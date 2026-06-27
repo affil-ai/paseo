@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "pino";
@@ -94,6 +94,15 @@ const QUESTION_RESPONSE_HEADER = "Response";
 const QUESTION_COMMENT_HEADER = "Comment";
 const PI_ASK_USER_FREEFORM_SENTINEL = "✏️ Type custom response...";
 const COMBINED_ASK_USER_METADATA = "ask_user_select_optional_comment";
+const PI_GLOBAL_MCP_CONFIG_PATH = join(homedir(), ".pi", "agent", "mcp.json");
+
+const PiGlobalMcpConfigSchema = z
+  .object({
+    mcpServers: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
+    settings: z.record(z.string(), z.unknown()).optional(),
+    imports: z.array(z.string()).optional(),
+  })
+  .passthrough();
 
 export const PiProviderParamsSchema = z
   .object({
@@ -159,6 +168,7 @@ interface PiRpcAgentClientOptions {
   providerParams?: unknown;
   commandsRpcType?: PiCommandsRpcType;
   runtime?: PiRuntime;
+  globalMcpConfigPath?: string;
 }
 
 interface PiPromptPayload {
@@ -198,14 +208,12 @@ interface PiResumeConfig {
   config: AgentSessionConfig;
 }
 
-interface PiMcpServerConfig {
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  url?: string;
-  headers?: Record<string, string>;
-  auth?: false;
-  oauth?: false;
+type PiMcpServerConfig = Record<string, unknown>;
+
+interface PiMcpConfig {
+  mcpServers: Record<string, PiMcpServerConfig>;
+  settings?: Record<string, unknown>;
+  imports?: string[];
 }
 
 interface PiMcpConfigFile {
@@ -472,14 +480,44 @@ function toPiMcpConfig(config: McpServerConfig): PiMcpServerConfig {
   };
 }
 
-function createPiMcpConfigFile(servers: Record<string, McpServerConfig>): PiMcpConfigFile {
+function getPiGlobalMcpConfigPath(): string {
+  return PI_GLOBAL_MCP_CONFIG_PATH;
+}
+
+function readPiGlobalMcpConfig(configPath: string): PiMcpConfig {
+  if (!existsSync(configPath)) {
+    return { mcpServers: {} };
+  }
+
+  try {
+    const parsed = PiGlobalMcpConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8")));
+    return {
+      mcpServers: parsed.mcpServers ?? {},
+      ...(parsed.settings ? { settings: parsed.settings } : {}),
+      ...(parsed.imports ? { imports: parsed.imports } : {}),
+    };
+  } catch {
+    return { mcpServers: {} };
+  }
+}
+
+function createPiMcpConfigFile(
+  servers: Record<string, McpServerConfig>,
+  globalMcpConfigPath = getPiGlobalMcpConfigPath(),
+): PiMcpConfigFile {
   const dir = mkdtempSync(join(tmpdir(), "paseo-pi-mcp-"));
   const filePath = join(dir, "mcp.json");
-  const mcpServers: Record<string, PiMcpServerConfig> = {};
+  const globalConfig = readPiGlobalMcpConfig(globalMcpConfigPath);
+  const mcpServers: Record<string, PiMcpServerConfig> = { ...globalConfig.mcpServers };
   for (const [name, serverConfig] of Object.entries(servers)) {
     mcpServers[name] = toPiMcpConfig(serverConfig);
   }
-  writeFileSync(filePath, `${JSON.stringify({ mcpServers }, null, 2)}\n`, "utf8");
+  const config: PiMcpConfig = {
+    ...(globalConfig.settings ? { settings: globalConfig.settings } : {}),
+    ...(globalConfig.imports ? { imports: globalConfig.imports } : {}),
+    mcpServers,
+  };
+  writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return {
     path: filePath,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
@@ -1872,6 +1910,7 @@ export class PiRpcAgentClient implements AgentClient {
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly providerParams: PiProviderParams;
   private readonly runtime: PiRuntime;
+  private readonly globalMcpConfigPath: string;
 
   constructor(options: PiRpcAgentClientOptions) {
     this.logger = options.logger;
@@ -1880,6 +1919,7 @@ export class PiRpcAgentClient implements AgentClient {
     this.runtime =
       options.runtime ??
       createRuntime(options.logger, options.runtimeSettings, options.commandsRpcType);
+    this.globalMcpConfigPath = options.globalMcpConfigPath ?? getPiGlobalMcpConfigPath();
   }
 
   async createSession(
@@ -2061,7 +2101,7 @@ export class PiRpcAgentClient implements AgentClient {
     if (!(await this.detectMcpAdapter(cwd))) {
       return null;
     }
-    return createPiMcpConfigFile(servers);
+    return createPiMcpConfigFile(servers, this.globalMcpConfigPath);
   }
 
   private async detectMcpAdapter(cwd: string): Promise<boolean> {
