@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   openSync,
   readSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,10 +18,19 @@ import type { AgentSession, AgentSessionConfig, AgentStreamEvent } from "../../a
 import { PiRpcAgentClient, PiRpcAgentSession, transformPiModels } from "./agent.js";
 import { FakePi } from "./test-utils/fake-pi.js";
 
-function createClient(pi = new FakePi()): PiRpcAgentClient {
+const EMPTY_GLOBAL_MCP_CONFIG_PATH = path.join(
+  mkdtempSync(path.join(tmpdir(), "paseo-pi-empty-global-mcp-")),
+  "mcp.json",
+);
+
+function createClient(
+  pi = new FakePi(),
+  options: { globalMcpConfigPath?: string } = {},
+): PiRpcAgentClient {
   return new PiRpcAgentClient({
     logger: pino({ level: "silent" }),
     runtime: pi,
+    globalMcpConfigPath: options.globalMcpConfigPath ?? EMPTY_GLOBAL_MCP_CONFIG_PATH,
   });
 }
 
@@ -1203,6 +1213,87 @@ describe("PiRpcAgentClient", () => {
 
     await session.close();
     expect(existsSync(configPath!)).toBe(false);
+  });
+
+  test("preserves Pi global MCP servers when generating the injected config", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "paseo-pi-global-mcp-"));
+    const globalMcpConfigPath = path.join(dir, "mcp.json");
+    writeFileSync(
+      globalMcpConfigPath,
+      `${JSON.stringify(
+        {
+          settings: { toolPrefix: "server" },
+          imports: ["claude"],
+          mcpServers: {
+            executor: {
+              url: "http://127.0.0.1:17888/mcp",
+              headers: { Authorization: "Bearer executor-token" },
+              auth: false,
+              oauth: false,
+              lifecycle: "lazy",
+            },
+            paseo: {
+              url: "http://127.0.0.1:9999/stale-paseo",
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const pi = new FakePi();
+    pi.queueCommands([
+      {
+        name: "mcp",
+        description: "Show MCP server status",
+        source: "extension",
+        sourceInfo: { source: "npm:pi-mcp-adapter" },
+      },
+    ]);
+    const client = createClient(pi, { globalMcpConfigPath });
+
+    try {
+      const session = await client.createSession(
+        createConfig({
+          mcpServers: {
+            paseo: {
+              type: "http",
+              url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            },
+          },
+        }),
+      );
+      const actualLaunch = pi.recordedLaunches[1]!;
+      const configPath = actualLaunch.mcpConfigPath;
+      expect(configPath).toEqual(expect.any(String));
+
+      const injectedConfig = JSON.parse(readUtf8File(configPath!));
+      expect(injectedConfig).toEqual({
+        settings: { toolPrefix: "server" },
+        imports: ["claude"],
+        mcpServers: {
+          executor: {
+            url: "http://127.0.0.1:17888/mcp",
+            headers: { Authorization: "Bearer executor-token" },
+            auth: false,
+            oauth: false,
+            lifecycle: "lazy",
+          },
+          paseo: {
+            url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            auth: false,
+            oauth: false,
+          },
+        },
+      });
+
+      await session.close();
+      expect(existsSync(configPath!)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("does not pass MCP config when pi-mcp-adapter is not loaded", async () => {
