@@ -38,6 +38,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/providers.md](docs/providers.md)                         | Adding a new agent provider end-to-end                                                                                         |
 | [docs/custom-providers.md](docs/custom-providers.md)           | Custom provider config: Z.AI, Alibaba/Qwen, ACP agents, profiles, custom binaries                                              |
 | [docs/service-proxy.md](docs/service-proxy.md)                 | Service proxy: exposing workspace scripts at public URLs, DNS setup, reverse proxy config                                      |
+| [docs/chat-bridge.md](docs/chat-bridge.md)                     | Chat bridge scoping (v1→v3 roadmap): driving agents from Slack/Chat SDK as another daemon client (not yet implemented)         |
 | [docs/development.md](docs/development.md)                     | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                     |
 | [docs/rpc-namespacing.md](docs/rpc-namespacing.md)             | WebSocket RPC naming convention — dotted namespaces and `.request`/`.response` pairs                                           |
 | [docs/terminal-performance.md](docs/terminal-performance.md)   | Terminal latency pipeline, coalescing/backpressure invariants, benchmark + perf spec usage                                     |
