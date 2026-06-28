@@ -472,6 +472,7 @@ export const zhCN: TranslationResources = {
         splitRight: "向右拆分窗格",
         splitDown: "向下拆分窗格",
         terminalProfilesMenu: "Terminal profiles",
+        closedChatsMenu: "已关闭的聊天",
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "固定",
         unpinTarget: "取消固定",

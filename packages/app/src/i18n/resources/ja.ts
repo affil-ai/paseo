@@ -477,6 +477,7 @@ export const ja: TranslationResources = {
         splitRight: "右にペインを分割",
         splitDown: "下にペインを分割",
         terminalProfilesMenu: "ターミナルプロファイル",
+        closedChatsMenu: "閉じたチャット",
         editTerminalProfiles: "プロファイルを編集…",
         pinTarget: "ピン留め",
         unpinTarget: "ピン留めを解除",

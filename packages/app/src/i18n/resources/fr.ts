@@ -477,6 +477,7 @@ export const fr: TranslationResources = {
         splitRight: "Volet divisé à droite",
         splitDown: "Diviser le volet vers le bas",
         terminalProfilesMenu: "Terminal profiles",
+        closedChatsMenu: "Discussions fermées",
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Épingler",
         unpinTarget: "Détacher",

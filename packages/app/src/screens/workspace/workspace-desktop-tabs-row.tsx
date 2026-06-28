@@ -34,7 +34,7 @@ import {
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { useRouter, type Href } from "expo-router";
+
 import { SortableInlineList } from "@/components/sortable-inline-list";
 import type {
   DraggableListDragHandleProps,
@@ -78,13 +78,11 @@ import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-
 import type { Theme } from "@/styles/theme";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
-import {
-  getTerminalProfileIcon,
-  resolveTerminalProfiles,
-} from "@getpaseo/protocol/terminal-profiles";
-import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import { useClosedWorkspaceChats } from "@/hooks/use-closed-workspace-chats";
+import { getProviderIcon } from "@/components/provider-icons";
+import { resolveTerminalProfiles } from "@getpaseo/protocol/terminal-profiles";
 import type { TerminalProfileInput } from "@/screens/workspace/terminals/use-workspace-terminals";
-import { ProfileIcon, usePinnedLaunchers } from "@/workspace-pins/launch";
+import { usePinnedLaunchers } from "@/workspace-pins/launch";
 import { runPinnedTabTarget, type TabTargetHandlers } from "@/workspace-pins/run";
 import type { PinnedTabTarget } from "@/workspace-pins/target";
 import { PinnedTargetsRow } from "@/workspace-pins/pinned-targets-row";
@@ -133,39 +131,40 @@ function updateMeasuredWidth(setWidth: Dispatch<SetStateAction<number>>, event: 
   setWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
 }
 
-function ProfileLeadingIcon({ iconKey }: { iconKey: string | undefined }) {
-  return (
-    <View style={styles.terminalProfileIconWrapper}>
-      <ProfileIcon iconKey={iconKey} />
-    </View>
-  );
+function ClosedChatProviderIcon({ provider, color = "" }: { provider: string; color?: string }) {
+  const Icon = getProviderIcon(provider);
+  return <Icon size={14} color={color} />;
 }
 
-interface PinnableProfileMenuItemProps {
-  profile: { id: string; name: string; command: string; args?: string[]; icon?: string };
-  disabled?: boolean;
-  onLaunch: (target: PinnedTabTarget) => void;
+const ThemedClosedChatProviderIcon = withUnistyles(ClosedChatProviderIcon);
+
+interface ClosedChatMenuItemProps {
+  agentId: string;
+  title: string | null;
+  provider: string;
+  onReopen: (agentId: string) => void;
 }
 
-function PinnableProfileMenuItem({ profile, disabled, onLaunch }: PinnableProfileMenuItemProps) {
-  const target = useMemo<PinnedTabTarget>(
-    () => ({ kind: "profile", profileId: profile.id }),
-    [profile.id],
-  );
+function ClosedChatMenuItem({ agentId, title, provider, onReopen }: ClosedChatMenuItemProps) {
+  const { t } = useTranslation();
   const leading = useMemo(
-    () => <ProfileLeadingIcon iconKey={getTerminalProfileIcon(profile)} />,
-    [profile],
+    () => (
+      <View style={styles.terminalProfileIconWrapper}>
+        <ThemedClosedChatProviderIcon provider={provider} uniProps={mutedColorMapping} />
+      </View>
+    ),
+    [provider],
   );
-  const handleSelect = useCallback(() => onLaunch(target), [onLaunch, target]);
+  const handleSelect = useCallback(() => onReopen(agentId), [agentId, onReopen]);
 
   return (
-    <PinnableMenuItem
-      target={target}
-      label={profile.name}
+    <DropdownMenuItem
+      testID={`workspace-new-tab-menu-closed-chat-${agentId}`}
       leading={leading}
-      disabled={disabled}
       onSelect={handleSelect}
-    />
+    >
+      {title?.trim() ? title : t("agentList.fallbackTitle")}
+    </DropdownMenuItem>
   );
 }
 
@@ -213,8 +212,9 @@ interface WorkspaceTabRowExtrasProps {
   onCreateTerminal: () => void;
   onCreateBrowser: () => void;
   onCreateTerminalWithProfile: (profile: TerminalProfileInput) => void;
-  onEditProfiles: () => void;
+  onReopenClosedChat: (agentId: string) => void;
   normalizedServerId: string;
+  normalizedWorkspaceId: string;
   showCreateBrowserTab: boolean;
   terminalDisabled: boolean;
 }
@@ -224,17 +224,24 @@ function WorkspaceTabRowExtras({
   onCreateTerminal,
   onCreateBrowser,
   onCreateTerminalWithProfile,
-  onEditProfiles,
+  onReopenClosedChat,
   normalizedServerId,
+  normalizedWorkspaceId,
   showCreateBrowserTab,
   terminalDisabled,
 }: WorkspaceTabRowExtrasProps) {
   const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
   const { config } = useDaemonConfig(normalizedServerId);
   const profiles = useMemo(
     () => resolveTerminalProfiles(config?.terminalProfiles),
     [config?.terminalProfiles],
   );
+  const { chats: closedChats } = useClosedWorkspaceChats({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    enabled: menuOpen,
+  });
 
   const handlers = useMemo<TabTargetHandlers>(
     () => ({
@@ -257,7 +264,7 @@ function WorkspaceTabRowExtras({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
           <TooltipTrigger asChild triggerRefProp="triggerRef">
             <DropdownMenuTrigger
@@ -298,20 +305,21 @@ function WorkspaceTabRowExtras({
               onSelect={onCreateBrowser}
             />
           ) : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</DropdownMenuLabel>
-          {profiles.map((profile) => (
-            <PinnableProfileMenuItem
-              key={profile.id}
-              profile={profile}
-              disabled={terminalDisabled}
-              onLaunch={onLaunch}
-            />
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem testID="workspace-new-tab-menu-edit-profiles" onSelect={onEditProfiles}>
-            {t("workspace.tabs.actions.editTerminalProfiles")}
-          </DropdownMenuItem>
+          {closedChats.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{t("workspace.tabs.actions.closedChatsMenu")}</DropdownMenuLabel>
+              {closedChats.map((chat) => (
+                <ClosedChatMenuItem
+                  key={chat.id}
+                  agentId={chat.id}
+                  title={chat.title}
+                  provider={chat.provider}
+                  onReopen={onReopenClosedChat}
+                />
+              ))}
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
       <PinnedTargetsRow launchers={launchers} testIdPrefix="workspace-pinned-target" />
@@ -428,6 +436,7 @@ interface WorkspaceDesktopTabsRowProps {
   onCreateDraftTab: (input: { paneId?: string }) => void;
   onCreateTerminalTab: (input: { paneId?: string; profile?: TerminalProfileInput }) => void;
   onCreateBrowserTab: (input: { paneId?: string }) => void;
+  onReopenClosedChat: (agentId: string) => void;
   showCreateBrowserTab?: boolean;
   disableCreateTerminal?: boolean;
   isWaitingOnTerminalReadiness?: boolean;
@@ -748,6 +757,7 @@ export function WorkspaceDesktopTabsRow({
   onCreateDraftTab,
   onCreateTerminalTab,
   onCreateBrowserTab,
+  onReopenClosedChat,
   showCreateBrowserTab = false,
   disableCreateTerminal = false,
   isWaitingOnTerminalReadiness = false,
@@ -760,7 +770,6 @@ export function WorkspaceDesktopTabsRow({
   showPaneSplitActions = true,
 }: WorkspaceDesktopTabsRowProps) {
   const { t } = useTranslation();
-  const router = useRouter();
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
   const splitDownKeys = useShortcutKeys("workspace-pane-split-down");
@@ -869,10 +878,6 @@ export function WorkspaceDesktopTabsRow({
     },
     [onCreateTerminalTab, paneId],
   );
-
-  const handleEditProfiles = useCallback(() => {
-    router.push(buildSettingsHostSectionRoute(normalizedServerId, "terminals") as Href);
-  }, [normalizedServerId, router]);
 
   const handleCreateBrowser = useCallback(() => {
     onCreateBrowserTab({ paneId });
@@ -999,8 +1004,9 @@ export function WorkspaceDesktopTabsRow({
           onCreateTerminal={handleCreateTerminal}
           onCreateBrowser={handleCreateBrowser}
           onCreateTerminalWithProfile={handleCreateTerminalWithProfile}
-          onEditProfiles={handleEditProfiles}
+          onReopenClosedChat={onReopenClosedChat}
           normalizedServerId={normalizedServerId}
+          normalizedWorkspaceId={normalizedWorkspaceId}
           showCreateBrowserTab={showCreateBrowserTab}
           terminalDisabled={terminalDisabled}
         />
