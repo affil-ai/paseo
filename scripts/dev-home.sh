@@ -88,6 +88,17 @@ resolve_dev_daemon_endpoint() {
     return
   fi
 
+  if [ -n "${PASEO_SERVICE_DAEMON_URL:-}" ]; then
+    node -e '
+const value = process.env.PASEO_SERVICE_DAEMON_URL;
+if (!value) process.exit(1);
+const url = new URL(value);
+const port = url.port || (url.protocol === "https:" ? "443" : "80");
+if (!url.hostname || !port) process.exit(1);
+console.log(`${url.hostname}:${port}`);
+' && return
+  fi
+
   case "${PASEO_LISTEN:-127.0.0.1:6768}" in
     0.0.0.0:*) echo "localhost:${PASEO_LISTEN#0.0.0.0:}" ;;
     127.0.0.1:*) echo "localhost:${PASEO_LISTEN#127.0.0.1:}" ;;

@@ -78,11 +78,15 @@ describe("service proxy subsystem shape", () => {
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
     try {
-      await expect(httpGet(port, `missing.services.example.com:${port}`)).resolves.toEqual({
+      await expect(httpGet(port, `missing--repo.services.example.com:${port}`)).resolves.toEqual({
         status: 404,
         body: "404 Not Found",
       });
       await expect(httpGet(port, `daemon.localhost:${port}`)).resolves.toEqual({
+        status: 200,
+        body: "daemon-api",
+      });
+      await expect(httpGet(port, `affil.services.example.com:${port}`)).resolves.toEqual({
         status: 200,
         body: "daemon-api",
       });
@@ -115,7 +119,7 @@ describe("service proxy subsystem shape", () => {
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
     try {
-      await expect(httpGet(port, `missing.services.example.com:${port}`)).resolves.toEqual({
+      await expect(httpGet(port, `missing--repo.services.example.com:${port}`)).resolves.toEqual({
         status: 404,
         body: "404 Not Found",
       });
