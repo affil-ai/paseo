@@ -476,6 +476,7 @@ export const ptBR: TranslationResources = {
         splitRight: "Dividir painel à direita",
         splitDown: "Dividir painel abaixo",
         terminalProfilesMenu: "Perfis de terminal",
+        closedChatsMenu: "Conversas fechadas",
         editTerminalProfiles: "Editar perfis…",
         pinTarget: "Fixar",
         unpinTarget: "Desafixar",

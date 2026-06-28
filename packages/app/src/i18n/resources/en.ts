@@ -472,6 +472,7 @@ export const en = {
         splitRight: "Split pane right",
         splitDown: "Split pane down",
         terminalProfilesMenu: "Terminal profiles",
+        closedChatsMenu: "Closed chats",
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Pin",
         unpinTarget: "Unpin",
