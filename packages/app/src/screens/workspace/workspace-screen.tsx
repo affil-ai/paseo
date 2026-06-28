@@ -178,6 +178,7 @@ import {
   type TerminalProfileInput,
 } from "@/screens/workspace/terminals/use-workspace-terminals";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
+import { closedWorkspaceChatsQueryKey } from "@/hooks/use-closed-workspace-chats";
 import {
   getTerminalProfileIcon,
   resolveTerminalProfiles,
@@ -2080,6 +2081,44 @@ function WorkspaceScreenContent({
     [navigateToTabId, openWorkspaceTabFocused, persistenceKey],
   );
 
+  const handleReopenClosedChat = useCallback(
+    async (agentId: string) => {
+      if (!persistenceKey) {
+        return;
+      }
+      const tabId = openWorkspaceTabFocused(persistenceKey, { kind: "agent", agentId });
+      if (tabId) {
+        navigateToTabId(tabId);
+      }
+      if (!client || !isConnected) {
+        toast.error(t("workspace.terminal.hostDisconnected"));
+        return;
+      }
+      try {
+        await client.refreshAgent(agentId);
+        await queryClient.invalidateQueries({
+          queryKey: closedWorkspaceChatsQueryKey(normalizedServerId, normalizedWorkspaceId),
+        });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : t("workspace.tabs.toasts.failedToReloadAgent"),
+        );
+      }
+    },
+    [
+      client,
+      isConnected,
+      navigateToTabId,
+      normalizedServerId,
+      normalizedWorkspaceId,
+      openWorkspaceTabFocused,
+      persistenceKey,
+      queryClient,
+      t,
+      toast,
+    ],
+  );
+
   const emptyWorkspaceSeedRef = useRef<string | null>(null);
   const autoOpenedSetupTabWorkspaceRef = useRef<string | null>(null);
 
@@ -3448,6 +3487,7 @@ function WorkspaceScreenContent({
         onCreateDraftTab={handleCreateDraftTab}
         onCreateTerminalTab={handleCreateTerminal}
         onCreateBrowserTab={handleCreateBrowserTab}
+        onReopenClosedChat={handleReopenClosedChat}
         showCreateBrowserTab={showCreateBrowserTab}
         buildPaneContentModel={buildDesktopPaneContentModel}
         onFocusPane={handleFocusPane}
@@ -3483,6 +3523,7 @@ function WorkspaceScreenContent({
     handleCreateDraftTab,
     handleCreateTerminal,
     handleCreateBrowserTab,
+    handleReopenClosedChat,
     showCreateBrowserTab,
     buildDesktopPaneContentModel,
     handleFocusPane,
@@ -3586,6 +3627,7 @@ function WorkspaceScreenContent({
           onCreateDraftTab={handleCreateDraftTab}
           onCreateTerminalTab={handleCreateTerminal}
           onCreateBrowserTab={handleCreateBrowserTab}
+          onReopenClosedChat={handleReopenClosedChat}
           showCreateBrowserTab={showCreateBrowserTab}
           disableCreateTerminal={createTerminalMutation.isPending}
           isWaitingOnTerminalReadiness={pendingTerminalCreateInput !== null}
