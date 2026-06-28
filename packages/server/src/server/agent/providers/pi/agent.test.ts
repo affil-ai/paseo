@@ -668,6 +668,22 @@ describe("PiRpcAgentSession", () => {
     expect(fakeSession.setThinkingLevelRequests).toEqual(["high"]);
   });
 
+  test("reports extension-driven Pi thinking level changes from runtime state", async () => {
+    const pi = new FakePi();
+    const client = createClient(pi);
+    const session = await client.createSession(createConfig({ thinkingOptionId: "high" }));
+    pi.latestSession().state = {
+      ...pi.latestSession().state,
+      thinkingLevel: "low",
+    };
+
+    await expect(session.getRuntimeInfo()).resolves.toMatchObject({
+      thinkingOptionId: "low",
+    });
+
+    await session.close();
+  });
+
   test("fails the active turn when the Pi process exits mid-turn", async () => {
     const { pi, session, events } = await createSession();
 
