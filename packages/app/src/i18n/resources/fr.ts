@@ -791,6 +791,7 @@ export const fr: TranslationResources = {
     },
     sections: {
       sessions: "Historique",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Configurer les scripts d'arbre de travail",

@@ -58,7 +58,7 @@ interface ExplorerSidebarSharedState {
   handleTabPress: (tab: ExplorerTab) => void;
 }
 
-function useExplorerSidebarSharedState({
+export function useExplorerSidebarSharedState({
   serverId,
   workspaceRoot,
   isGit,
@@ -443,7 +443,7 @@ interface SidebarContentProps {
   onOpenFile?: (filePath: string) => void;
 }
 
-function ExplorerSidebarContent({
+export function ExplorerSidebarContent({
   activeTab,
   onTabPress,
   onClose,

@@ -759,6 +759,7 @@ export const zhCN: TranslationResources = {
     },
     sections: {
       sessions: "历史",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "设置 worktree scripts",

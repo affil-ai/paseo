@@ -13,9 +13,11 @@ import {
   selectWorkspaceFields,
   selectWorkspaceKeys,
   selectWorkspaceOrderByScope,
+  selectWorkspacesForHosts,
   selectWorkspaceStatusesForBadges,
   selectWorkspaceStructureProjects,
   workspaceEqualityFns,
+  type HostWorkspaceDescriptor,
   type WorkspaceStructure,
 } from "./selectors";
 import { useSessionStore, type WorkspaceDescriptor } from "../session-store";
@@ -27,6 +29,7 @@ import type { DesktopBadgeWorkspaceStatus } from "@/utils/desktop-badge-state";
 
 export type {
   DesktopBadgeWorkspaceStatus,
+  HostWorkspaceDescriptor,
   WorkspaceStructure,
   WorkspaceStructureProject,
 } from "./selectors";
@@ -113,6 +116,14 @@ export function useWorkspaceKeys(serverId: string | null): string[] {
   return useStoreWithEqualityFn(
     useSessionStore,
     (state) => selectWorkspaceKeys(state, serverId),
+    workspaceEqualityFns.deep,
+  );
+}
+
+export function useWorkspacesForHosts(serverIds: readonly string[]): HostWorkspaceDescriptor[] {
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => selectWorkspacesForHosts(state, serverIds),
     workspaceEqualityFns.deep,
   );
 }

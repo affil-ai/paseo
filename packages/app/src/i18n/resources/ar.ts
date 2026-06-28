@@ -765,6 +765,7 @@ export const ar: TranslationResources = {
     },
     sections: {
       sessions: "السجل",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "إعداد البرامج النصية لشجرة العمل",

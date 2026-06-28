@@ -783,6 +783,7 @@ export const ptBR: TranslationResources = {
     },
     sections: {
       sessions: "Histórico",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Configurar scripts de worktree",

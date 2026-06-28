@@ -27,7 +27,13 @@ export interface SidebarOrderSnapshot {
   workspaceOrderByProject: Record<string, string[]>;
 }
 
+export interface HostWorkspaceDescriptor {
+  serverId: string;
+  workspace: WorkspaceDescriptor;
+}
+
 const EMPTY_WORKSPACE_KEYS: string[] = [];
+const EMPTY_HOST_WORKSPACES: HostWorkspaceDescriptor[] = [];
 const EMPTY_WORKSPACE_STRUCTURE: WorkspaceStructure = { projects: [] };
 
 export const workspaceEqualityFns = {
@@ -205,6 +211,23 @@ export function selectWorkspaceKeys(state: SessionsSnapshot, serverId: string | 
   }
   const workspaces = state.sessions[serverId]?.workspaces;
   return workspaces ? Array.from(workspaces.keys()) : EMPTY_WORKSPACE_KEYS;
+}
+
+export function selectWorkspacesForHosts(
+  state: SessionsSnapshot,
+  serverIds: readonly string[],
+): HostWorkspaceDescriptor[] {
+  const workspaces: HostWorkspaceDescriptor[] = [];
+  for (const serverId of serverIds) {
+    const session = state.sessions[serverId];
+    if (!session) {
+      continue;
+    }
+    for (const workspace of session.workspaces.values()) {
+      workspaces.push({ serverId, workspace });
+    }
+  }
+  return workspaces.length > 0 ? workspaces : EMPTY_HOST_WORKSPACES;
 }
 
 export function selectRecommendedProjectPaths(

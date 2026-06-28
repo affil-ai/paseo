@@ -772,6 +772,7 @@ export const en = {
     },
     sections: {
       sessions: "History",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Set up worktree scripts",

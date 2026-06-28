@@ -784,6 +784,7 @@ export const ru: TranslationResources = {
     },
     sections: {
       sessions: "История",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Настройка сценариев рабочего дерева",

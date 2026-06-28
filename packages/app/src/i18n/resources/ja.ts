@@ -777,6 +777,7 @@ export const ja: TranslationResources = {
     },
     sections: {
       sessions: "履歴",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "ワークツリースクリプトを設定",
