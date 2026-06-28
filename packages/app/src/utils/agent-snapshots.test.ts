@@ -13,6 +13,8 @@ function createSnapshot(
     provider: input.provider ?? "codex",
     cwd: input.cwd ?? "/repo",
     model: input.model ?? null,
+    thinkingOptionId: input.thinkingOptionId ?? null,
+    effectiveThinkingOptionId: input.effectiveThinkingOptionId ?? null,
     createdAt: input.createdAt ?? "2026-04-20T00:00:00.000Z",
     updatedAt: input.updatedAt ?? "2026-04-20T00:01:00.000Z",
     lastUserMessageAt: input.lastUserMessageAt ?? null,
@@ -70,5 +72,14 @@ describe("normalizeAgentSnapshot", () => {
     expect(missing.parentAgentId).toBeNull();
     expect(empty.parentAgentId).toBeNull();
     expect(nonString.parentAgentId).toBeNull();
+  });
+
+  it("uses the effective runtime thinking option when present", () => {
+    const agent = normalizeAgentSnapshot(
+      createSnapshot({ thinkingOptionId: "medium", effectiveThinkingOptionId: "xhigh" }),
+      "server-1",
+    );
+
+    expect(agent.thinkingOptionId).toBe("xhigh");
   });
 });
