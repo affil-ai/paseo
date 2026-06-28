@@ -109,6 +109,10 @@ class SessionEvents {
     });
   }
 
+  allEvents() {
+    return [...this.events];
+  }
+
   timelineItems() {
     return this.events
       .filter(
@@ -141,6 +145,13 @@ class SessionEvents {
     return this.nextEvent(
       (event): event is Extract<AgentStreamEvent, { type: "turn_failed" }> =>
         event.type === "turn_failed",
+    );
+  }
+
+  nextTurnCancellation(): Promise<Extract<AgentStreamEvent, { type: "turn_canceled" }>> {
+    return this.nextEvent(
+      (event): event is Extract<AgentStreamEvent, { type: "turn_canceled" }> =>
+        event.type === "turn_canceled",
     );
   }
 
@@ -511,6 +522,40 @@ describe("PiRpcAgentSession", () => {
         item: { type: "assistant_message", text: "Extension command output" },
       },
       { type: "turn_completed" },
+    ]);
+  });
+
+  test("treats aborted Pi assistant finish as cancellation control flow", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    const { turnId } = await session.startTurn("write a long response");
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_delta", delta: "Partial draft" },
+    });
+    fakeSession.finishTurn({
+      role: "assistant",
+      provider: "openrouter",
+      model: "anthropic/claude-opus-4.1",
+      responseId: "gen-aborted",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+      content: [],
+    });
+
+    await expect(events.nextTurnCancellation()).resolves.toMatchObject({
+      turnId,
+      reason: "Request was aborted",
+    });
+    expect(events.allEvents().some((event) => event.type === "turn_failed")).toBe(false);
+    expect(events.timelineItems()).toEqual([{ type: "assistant_message", text: "Partial draft" }]);
+
+    await session.startTurn("continue");
+    expect(fakeSession.prompts.map((prompt) => prompt.message)).toEqual([
+      "write a long response",
+      "continue",
     ]);
   });
 

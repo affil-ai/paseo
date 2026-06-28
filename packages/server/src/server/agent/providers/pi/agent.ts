@@ -192,6 +192,11 @@ interface StartTurnResult {
   turnId: string;
 }
 
+type PiTurnTerminalResult =
+  | { type: "canceled"; reason: string }
+  | { type: "failed"; error: string }
+  | null;
+
 interface PiRpcAgentSessionOptions {
   runtimeSession: PiRuntimeSession;
   config: AgentSessionConfig;
@@ -682,6 +687,23 @@ function piAssistantText(message: Extract<PiAgentMessage, { role: "assistant" }>
   return text.length > 0 ? text : null;
 }
 
+function isPiAbortStopReason(stopReason: string | undefined): boolean {
+  return stopReason?.trim().toLowerCase() === "aborted";
+}
+
+function isPiAbortErrorMessage(errorMessage: string | null | undefined): boolean {
+  const normalized = errorMessage?.trim().toLowerCase();
+  return Boolean(normalized?.includes("request was aborted"));
+}
+
+function piAbortReason(message: Extract<PiAgentMessage, { role: "assistant" }>): string | null {
+  if (!isPiAbortStopReason(message.stopReason) && !isPiAbortErrorMessage(message.errorMessage)) {
+    return null;
+  }
+
+  return message.errorMessage?.trim() || "Request was aborted";
+}
+
 function formatPiErrorMessage(message: Extract<PiAgentMessage, { role: "assistant" }>): string {
   const headline = message.errorMessage?.trim() || "Pi turn failed";
   const details = [
@@ -697,12 +719,48 @@ function formatPiErrorMessage(message: Extract<PiAgentMessage, { role: "assistan
   return details.length > 0 ? `${headline} (${details.join(", ")})` : headline;
 }
 
-function latestPiErrorMessage(messages: PiAgentMessage[]): string | null {
+function latestPiTurnTerminalResult(messages: PiAgentMessage[]): PiTurnTerminalResult {
   const latestAssistant = messages.findLast((message) => message.role === "assistant");
-  if (!latestAssistant || !latestAssistant.errorMessage?.trim()) {
+  if (!latestAssistant) {
     return null;
   }
-  return formatPiErrorMessage(latestAssistant);
+
+  const abortReason = piAbortReason(latestAssistant);
+  if (abortReason) {
+    return { type: "canceled", reason: abortReason };
+  }
+
+  if (!latestAssistant.errorMessage?.trim()) {
+    return null;
+  }
+
+  return { type: "failed", error: formatPiErrorMessage(latestAssistant) };
+}
+
+function emitPiTurnCanceled(
+  emit: (event: AgentStreamEvent) => void,
+  turnId: string | undefined,
+  reason: string,
+): void {
+  emit({
+    type: "turn_canceled",
+    provider: PI_PROVIDER,
+    turnId,
+    reason,
+  });
+}
+
+function emitPiTurnFailed(
+  emit: (event: AgentStreamEvent) => void,
+  turnId: string | undefined,
+  error: string,
+): void {
+  emit({
+    type: "turn_failed",
+    provider: PI_PROVIDER,
+    turnId,
+    error,
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1094,20 +1152,14 @@ export class PiRpcAgentSession implements AgentSession {
       const failedTurnId = this.activeTurnId ?? turnId;
       this.activeTurnId = null;
       if (isPiRequestAbortError(error)) {
-        this.emit({
-          type: "turn_canceled",
-          provider: PI_PROVIDER,
-          turnId: failedTurnId,
-          reason: toDiagnosticErrorMessage(error),
-        });
+        emitPiTurnCanceled(
+          (event) => this.emit(event),
+          failedTurnId,
+          toDiagnosticErrorMessage(error),
+        );
         return;
       }
-      this.emit({
-        type: "turn_failed",
-        provider: PI_PROVIDER,
-        turnId: failedTurnId,
-        error: toDiagnosticErrorMessage(error),
-      });
+      emitPiTurnFailed((event) => this.emit(event), failedTurnId, toDiagnosticErrorMessage(error));
     });
 
     return { turnId };
@@ -1643,12 +1695,12 @@ export class PiRpcAgentSession implements AgentSession {
     }
     const turnId = this.activeTurnId;
     this.activeTurnId = null;
-    this.emit({
-      type: "turn_failed",
-      provider: PI_PROVIDER,
-      turnId,
-      error,
-    });
+    if (isPiRequestAbortError(error)) {
+      emitPiTurnCanceled((event) => this.emit(event), turnId, error);
+      return;
+    }
+
+    emitPiTurnFailed((event) => this.emit(event), turnId, error);
   }
 
   private handleSessionEvent(event: PiAgentSessionEvent): void {
@@ -1865,14 +1917,13 @@ export class PiRpcAgentSession implements AgentSession {
 
   private completeTurn(turnId: string | undefined, messages: PiAgentMessage[]): void {
     this.activeTurnId = null;
-    const errorMessage = latestPiErrorMessage(messages);
-    if (typeof errorMessage === "string" && errorMessage.length > 0) {
-      this.emit({
-        type: "turn_failed",
-        provider: PI_PROVIDER,
-        turnId,
-        error: errorMessage,
-      });
+    const terminalResult = latestPiTurnTerminalResult(messages);
+    if (terminalResult?.type === "canceled") {
+      emitPiTurnCanceled((event) => this.emit(event), turnId, terminalResult.reason);
+      return;
+    }
+    if (terminalResult?.type === "failed") {
+      emitPiTurnFailed((event) => this.emit(event), turnId, terminalResult.error);
       return;
     }
     this.emit({
