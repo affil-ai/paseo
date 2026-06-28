@@ -1,6 +1,7 @@
 import {
   normalizeHostPort,
   normalizeLoopbackToLocalhost,
+  parseHostPort,
 } from "@getpaseo/protocol/daemon-endpoints";
 import {
   DirectTcpHostConnectionSchema,
@@ -244,10 +245,12 @@ export function connectionFromListen(listen: string): HostConnection | null {
 
   try {
     const endpoint = normalizeLoopbackToLocalhost(normalizeHostPort(normalizedListen));
+    const { port } = parseHostPort(endpoint);
     return {
       id: `direct:${endpoint}`,
       type: "directTcp",
       endpoint,
+      ...(port === 443 ? { useTls: true } : {}),
     };
   } catch {
     return null;

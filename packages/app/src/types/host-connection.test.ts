@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  connectionFromListen,
   normalizeStoredHostProfile,
   orderHostsLocalFirst,
   type HostProfile,
@@ -40,6 +41,25 @@ describe("orderHostsLocalFirst", () => {
     const hosts = [makeHost("srv_remote"), makeHost("srv_another_remote")];
 
     expect(orderHostsLocalFirst(hosts, null)).toBe(hosts);
+  });
+});
+
+describe("connectionFromListen", () => {
+  it("infers TLS for default HTTPS daemon endpoints", () => {
+    expect(connectionFromListen("daemon--paseo.example.com:443")).toEqual({
+      id: "direct:daemon--paseo.example.com:443",
+      type: "directTcp",
+      endpoint: "daemon--paseo.example.com:443",
+      useTls: true,
+    });
+  });
+
+  it("keeps non-HTTPS daemon endpoints as plain TCP", () => {
+    expect(connectionFromListen("127.0.0.1:6767")).toEqual({
+      id: "direct:localhost:6767",
+      type: "directTcp",
+      endpoint: "localhost:6767",
+    });
   });
 });
 

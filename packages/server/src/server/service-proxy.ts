@@ -584,7 +584,12 @@ export class ServiceProxyRouteRegistry {
       return { type: "known-service-miss" };
     }
     for (const baseHostname of this.publicBaseHostnames) {
-      if (hostname === baseHostname || hostname.endsWith(`.${baseHostname}`)) {
+      const suffix = `.${baseHostname}`;
+      if (!hostname.endsWith(suffix)) {
+        continue;
+      }
+      const serviceLabel = hostname.slice(0, -suffix.length);
+      if (serviceLabel && !serviceLabel.includes(".") && serviceLabel.includes("--")) {
         return { type: "known-service-miss" };
       }
     }
