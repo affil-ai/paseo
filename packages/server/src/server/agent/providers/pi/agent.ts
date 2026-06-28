@@ -656,8 +656,10 @@ function resolveThinkingOptionId(
   cachedThinkingOptionId: string | null,
   sessionThinkingLevel: PiThinkingLevel,
 ): PiThinkingLevel | null {
-  const currentThinking = cachedThinkingOptionId ?? sessionThinkingLevel;
-  return normalizePiThinkingOption(currentThinking);
+  return (
+    normalizePiThinkingOption(sessionThinkingLevel) ??
+    normalizePiThinkingOption(cachedThinkingOptionId)
+  );
 }
 
 function modelToId(model: PiModel | null | undefined): string | null {
