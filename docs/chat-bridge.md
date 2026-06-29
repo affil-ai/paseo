@@ -120,8 +120,9 @@ The model is deliberately simple:
   worktree and **not** tied to one product repo.
 - **Worktrees are created only if the agent itself decides a task needs isolated code
   changes** — using its `create_worktree` + `create_agent` Paseo tools (see
-  [Execution model](#execution-model)). The bridge never cuts a worktree and never decides
-  "this is a code task."
+  [Execution model](#execution-model)). The bridge never cuts a worktree, but the office
+  prompt tells the agent to infer code-editing intent from ordinary requests so non-technical
+  users do not need to ask for a subagent explicitly.
 - The bridge is a **standalone, long-lived Node process** running beside the daemon.
 
 The thread is the continuity unit. Each new thread gets a fresh office agent with its own
@@ -159,11 +160,13 @@ The office agent can, on its own:
 - **Take an external action** (update a Google Sheet, file a ticket, post an update) via
   `executor` MCP, asking for confirmation first on destructive/external writes.
 - **Inspect code in place** by `cd`-ing into a sibling repo from its office-repo workspace — no
-  worktree needed.
-- **Delegate code changes to a coding subagent** when a task genuinely needs isolated edits:
-  it calls `create_worktree` + `create_agent` with `relationship: { kind: "subagent" }`, which
-  cuts a worktree off the right repo and spawns a child agent stamped with
-  `paseo.parent-agent-id` (see [agent-lifecycle.md](agent-lifecycle.md)).
+  worktree needed for read-only questions or quick investigation.
+- **Delegate code changes to a coding subagent** when a task requires modifying code — fix,
+  refactor, cleanup, implement, test, or behavior change. The agent infers this from user
+  intent (for example, "clean up the affil repo") and calls `create_worktree` + `create_agent`
+  with `relationship: { kind: "subagent" }`, which cuts a worktree off the right repo and
+  spawns a child agent stamped with `paseo.parent-agent-id` (see
+  [agent-lifecycle.md](agent-lifecycle.md)).
 - **Run terminals, schedules, heartbeats** via the Paseo tools (`create_terminal`,
   `create_schedule`, …) for recurring / proactive office work.
 
