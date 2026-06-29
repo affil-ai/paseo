@@ -1,0 +1,33 @@
+{
+  "name": "@getpaseo/chat",
+  "version": "0.1.102-beta.1",
+  "private": true,
+  "description": "Office Chat SDK bridge for Slack",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node ../../scripts/clean-package-dist.mjs",
+    "build": "tsc -p tsconfig.json --incremental false",
+    "build:clean": "npm run clean && npm run build",
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@chat-adapter/slack": "4.31.0",
+    "@getpaseo/client": "0.1.102-beta.1",
+    "@getpaseo/protocol": "0.1.102-beta.1",
+    "chat": "4.31.0",
+    "ws": "^8.20.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "typescript": "^5.2.2",
+    "vitest": "^4.1.6"
+  }
+}

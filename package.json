@@ -30,7 +30,8 @@
     "packages/relay",
     "packages/website",
     "packages/desktop",
-    "packages/cli"
+    "packages/cli",
+    "packages/chat"
   ],
   "scripts": {
     "dev": "npm run dev:server",
@@ -111,7 +112,8 @@
     "release:promote": "npm run release:check && npm run version:all:promote && npm run release:publish && npm run release:push",
     "release:patch": "npm run release:check && npm run version:all:patch && npm run release:publish && npm run release:push",
     "release:minor": "npm run release:check && npm run version:all:minor && npm run release:publish && npm run release:push",
-    "release:major": "npm run release:check && npm run version:all:major && npm run release:publish && npm run release:push"
+    "release:major": "npm run release:check && npm run version:all:major && npm run release:publish && npm run release:push",
+    "build:chat": "npm run build:client && npm run build --workspace=@getpaseo/chat"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14",
