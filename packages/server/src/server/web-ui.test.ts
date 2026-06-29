@@ -157,6 +157,17 @@ describe("daemon web UI route module", () => {
     expect(res.body).toContain('"label":"test-label"');
   });
 
+  test("injects Cloudflare Access user email into the initial connection hint", async () => {
+    const app = createApp({ enabled: true, distDir, publicDir });
+
+    const res = await request(app, "GET", "/", {
+      "cf-access-authenticated-user-email": "user@affil.ai",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('"authenticatedUserEmail":"user@affil.ai"');
+  });
+
   test("injects hint before closing head tag", async () => {
     const app = createApp({ enabled: true, distDir, publicDir });
 

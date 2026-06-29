@@ -250,6 +250,16 @@ function serializeInlineScriptJson(value: unknown): string {
     .replace(/&/g, "\\u0026");
 }
 
+function readCloudflareAuthenticatedUserEmail(req: Parameters<RequestHandler>[0]): string | null {
+  const value = req.headers["cf-access-authenticated-user-email"];
+  const email = Array.isArray(value) ? value[0] : value;
+  if (typeof email !== "string") {
+    return null;
+  }
+  const trimmed = email.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function injectConnectionHint(
   html: string,
   req: Parameters<RequestHandler>[0],
@@ -257,10 +267,12 @@ function injectConnectionHint(
 ): string {
   const host = typeof req.headers.host === "string" ? req.headers.host : "";
   const useTls = req.protocol === "https";
+  const authenticatedUserEmail = readCloudflareAuthenticatedUserEmail(req);
   const hint = {
     listen: host,
     useTls,
     label,
+    ...(authenticatedUserEmail ? { authenticatedUserEmail } : {}),
   };
   const script = `<script>window.__PASEO_INITIAL_DAEMON_CONNECTION__=${serializeInlineScriptJson(hint)}</script>`;
   const headClose = /<\/head>/i;
