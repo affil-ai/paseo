@@ -1,4 +1,7 @@
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type {
+  DaemonClient,
+  FetchAgentTimelinePayload,
+} from "@getpaseo/client/internal/daemon-client";
 import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import {
   emoji,
@@ -29,6 +32,43 @@ import {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type AgentTimelineEntry = FetchAgentTimelinePayload["entries"][number];
+
+interface AssistantTextBlock {
+  text: string;
+  lastEntryIndex: number;
+}
+
+function collectAssistantTextBlocksSince(
+  entries: readonly AgentTimelineEntry[],
+  sinceSeq: number,
+): AssistantTextBlock[] {
+  const blocks: AssistantTextBlock[] = [];
+  let current: AssistantTextBlock | null = null;
+
+  entries.forEach((entry, index) => {
+    if (entry.seqEnd < sinceSeq) return;
+
+    if (entry.item.type !== "assistant_message") {
+      current = null;
+      return;
+    }
+
+    if (!current) {
+      current = { text: "", lastEntryIndex: index };
+      blocks.push(current);
+    }
+
+    current.text += entry.item.text;
+    current.lastEntryIndex = index;
+  });
+
+  for (const block of blocks) {
+    block.text = block.text.trim();
+  }
+  return blocks;
 }
 
 export class ChatBridge {
@@ -348,32 +388,23 @@ export class ChatBridge {
     while (await this.isRelayCurrent(input.externalThreadId, input.relayId)) {
       const timeline = await this.client.fetchAgentTimeline(input.agentId, {
         direction: "tail",
-        projection: "projected",
+        projection: "canonical",
         limit: 200,
       });
-      const assistantEntries = timeline.entries.filter(
-        (entry) => entry.seqStart >= input.sinceSeq && entry.item.type === "assistant_message",
-      );
+      const assistantBlocks = collectAssistantTextBlocksSince(timeline.entries, input.sinceSeq);
 
-      const firstEntry = assistantEntries[0];
-      if (!firstTextPosted && firstEntry?.item.type === "assistant_message") {
-        const firstText = firstEntry.item.text.trim();
-        const firstEntryIndex = timeline.entries.findIndex(
-          (entry) => entry.seqStart === firstEntry.seqStart,
-        );
-        const firstBlockClosed =
-          firstEntryIndex >= 0 && firstEntryIndex < timeline.entries.length - 1;
+      const firstBlock = assistantBlocks[0];
+      if (!firstTextPosted && firstBlock) {
         const status = timeline.agent?.status;
         const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
-        if (firstText && (firstBlockClosed || agentStopped)) {
+        const firstBlockClosed = firstBlock.lastEntryIndex < timeline.entries.length - 1;
+        if (firstBlock.text && (firstBlockClosed || agentStopped)) {
           firstTextPosted = true;
-          await input.onFirstText(firstText);
+          await input.onFirstText(firstBlock.text);
         }
       }
 
-      const lastEntry = assistantEntries.at(-1);
-      finalText =
-        lastEntry?.item.type === "assistant_message" ? lastEntry.item.text.trim() : finalText;
+      finalText = assistantBlocks.at(-1)?.text ?? finalText;
 
       const status = timeline.agent?.status;
       if (status && status !== "initializing" && status !== "running") return finalText;

@@ -50,6 +50,15 @@ interface FilePreviewBodyProps {
   imagePreviewUri: string | null;
 }
 
+interface ImageFilePreviewProps {
+  imagePreviewUri: string | null;
+  imageSource: { uri: string } | null;
+  loadingLabel: string;
+  previewScrollRef: React.RefObject<RNScrollView | null>;
+  scrollbar: ReturnType<typeof useWebScrollViewScrollbar>;
+  showDesktopWebScrollbar: boolean;
+}
+
 function trimNonEmpty(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -189,6 +198,46 @@ const codeLineStyles = StyleSheet.create((theme) => ({
     flex: 1,
   },
 }));
+
+function ImageFilePreview({
+  imagePreviewUri,
+  imageSource,
+  loadingLabel,
+  previewScrollRef,
+  scrollbar,
+  showDesktopWebScrollbar,
+}: ImageFilePreviewProps) {
+  if (!imagePreviewUri) {
+    return (
+      <View style={styles.centerState}>
+        <ActivityIndicator size="small" />
+        <Text style={styles.loadingText}>{loadingLabel}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.previewScrollContainer}>
+      <RNScrollView
+        ref={previewScrollRef}
+        style={styles.previewContent}
+        contentContainerStyle={styles.previewImageScrollContent}
+        onLayout={scrollbar.onLayout}
+        onScroll={scrollbar.onScroll}
+        onContentSizeChange={scrollbar.onContentSizeChange}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={!showDesktopWebScrollbar}
+      >
+        <RNImage
+          source={imageSource ?? undefined}
+          style={styles.previewImage}
+          resizeMode="contain"
+        />
+      </RNScrollView>
+      {scrollbar.overlay}
+    </View>
+  );
+}
 
 function FilePreviewBody({
   preview,
@@ -351,35 +400,15 @@ function FilePreviewBody({
   }
 
   if (preview.kind === "image") {
-    if (!imagePreviewUri) {
-      return (
-        <View style={styles.centerState}>
-          <ActivityIndicator size="small" />
-          <Text style={styles.loadingText}>{t("panels.file.loading")}</Text>
-        </View>
-      );
-    }
-
     return (
-      <View style={styles.previewScrollContainer}>
-        <RNScrollView
-          ref={previewScrollRef}
-          style={styles.previewContent}
-          contentContainerStyle={styles.previewImageScrollContent}
-          onLayout={scrollbar.onLayout}
-          onScroll={scrollbar.onScroll}
-          onContentSizeChange={scrollbar.onContentSizeChange}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={!showDesktopWebScrollbar}
-        >
-          <RNImage
-            source={imageSource ?? undefined}
-            style={styles.previewImage}
-            resizeMode="contain"
-          />
-        </RNScrollView>
-        {scrollbar.overlay}
-      </View>
+      <ImageFilePreview
+        imagePreviewUri={imagePreviewUri}
+        imageSource={imageSource}
+        loadingLabel={t("panels.file.loading")}
+        previewScrollRef={previewScrollRef}
+        scrollbar={scrollbar}
+        showDesktopWebScrollbar={showDesktopWebScrollbar}
+      />
     );
   }
 

@@ -8,6 +8,8 @@ interface HtmlArtifactPreviewProps {
   filePath: string;
 }
 
+const ORIGIN_WHITELIST = ["about:blank"];
+
 export function HtmlArtifactPreview({ html, filePath }: HtmlArtifactPreviewProps) {
   const source = useMemo(() => ({ html, baseUrl: "about:blank" }), [html]);
 
@@ -16,7 +18,7 @@ export function HtmlArtifactPreview({ html, filePath }: HtmlArtifactPreviewProps
       <WebView
         testID="html-artifact-preview"
         source={source}
-        originWhitelist={["about:blank"]}
+        originWhitelist={ORIGIN_WHITELIST}
         style={styles.webView}
         javaScriptEnabled
         domStorageEnabled={false}

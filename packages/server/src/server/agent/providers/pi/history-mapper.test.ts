@@ -127,6 +127,31 @@ describe("Pi history mapper", () => {
     ]);
   });
 
+  test("preserves paragraph boundaries between adjacent assistant text blocks", async () => {
+    await expect(
+      collectHistory([
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "This is good." },
+            { type: "text", text: "Done.\n\n- Final summary" },
+          ],
+        },
+      ]),
+    ).resolves.toEqual([
+      {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "assistant_message", text: "This is good." },
+      },
+      {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "assistant_message", text: "\n\nDone.\n\n- Final summary" },
+      },
+    ]);
+  });
+
   test("uses Pi tree entry ids for replayed user messages", async () => {
     await expect(
       collectHistory(
