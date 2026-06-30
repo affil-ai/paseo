@@ -1,15 +1,16 @@
 # Chat Bridge (Slack / Chat SDK) — Scoping
 
 > **Status: v1 implementation in progress.** `packages/chat` now contains the initial Slack Socket Mode bridge. This doc remains the system design and roadmap; v2 items are still future work.
-> Work is scoped across three phases — see [Release roadmap](#release-roadmap) — and each
-> feature is tagged **v1** / **v2** with a concrete scope, not deferred to "later."
+> Work is scoped across phases — see [Release roadmap](#release-roadmap) — and each feature is
+> tagged **v1** / **v2** with a concrete scope, not deferred to "later." The production
+> agent-initiated conversation plan lives in [docs/plans/chat-bridge-v2](plans/chat-bridge-v2/prd.md).
 
 ## Goal
 
-Let you drive a Paseo agent from chat platforms — Slack first, others later — the same way
-you drive agents from the mobile app today. You @-mention a bot, it starts an agent, and the
-the agent posts its final response back into the thread; replies in the thread continue
-the conversation.
+Let people and Paseo agents talk through chat platforms — Slack first, others later — without
+making Slack the product model. A human can @-mention a bot to start or continue an agent, and
+an agent can explicitly start or continue a chat with a person when it needs human input. In
+both directions, the durable product object is a Paseo **chat binding**, not a Slack thread.
 
 The agent on the other end is **not** a coding-only agent. It is an **"office of CTO" agent**:
 a general operator with full org context that can answer questions, do data analysis, take
@@ -19,10 +20,12 @@ is — it just gets the message into the agent and relays the answer back. All o
 capability comes from the agent's tools (its `executor` MCP for external systems, plus the
 native Paseo tool catalog), not from logic in the bridge.
 
-> **The bridge is a transport adapter, not an orchestrator.** `Slack thread ⇄ Paseo agent`.
-> It does intake, thread↔agent mapping, output relay, and permission relay. It does **not** route
-> by task type, own per-repo profiles, classify intent, decide when to cut a worktree, or talk
-> to Google Sheets/GitHub itself. Those are agent decisions, made with the agent's own tools.
+> **The bridge is a transport adapter, not an orchestrator.**
+> `external chat thread ⇄ chat binding ⇄ existing or new Paseo agent`.
+> It does intake, binding lookup/persistence, output relay, permission/question relay, delivery
+> receipts, attachment normalization, and subscriptions. It does **not** route by task type, own
+> per-repo profiles, classify intent, decide when to cut a worktree, or talk to Google
+> Sheets/GitHub itself. Those are agent decisions, made with the agent's own tools.
 
 The platform-agnostic layer is [Chat SDK](https://chat-sdk.dev) (`chat` core +
 `@chat-adapter/*` adapters), which unifies Slack, Discord, Telegram, Teams, Google Chat,
@@ -44,9 +47,8 @@ mechanics, but **deliberately departs from its model**. Three things to note:
   is an agent decision, not an intake invariant. Multi-repo profiles and route classification
   are not core to the design (see [Optional routing](#optional-routing-not-core)).
 - **Improve (threading):** t3code's core shape — first visible assistant response and final
-  response as thread replies — is the right Slack UX for now. The Paseo bridge still consumes
-  the daemon stream internally for lifecycle/focus tracking, but Slack receives one final
-  assistant reply, not intermediate partial output.
+  response as thread replies — is the right Slack UX for now. The Paseo bridge polls the
+  daemon timeline and posts complete assistant text blocks only, never partial stream chunks.
 
 ## Slack reply contract
 
@@ -54,7 +56,8 @@ Slack output must stay in the user's message thread:
 
 - Always send assistant output as replies to the Slack message thread, never as new top-level messages.
 - Do **not** post intermediate assistant/tool output in Slack v1; it is too noisy and Slack's native streaming error UI is confusing.
-- Always post exactly one final assistant message for a turn. Fetch the daemon's projected timeline after the turn finishes and post that final assistant text as a normal thread reply.
+- Post the first complete assistant text block for a turn, then post the final assistant text block when the agent stops. If first and final are the same text, post it only once.
+- Fetch assistant text from the daemon's projected timeline and post it as normal thread replies. Do not use native Slack streaming.
 
 ## Hard constraint: Chat SDK is the _only_ Slack client
 
@@ -107,11 +110,107 @@ the app/CLI/desktop look: the sidebar agent list, the timeline view, deep links.
 thread and the Paseo UI are two windows onto the _same_ agent — start a task from Slack,
 finish it from your phone. See [UI model](#ui-model) for the full picture.
 
+## Bidirectional binding model
+
+Stop thinking of the bridge as only `Slack thread → newly-created Paseo agent`. The core model is
+bidirectional:
+
+```txt
+external chat thread <-> chat binding <-> existing or new Paseo agent
+```
+
+`packages/chat` owns transport concerns: Chat SDK adapter setup, inbound event handling,
+subscriptions, Slack/thread identity mapping, attachment normalization, inbound dedupe, outbound
+delivery receipts, thread-agent bindings, and permission/question bridging. Chat SDK stays because
+it handles Slack Socket Mode/webhooks, `thread.post`, cross-platform posting/streaming
+abstractions, attachments, reactions/cards, and future Discord/Teams/etc. But Chat SDK is **not**
+the durable domain model; Paseo's file-backed chat bridge state is.
+
+### Binding kinds
+
+```ts
+type ChatBinding =
+  | {
+      kind: "inbound-session";
+      externalThreadId: string;
+      rootAgentId: string;
+      focusedAgentId: string;
+    }
+  | {
+      kind: "outbound-conversation";
+      externalThreadId: string;
+      ownerAgentId: string;
+      pendingRequestId?: string;
+      subscribed: boolean;
+    };
+```
+
+Current v1 code has the first shape as `ThreadSession { rootAgentId, focusedAgentId,
+activeChildAgentId, activeRelayId, muted }` in `ThreadSessionStore`. Evolve that store into the
+union above rather than treating Chat SDK subscription state as the product state.
+
+### Routing rules
+
+- Human starts a new DM, mention, or unclaimed Slack thread → create a new office agent and an
+  `inbound-session` binding.
+- Existing bound external thread → route replies to the bound `focusedAgentId` / `ownerAgentId`.
+- Agent starts an outbound conversation → create or reuse a Slack DM/thread, post via Chat SDK,
+  and bind replies back to that **same existing agent** (`outbound-conversation`). No new Paseo
+  agent is created.
+- Agent creates another Paseo agent/workspace using existing Paseo tools → the current chat
+  binding follows focus to that agent in the same external thread. Chat tools do not create agents.
+
+### Agent-visible chat tools
+
+Agents must not use raw Slack APIs or tokens. They should receive person/thread primitives through
+a Paseo-owned tool surface, for example:
+
+```ts
+chat.startConversation({ destination: { kind: "person", key: "vivek" }, message: "..." });
+chat.askPerson({ destination: { kind: "person", key: "vivek" }, question: "..." });
+chat.reply({ conversationId: "...", message: "..." });
+```
+
+Recommended implementation for Paseo's current architecture: expose these as **daemon-owned
+Paseo/MCP tools backed by a chat service API**, not as bridge-local Slack tools. The daemon already
+owns the agent tool catalog and audit trail; `packages/chat` owns transport. A local
+`ChatBridgeService` can register with the daemon over the existing WebSocket/client path (or a
+small local RPC) so the daemon tool calls `packages/chat`, and `packages/chat` uses Chat SDK to
+post + persist the binding. This keeps agents on stable `chat.*` primitives, keeps Slack tokens
+inside the bridge, and avoids coupling the agent runtime to one adapter.
+
+### Outbound modes
+
+1. **Fire-and-subscribe / same-agent conversation.** Agent sends a message to a person; bridge
+   creates or reuses a Slack DM/thread; replies route back to the same existing agent via
+   `client.sendAgentMessage(...)`. Use for quick async input, file requests, or permission
+   confirmations. No new Paseo agent.
+2. **Ask-and-wait / same-agent blocking question.** `chat.askPerson(...)` posts a question and
+   stores a pending request. The tool call (or permission-like wait) resolves when the person
+   replies, with timeout/cancel semantics. Still the same existing agent; the current task is
+   waiting for human input.
+3. **New agents stay in the existing Paseo focus model.** If the current agent wants a new
+   agent/workspace, it uses normal Paseo tools (`create_agent`, `create_worktree`, etc.). The
+   bridge follows focus in the same bound chat thread. Chat tools never create agents.
+
+### People resolution and guardrails
+
+- Resolve `person: "vivek"` through bridge/daemon config: aliases, Slack user IDs, emails, and
+  optionally `memory/people/*.md` metadata. Agents see people keys; raw Slack tokens and adapter
+  user IDs stay behind the bridge.
+- Persist outbound bindings and pending `askPerson` requests under `$PASEO_HOME/chat-bridge/`
+  with the same atomic JSON + Zod pattern as inbound sessions. On restart, reload bindings,
+  subscriptions, pending request deadlines, and delivery receipts; expired asks resolve as
+  timeout/canceled rather than hanging forever.
+- Outbound contact requires an explicit `chat.*` tool call. Ordinary assistant messages must not
+  ambiently DM people. Record an audit trail (agent id, requester, person, external thread id,
+  message preview, timestamp) and support an optional allowlist per workspace/person/channel.
+
 ## Task model
 
 The model is deliberately simple:
 
-- **One chat thread = one Paseo workspace = one long-lived "office agent."**
+- **One inbound chat thread = one Paseo workspace = one long-lived "office agent."** Agent-initiated outbound conversations bind to the existing agent. If that agent starts another Paseo agent/workspace, the same chat thread follows focus; no extra chat thread is created by default.
 - The office agent's workspace is a **`directory` workspace** backed by the configured **office
   repo** — the CTO-office repo that holds the agent's schema (`AGENTS.md`), memory, and shared
   skills (see [office-brain.md](office-brain.md)). It sits alongside your other product repos,
@@ -181,33 +280,36 @@ modes" layer is needed in the bridge — the agent already has the primitives.
 When the office agent spawns a coding subagent, the action moves to a **different `agentId`**
 (the parent stays `idle` while the child runs — `agent-lifecycle.md` keeps status literal).
 We want the Slack thread to follow the work, so the bridge tracks a **focused agent** per
-thread and streams that.
+thread and routes replies/output to that agent.
 
 ```ts
 type ThreadSession = {
   externalThreadId: string;
   rootAgentId: string; // the office agent — always
-  focusedAgentId: string; // who we currently stream + route replies to
+  focusedAgentId: string; // who we currently poll for output + route replies to
   // ...dedup keys, muted, artifacts, timestamps (see State storage)
 };
 ```
 
 Rules (all decided):
 
-- **Focus-follow.** The bridge streams `focusedAgentId`. When it observes an `agent_update`
+- **Focus-follow.** The bridge tracks `focusedAgentId`. When it observes an `agent_update`
   whose `parentAgentId === rootAgentId` (the office agent just spawned a child), it **shifts
-  focus to the child**, posts a small divider in the thread (e.g.
-  "🔧 handed off to a coding agent in worktree `fix-onboarding`"), and streams the child's
-  `agent_stream`. Replies route to the focused agent (`sendAgentMessage(focusedAgentId, …)`).
+  focus to the child**, posts a small handoff message in the same thread (v1: plain divider; v2:
+  Chat SDK card, e.g. "🔧 Focus moved to coding agent: `fix-onboarding`", with a **Back to office
+  agent** button), and polls the child's projected timeline for assistant text. Replies route to
+  the focused agent (`sendAgentMessage(focusedAgentId, …)`).
 - **One focused child at a time.** The bridge tracks at most one child. If the office agent
   spawns a _second_ concurrent child, the bridge does **not** hijack the thread for it — the
   second child still runs (visible in the office agent's subagents track / its worktree), but
-  its stream is not relayed. This keeps the linear Slack thread coherent.
+  its output is not relayed. This keeps the linear Slack thread coherent.
 - **No sub-subagents.** Focus never descends past depth 1. If the coding child spawns its own
   children, their work surfaces only as the child's tool cards, never as a focus hop.
-- **Escape hatch.** `@cto ↑` (or a "talk to supervisor" button via `StreamingPlan.endWith`)
-  pops focus back to the office agent without waiting for the child to finish. The child keeps
-  running in its track/worktree; the office agent fields the aside.
+- **Escape hatch.** v1 supports `@cto ↑` to pop focus back to the office agent without waiting
+  for the child to finish. v2 adds the required **Back to office agent** button on the handoff
+  card; button actions use a bridge-owned action id (for example
+  `paseo-focus:root:<externalThreadId>`) and never go through the agent. The child keeps running
+  in its track/worktree; the office agent fields the aside.
 - **Auto-return on completion.** When the focused child reaches a terminal state
   (`turn_completed` / archived), focus auto-pops back to the office agent, which narrates the
   result ("opened PR #42"). Focus does **not** snap back to a finished child — completion posts
@@ -274,9 +376,9 @@ needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is 
 **thin** — the intelligence lives in the agent and its prompt, not the bridge.
 
 - Slack intake: mentions, DMs, subscribed-thread follow-ups (Feature 1).
-- One thread = one workspace = one office agent, on a single configured `directory` workspace
-  (the office repo). **No per-thread worktree, no repo routing, no classifier.**
-- Native Slack streaming of each turn (assistant text + reasoning + tool-call task cards).
+- One inbound thread = one workspace = one office agent, on a single configured `directory`
+  workspace (the office repo). **No per-thread worktree, no repo routing, no classifier.**
+- Timeline-polled Slack relay: first complete assistant text block plus final assistant text block; no native Slack streaming.
 - **Subagent focus relay:** focus-follow, one child at a time, escape hatch, auto-return
   (see [Subagent focus relay](#subagent-focus-relay)).
 - `:eyes:` acknowledgement reaction; compact "Working on it" card with a `View chat` deep-link button.
@@ -287,7 +389,7 @@ needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is 
 - Assembled initial prompt with the configurable **office system prompt** block.
 - Inbound image attachments → agent.
 - `paseo.chat-thread-id` label stamped on the office agent and every relayed child.
-- Health/config command (Feature 6).
+- Health/config command (Feature 5).
 - Start-failure and turn-error messages surfaced to the thread.
 - The intake & relay mechanics below: serial-per-thread queue, inbound dedup + **outbound
   delivery receipts**, loop/mention/ambient filtering, channel-vs-DM rules, text cleaning,
@@ -295,9 +397,11 @@ needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is 
 - Idempotency, thread linking, and restart-resilient state (file-backed store).
 
 **v1 exit criteria:** from Slack you can start the office agent, ask it to answer/analyze/act,
-watch it work live, have it delegate code work to a coding subagent and watch the thread
-_follow that child_ and come back, answer its permission prompts, reply to continue it, and
-mute it — across a daemon or bridge restart.
+receive first/final assistant updates, have it delegate code work to a coding subagent and watch
+the thread _follow that child_ and come back, answer its permission prompts, reply to continue it,
+and mute it. From an agent, an explicit same-agent outbound chat tool can message a configured
+person and bind replies back to the owner agent. Both inbound and outbound bindings survive a
+daemon or bridge restart.
 
 ### v2 — "Webhooks + richer I/O + remote" (introduces a public inbound HTTP server)
 
@@ -307,6 +411,11 @@ otherwise outbound-only), which unlocks webhook-driven features. v2 delivers:
 - **PR-merged notifications** — GitHub webhook → `:white_check_mark:` + "merged" message
   posted into the originating thread (Feature 3).
 - **Inbound email intake** (Resend) as a second channel feeding the same pipeline (Feature 4).
+- **Agent-initiated chat tools** — `chat.startConversation`, `chat.reply`, `chat.askPerson`, and
+  `chat.askChannel`, with executor-discovered channel destinations, durable outbound bindings,
+  pending asks, restart recovery, and audit records.
+- **Focus UX upgrade** — when focus shifts to a spawned child/subagent, post a transition card with
+  a **Back to office agent** button.
 - **Bidirectional file attachments** — agent-produced files posted back to the thread.
 - **Second chat adapter** (Discord or Telegram) to prove the platform-agnostic seam.
 - **Remote deployment mode** — bridge on a different host than the daemon, connecting over the
@@ -422,10 +531,10 @@ being noisy in shared channels. Store the flag on the `ThreadSession`.
 When the office agent (or a coding subagent it spawned) opens a PR and it later merges, the
 bridge posts a completion message back to the thread:
 
-1. **Detect + record the PR.** Scan the streamed agent `timeline` (of whichever agent is being
+1. **Detect + record the PR.** Scan the projected agent timeline (of whichever agent is being
    relayed) for `https://github.com/<owner>/<repo>/pull/<number>` and store an artifact link
    `("github_pr", "<owner>/<repo>#<number>") → { externalThreadId, url, title }`. The
-   artifact-link recording can land in v1 since it only reads the agent stream.
+   artifact-link recording can land in v1 since it only reads persisted timeline rows.
 2. **Receive the merge event.** A `POST /github/webhook` endpoint (verified with
    `GITHUB_WEBHOOK_SECRET`, HMAC-SHA256, deduped on `x-github-delivery`) listens for
    `pull_request` events where `merged === true`.
@@ -464,6 +573,20 @@ the operator can read** (is the daemon reachable? is Slack connected via Socket 
 the bot user id? which workspace folder + provider is configured?). When the v2 `inbound-http`
 server exists, promote it to a real `GET /health` route that also reports the computed webhook
 URLs.
+
+### 6. Agent-initiated chat — **v2**
+
+Agents can explicitly contact people or channels through `chat.*` tools without raw Slack
+APIs/tokens. This is v2 scope: `chat.startConversation` / `chat.reply` post through Chat SDK and
+persist an `outbound-conversation` binding so replies go back to the same focused agent;
+`chat.askPerson` / `chat.askChannel` add pending waits with timeout/cancel/restart semantics. The
+agent can use executor MCP to discover channels it can access, then pass those destinations to the
+chat tools.
+
+Chat tools intentionally do **not** create agents. If an agent needs a new workspace/agent in a
+project, it uses the normal Paseo agent/workspace tools and the bridge focus relay keeps the same
+chat thread pointed at the focused agent. Every outbound chat tool call records an audit entry.
+Ordinary assistant text is not interpreted as a request to DM someone.
 
 ## Standing work (routines)
 
@@ -537,47 +660,30 @@ strict per-channel isolation):
 If added, this must not reintroduce bridge-owned worktree creation or "run vs build"
 classification — those remain agent decisions.
 
-## Slack output relay (no intermediate Slack streaming in v1)
+## Slack output relay (timeline polling, no streaming)
 
-The bridge consumes the daemon's live `agent_stream` internally so it can notice lifecycle,
-permission, and focus changes. Slack v1 intentionally does **not** display intermediate
-assistant/tool output: native Slack streaming can show confusing error chrome, and partial
-messages are too noisy for the desired thread UX. Each user turn gets one final assistant reply.
+Slack v1 intentionally does **not** display intermediate assistant/tool output: native Slack
+streaming can show confusing error chrome, and partial messages are too noisy for the desired
+thread UX. The bridge does not subscribe to `agent_stream` for Slack relay. It polls the
+daemon's **projected timeline** for complete `assistant_message` rows and posts only two kinds
+of normal thread replies:
 
-**How it works.** `turn-stream.ts` still models live daemon events as `StreamChunk`s, but
-`bridge.ts` drains that stream for side effects and then fetches the daemon timeline after the
-turn finishes. The final assistant text is fetched from the projected timeline (so assistant
-chunks are merged before Slack formatting), then posted with `thread.post(...)` or
-`adapter.postMessage(...)` against the normalized Slack thread id.
+1. The first complete assistant text block for the turn.
+2. The final assistant text block after the agent reaches a terminal state.
 
-**Internal `StreamChunk` types** (`import type { StreamChunk } from "chat"`):
+If the first and final text are identical, the bridge posts once. Tool calls, reasoning, plan
+updates, and partial assistant chunks are never posted to Slack.
 
-| Chunk           | Fields                                     | Internal use                                         |
-| --------------- | ------------------------------------------ | ---------------------------------------------------- |
-| `markdown_text` | `{ text }`                                 | fallback assistant text collection                   |
-| `task_update`   | `{ id, title, status, details?, output? }` | tool-call/focus side effects; not posted in Slack v1 |
-| `plan_update`   | `{ title }`                                | plan side effects; not posted in Slack v1            |
+**How it works.** For Slack-originated turns, `bridge.ts` records the timeline sequence number
+before sending the prompt. For UI-originated turns on an agent that is linked to a Slack thread,
+the bridge observes `turn_started` and starts the same relay. A background relay polls
+`fetchAgentTimeline(..., { projection: "projected" })` for assistant messages at or after that
+sequence. It posts the first complete assistant block once it is no longer the newest row (or
+the agent has stopped), then keeps polling until the focused agent is no longer
+`initializing`/`running` and posts the last assistant block as the final reply. Replies are sent
+with `thread.post(...)` or `adapter.postMessage(...)` against the normalized Slack thread id.
 
-**Mapping Paseo turn events → `StreamChunk`s.** The bridge's `turn-stream.ts` is an async
-generator that consumes `client.on("agent_stream", …)` **for the currently focused agent** and
-yields:
-
-- `timeline { item.type: "assistant_message" }` → `{ type: "markdown_text", text }`
-  (concatenate consecutive assistant messages — there are no text deltas; assistant text
-  arrives as several complete rows).
-- `timeline { item.type: "tool_call" }` → `{ type: "task_update", id: callId, title: name,
-status: map(item.status) }` where `running→in_progress`, `completed→complete`,
-  `failed→error`.
-- `timeline { item.type: "reasoning" }` → optional `markdown_text` (suppressed by default to
-  reduce noise; config flag to show the "thinking").
-- `timeline { item.type: "plan" }` / plan mode → `{ type: "plan_update", title }`.
-- **office agent spawns a subagent** (`agent_update` with `parentAgentId === rootAgentId`) →
-  emit a `task_update` divider ("🔧 handed off to …"), then **switch the generator's source**
-  to the child's stream (focus relay).
-- `turn_completed | turn_failed | turn_canceled` → **end the generator** (closing the stream).
-  `client.waitForFinish(agentId)` is the authoritative backstop to close it.
-
-If we re-enable native Slack streaming later, it must be behind an explicit product decision
+If native Slack streaming is ever reintroduced, it must be behind an explicit product decision
 and preserve the reply contract above: no top-level messages, no duplicate final text, and no
 Slack error chrome exposed as the primary response.
 
@@ -586,8 +692,8 @@ Slack error chrome exposed as the primary response.
 When an agent needs approval the daemon emits `agent_permission_request`. The bridge:
 
 - Listens on `client.on("agent_permission_request", …)`; the request carries `actions[]`
-  (each `{ id, label, behavior, variant }`) which map 1:1 to Slack buttons (post them via
-  `StreamingPlan.endWith` or a standalone Block Kit message).
+  (each `{ id, label, behavior, variant }`) which map 1:1 to Slack buttons posted as normal
+  Chat SDK card/action messages.
 - On click, resolves with `client.respondToPermission(agentId, request.id, { behavior,
 selectedActionId })` — for the **focused** agent.
 - The `question` permission kind is also how interactive "agent asks the user a question"
@@ -645,9 +751,7 @@ Before building the prompt, clean the message: strip the bot's own mention (`<@U
 
 ### Output relay rules — **v1**
 
-- **One final assistant reply per user turn.** Do not post intermediate assistant/tool chunks;
-  drain the daemon stream internally, then fetch and post final assistant text from the
-  timeline.
+- **First + final assistant replies per user turn.** Do not post intermediate assistant/tool chunks. Poll the projected daemon timeline, post the first complete assistant text block, then post the final assistant text block when the agent stops. If they match, post once.
 - **No message editing for replies** — assistant relay always posts a normal thread reply; we
   don't hand-edit prior posts.
 - **Outbound dedup:** delivery receipts prevent re-posting after retries/restarts.
@@ -661,8 +765,7 @@ Before building the prompt, clean the message: strip the bot's own mention (`<@U
 
 - **Start failure → posted.** If creating/continuing an agent throws, post
   `"I couldn't start a task from this message. Reason: <message>"` to the thread.
-- **Turn failure (`turn_failed` / status `error`):** post a short "the agent hit an error"
-  line. (t3code only posts the former; we do both, since the turn-stream observes turn end.)
+- **Turn failure (`status: "error"`):** post a short "the agent hit an error" line when timeline polling observes the agent stopped in an error state.
 - **Agent asks a question** (`agent_permission_request` kind `question`): post a numbered
   question card; the user's next thread reply is the answer (strip `<@…>`; support
   single-answer-applies-to-all vs `Q1: … Q2: …`). Rides the same permission plumbing as
@@ -705,16 +808,16 @@ packages/chat/
                           #   officePromptPath, deepLinkBaseUrl, daemon host/password, stateDir
                           #   (Slack tokens are read by @chat-adapter/slack, not by us)
     paseo-client.ts       # connect() helper mirroring packages/cli/src/utils/client.ts (reconnect: enabled)
-    bridge.ts             # core: handleMessage — filters/gates, new-thread vs follow-up, dedup
-    focus.ts              # [v1] focus pointer: detect parentAgentId child, switch relay source,
+    bridge.ts             # core: handleMessage — filters/gates, new-thread vs follow-up, dedup,
+                          #   timeline-polling output relay
+    focus.ts              # [v1] focus pointer: detect parentAgentId child, switch relay target,
                           #   one-child rule, escape hatch (@cto ↑), auto-return on completion
     state/
       json-state.ts       # [v1] shared atomic JSON load/save + write-queue (mirrors loop-service.ts)
       chat-state-adapter.ts # [v1] file-backed Chat SDK StateAdapter (subscriptions/cache persisted; locks in-process)
-      thread-session-store.ts # [v1] domain store: ThreadSession (rootAgentId, focusedAgentId, muted),
-                          #   event + delivery receipts, artifacts
-    turn-stream.ts        # focused agent's turn → AsyncIterable<StreamChunk>; switches source on focus relay
-    render.ts             # AgentTimelineItem / ToolCallDetail → StreamChunk; Slack markdown fix-ups
+      thread-session-store.ts # [v1] domain store: ChatBinding/ThreadSession (inbound-session,
+                          #   outbound-conversation), pending asks, event + delivery receipts, artifacts
+    render.ts             # Slack markdown fix-ups for projected assistant text
     permissions.ts        # agent_permission_request → buttons (kind tool) / question card (kind question)
     intake/
       slack.ts            # [v1] Slack glue: mute/aside parsing, attribution strip, context capture, reactions,
@@ -735,7 +838,7 @@ The package `README.md` would be operational setup; this doc is the system-level
 
 **v1** is exactly the diagram in [Core concept](#core-concept-the-bridge-is-just-another-daemon-client):
 an outbound-only process (`DaemonClient` over `127.0.0.1`, Slack over Socket Mode), file-backed
-state, and the turn-stream/render/permissions/focus glue. No inbound listener, no HTTP server,
+state, and the timeline-relay/render/permissions/focus glue. No inbound listener, no HTTP server,
 no database.
 
 **v2 introduces an inbound HTTP server (`inbound-http.ts`).** This is the one structural
@@ -773,10 +876,12 @@ There are **two logical state stores, both file-backed:**
    persisted, so a restart never loses which threads the bot follows.
 
 2. **Our domain store** (`thread-session-store.ts`) — the bridge's own data:
-   `externalThreadId → ThreadSession { rootAgentId, focusedAgentId, muted, createdAt }`,
-   event-receipt dedup keys, outbound delivery receipts, and (v2) PR artifact links. Keep the
-   logical tables t3code used (`external_thread_links`, `external_event_receipts`,
-   `artifact_links`) as JSON collections — extended with the `focusedAgentId` pointer.
+   `externalThreadId → ChatBinding`, pending `askPerson` waits, event-receipt dedup keys,
+   outbound delivery receipts, audit records, and (v2) PR artifact links. Keep the logical tables
+   t3code used (`external_thread_links`, `external_event_receipts`, `artifact_links`) as JSON
+   collections, but make the domain shape explicit: inbound sessions have `rootAgentId` /
+   `focusedAgentId`; outbound conversations have `ownerAgentId`, `focusedAgentId`, `subscribed`,
+   and optional `pendingRequestId`.
 
 **Implementation — reuse Paseo's primitives, don't reinvent:**
 
@@ -795,7 +900,7 @@ There are **two logical state stores, both file-backed:**
 Chat SDK `StateAdapter` interface — Chat SDK is beta, so **pin the version** and treat an
 interface change as a small, contained fix.
 
-## Flow (v1, Slack, streaming)
+## Flow (v1, Slack, timeline polling)
 
 **New thread** (`bot.onNewMention` / `onDirectMessage`):
 
@@ -808,24 +913,24 @@ workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalTh
    (provider/model/mode come from config; the default is Pi + Codex gpt-5.5 medium).
 6. Persist `ThreadSession { rootAgentId: agentId, focusedAgentId: agentId }`; react `:eyes:` on
    the triggering message; post the compact "Working on it" card with a `View chat` button.
-7. Drain `turnStream(focusedAgentId)` internally for lifecycle/focus side effects. If the agent
+7. Poll the focused agent's projected timeline. Post the first complete assistant text block,
+   keep polling until the agent stops, then post the final assistant text block. If the agent
    spawns a coding subagent mid-turn, focus can switch to the child and stamp the same
-   `paseo.chat-thread-id` label on it; on completion, focus returns to root. After the turn,
-   fetch the timeline and post exactly one final assistant reply.
+   `paseo.chat-thread-id` label on it; on completion, focus returns to root.
 
 **Reply** (`bot.onSubscribedMessage`): dedup → look up `ThreadSession` (respect `muted`, except explicit bot mentions bypass mute) →
 if it's the escape hatch (`@cto ↑`), pop focus to `rootAgentId` → `client.sendAgentMessage(
-focusedAgentId, text)` → drain turn stream internally → post exactly one final assistant reply.
+focusedAgentId, text)` → poll projected timeline → post first complete assistant text and final assistant text.
 
 **Permission mid-turn:** permission requests are posted as standalone buttons/cards; the click
 handler calls `respondToPermission` on the focused agent, the agent continues, and the bridge
-still posts only the final assistant reply for the turn.
+still posts only the first complete assistant text and final assistant text for the turn.
 
 ## Research gotchas to preserve
 
 - **Use the low-level `DaemonClient`, not the `PaseoClient` facade.** Import from
-  `@getpaseo/client/internal/daemon-client` (as the CLI does). The high-level facade has **no
-  raw stream subscription and no permission handling**, both of which the bridge needs.
+  `@getpaseo/client/internal/daemon-client` (as the CLI does). The bridge needs timeline
+  fetching, permission handling, and agent-control RPCs in one place.
 - **Workspace creation for the office agent is `directory`-backed.** Use
   `createWorkspace({ source: { kind: "directory", path } })` and pass the resulting
   `workspaceId` into `createAgent`. Worktree creation is **not** done by the bridge — it's a
@@ -833,12 +938,12 @@ still posts only the final assistant reply for the turn.
 - **The agent owns task decisions.** Routing, tool selection, worktree-vs-no-worktree,
   Sheets/GitHub/etc. all happen inside the agent (via `executor` MCP + Paseo tools). Do not
   rebuild any of this in the bridge.
-- **No assistant text deltas.** Assistant output arrives as multiple complete `timeline`
-  events with `item.type: "assistant_message"`; concatenate them.
-- **Turn boundaries from the stream; completion from an RPC.** A turn is `turn_started` →
-  N× `timeline` → `turn_completed | turn_failed | turn_canceled`. `client.waitForFinish(
-agentId, timeoutMs)` is the authoritative completion signal. `turnId` is internal-only and
-  stripped at the wire — group by the start/end stream events.
+- **No assistant text deltas.** Assistant output in the projected timeline arrives as complete
+  `assistant_message` rows. Poll the timeline and post only complete blocks; never relay
+  partial text.
+- **Turn relay is timeline-polled.** Capture the timeline sequence before sending a prompt,
+  then poll projected timeline entries at or after that sequence. Agent status from the
+  timeline tells the bridge when the final assistant block is ready.
 - **Subagent relationship + label.** Spawned coding agents carry `paseo.parent-agent-id`
   (set by `create_agent` with `relationship: { kind: "subagent" }`) — that's how the bridge
   detects a handoff for focus relay. The bridge additionally stamps `paseo.chat-thread-id` on
@@ -846,8 +951,9 @@ agentId, timeoutMs)` is the authoritative completion signal. `turnId` is interna
 - **Permissions are low-level only.** Listen on `agent_permission_request`; resolve via
   `respondToPermission(agentId, request.id, { behavior, selectedActionId })`. Pending requests
   also appear on `AgentSnapshotPayload.pendingPermissions`.
-- **Chat SDK streaming + fallback is automatic.** `thread.post(asyncIterable)` streams
-  natively on Slack and falls back elsewhere; we never branch on platform capability.
+- **Do not use Chat SDK native streaming for assistant replies.** Post normal messages with
+  `thread.post({ markdown })` / `adapter.postMessage(...)` only, so Slack never shows partial
+  chunks or streaming error chrome.
 - **Chat SDK is the only Slack client — no raw token calls.** Reactions, cards, posting, file
   upload (`thread.post({ files })`), and inbound attachment reads (`attachment.fetchData()`)
   are all native. Do not replicate t3code's raw `files.*` / `url_private` paths.
@@ -877,12 +983,12 @@ agentId, timeoutMs)` is the authoritative completion signal. `turnId` is interna
 - `affil-ai/t3code` `apps/server/src/externalIntake/` — prior implementation, mined for intake
   mechanics only: `ExternalChat.ts` (Slack callbacks), `ExternalIntake.ts` (tags, mute),
   `Reactor.ts` (output relay), `http.ts` (webhook routes + signature verification).
-- [Chat SDK streaming docs](https://chat-sdk.dev/docs/streaming) — `StreamChunk`, `StreamingPlan`.
+- Chat SDK posting docs — normal `thread.post({ markdown })` / `adapter.postMessage(...)` replies.
 
 ## Decisions (resolved)
 
 - **The bridge is a transport adapter, not an orchestrator → v1.** It does intake, thread↔agent
-  mapping, streaming, focus relay, and permission relay. Routing/tools/worktree decisions live
+  mapping, timeline-polled output relay, focus relay, and permission relay. Routing/tools/worktree decisions live
   in the agent. This is the core model change from t3code.
 - **One thread = one workspace = one office agent on a configured `directory` folder → v1.**
   No per-thread worktree, no per-repo profiles, no classifier. The office repo sits alongside
@@ -962,9 +1068,8 @@ design borrows vs. where it diverges:
 ## Remaining open questions (genuinely undecided)
 
 - **Reply target while a child is focused vs the office agent.** Decided: replies go to the
-  _focused_ agent; the escape hatch (`@cto ↑`) re-targets the office agent. Open: should there
-  be a visible affordance (button) in the streamed message for the escape hatch, or only the
-  text command? Likely both (a `StreamingPlan.endWith` "talk to supervisor" button).
+  _focused_ agent. v1 supports textual escape (`@cto ↑`); v2 adds the visible child-handoff
+  transition card with a **Back to office agent** button that re-targets the office agent.
 - **Concurrency caps:** should one channel/user be limited to N concurrent office agents to
   avoid runaway resource use? Likely a v2 config knob.
 - **Second adapter choice for v2:** Discord vs Telegram first — driven by which you actually

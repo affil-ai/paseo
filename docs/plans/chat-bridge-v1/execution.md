@@ -3,6 +3,10 @@
 Source references: [prd.md](prd.md), [research.md](research.md), [docs/chat-bridge.md](../../chat-bridge.md)
 Date created: 2026-06-27
 
+> Branch note: chat bridge work is in this worktree on `cto/generalized-chat-bridge`. PR #5 in
+> `affil-ai/paseo` is currently `feature/cloudflare-access-user-email` (Cloudflare Access email),
+> not the chat bridge PR.
+
 > [!IMPORTANT]
 > This is a working execution plan. As implementation progresses:
 >
@@ -16,7 +20,7 @@ Date created: 2026-06-27
 Ship `@getpaseo/chat`: a standalone Node process that bridges Slack (via Chat SDK, Socket Mode)
 to the local Paseo daemon, so a `@cto` mention starts an office agent whose final answer is posted
 back into the thread, with subagent focus relay, permissions, mute, and restart-safe state — no
-daemon/core changes, no database, no public HTTP.
+database and no public product HTTP surface.
 
 ## Locked decisions
 
@@ -33,8 +37,11 @@ daemon/core changes, no database, no public HTTP.
 
 ## Out of scope
 
-- `inbound-http.ts`, GitHub/Resend webhooks, remote/relay mode, multi-repo routing, outbound
-  files, REST API. (All v2+ or dropped.)
+- Agent-initiated chat tools (`chat.startConversation`, `chat.askPerson`, `chat.askChannel`,
+  `chat.reply`) — v2.
+- GitHub/Resend webhooks, remote/relay mode, multi-repo routing, outbound files, public REST API.
+  (All v2+ or dropped.) Minimal Slack webhook mode may exist only to support Chat SDK's own inbound
+  adapter; it is not the v2 public webhook feature set.
 - The office brain capture/lint implementation (this plan only calls the teardown hook).
 
 ## Implementation slices
@@ -62,21 +69,6 @@ daemon/core changes, no database, no public HTTP.
 | `config.ts`          | Zod-parsed env: `officeRepoPath`, `provider` (default `pi`), `model` (default `openai-codex/gpt-5.5`), `modeId` (default `medium`), `ackEmoji`, `officePromptPath`, `deepLinkBaseUrl`, daemon host, `stateDir` |
 | `paseo-client.ts`    | `connect()` mirroring `cli/src/utils/client.ts` (DaemonClient over `ws://127.0.0.1:6767`, reconnect enabled)                                                                                                   |
 | `index.ts`           | boot: load config → connect daemon → (Slice 5) construct Chat + adapters → register handlers                                                                                                                   |
-
-**Sketch**
-
-```ts
-// config.ts
-export const Config = z.object({
-  officeRepoPath: z.string(),
-  provider: z.string().default("pi"),
-  model: z.string().default("openai-codex/gpt-5.5"),
-  modeId: z.string().default("medium"),
-  daemonHost: z.string().default("localhost:6767"),
-  stateDir: z.string().optional(),
-  // ...
-});
-```
 
 **Tests**
 
@@ -127,42 +119,31 @@ type ThreadSession = {
 
 - [x] State survives a process restart (write, restart, read back).
 
-### Slice 3 — Turn stream + render (office agent only)
+### Slice 3 — Timeline-polled output relay (office agent only)
 
-**Goal**: one office-agent turn is consumed as a live `AsyncIterable<StreamChunk>` for lifecycle/focus side effects, but Slack receives exactly one final assistant reply. Do not show intermediate assistant/tool output in Slack v1.
+**Goal**: one office-agent turn is observed by polling the projected daemon timeline. Slack receives the first complete assistant text block and the final assistant text block only. Do not show intermediate assistant/tool output or native Slack streaming in v1.
 
 **Files**
 
-- `packages/chat/src/turn-stream.ts`
+- `packages/chat/src/bridge.ts`
 - `packages/chat/src/render.ts`
 
 **Change map**
 
-| File             | Change                                                                                                                                                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `turn-stream.ts` | async generator consuming `client.on("agent_stream", …)` for a given `agentId`; ends on `turn_completed/failed/canceled`; `waitForFinish` backstop                                                                                                                                                           |
-| `render.ts`      | map `AgentTimelineItem` → `StreamChunk`: `assistant_message`→`markdown_text` (concatenate), `tool_call`→`task_update` (`running→in_progress`, `completed→complete`, `failed→error`), `plan`→`plan_update`, `reasoning`→suppressed by default; Slack markdown fix-ups (flatten tables, backtick `@scope/pkg`) |
-
-**Sketch**
-
-```ts
-async function* turnStream(client, agentId): AsyncIterable<StreamChunk> {
-  for await (const ev of streamFor(client, agentId)) {
-    if (ev.type === "timeline") yield renderItem(ev.item);
-    if (isTurnEnd(ev)) return;
-  }
-}
-```
+| File        | Change                                                                                                                                                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bridge.ts` | capture timeline sequence before prompting; poll projected timeline for `assistant_message` rows; post first complete assistant text block; on terminal status post final assistant text block; skip duplicate first/final text |
+| `render.ts` | Slack markdown fix-ups for projected assistant text (flatten tables, backtick `@scope/pkg`)                                                                                                                                     |
 
 **Tests**
 
-- [ ] Multiple `assistant_message` rows concatenate into one `markdown_text`.
-- [ ] `tool_call` status transitions map to the right `task_update` status.
-- [ ] Generator closes on `turn_completed`.
+- [ ] First complete assistant text block posts once.
+- [ ] Final assistant text block posts once after agent terminal status.
+- [ ] If first and final text match, only one reply is posted.
 
 **Done when**
 
-- [ ] A real office-agent turn posts exactly one final assistant reply in the Slack thread, with no intermediate/native-streaming message. _Code path implemented; pending Slack manual test._
+- [ ] A real office-agent turn posts first + final assistant replies in the Slack thread, with no intermediate/native-streaming message. _Code path implemented; pending Slack manual test._
 
 ### Slice 4 — Permissions + questions
 
@@ -201,11 +182,11 @@ attached.
 
 **Change map**
 
-| File              | Change                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `index.ts`        | construct `Chat` with the file-backed `StateAdapter` + `@chat-adapter/slack`, `concurrency: "queue"`; register `onNewMention`/`onDirectMessage`/`onSubscribedMessage` → `bridge.handleMessage`                                                                                                                                                                                                         |
-| `bridge.ts`       | `handleMessage`: dedup on `eventId`; `thread.subscribe()`; new-thread vs follow-up; resolve sender identity; create workspace+agent or `sendAgentMessage`; persist `ThreadSession`; `:eyes:` reaction + "task started" card; set `activeRelayId`, start a background relay that drains `turnStream(focusedAgentId)` internally, then post one final assistant reply only if the relay is still current |
-| `intake/slack.ts` | channel-vs-DM gates, mentions-other-user filter, ambient-message gate, attribution strip, bot mention strip, other-user mention resolution, thread-context capture (~30 msgs/8k chars), sender resolution (`user` id → name/handle, cached), mute/`aside -` parsing                                                                                                                                    |
+| File              | Change                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`        | construct `Chat` with the file-backed `StateAdapter` + `@chat-adapter/slack`, `concurrency: "queue"`; register `onNewMention`/`onDirectMessage`/`onSubscribedMessage` → `bridge.handleMessage`                                                                                                                                                                                     |
+| `bridge.ts`       | `handleMessage`: dedup on `eventId`; `thread.subscribe()`; new-thread vs follow-up; resolve sender identity; create workspace+agent or `sendAgentMessage`; persist `ThreadSession`; `:eyes:` reaction + "task started" card; set `activeRelayId`, start a background relay that polls projected timeline and posts first + final assistant text only if the relay is still current |
+| `intake/slack.ts` | channel-vs-DM gates, mentions-other-user filter, ambient-message gate, attribution strip, bot mention strip, other-user mention resolution, thread-context capture (~30 msgs/8k chars), sender resolution (`user` id → name/handle, cached), mute/`aside -` parsing                                                                                                                |
 
 **Sketch**
 
@@ -266,16 +247,14 @@ completion; one child at a time; escape hatch.
 **Files**
 
 - `packages/chat/src/focus.ts`
-- `packages/chat/src/turn-stream.ts` (source switch)
-- `packages/chat/src/bridge.ts` (escape-hatch reply handling)
+- `packages/chat/src/bridge.ts` (escape-hatch reply handling and timeline relay target)
 
 **Change map**
 
-| File             | Change                                                                                                                                                                                                                                                                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `focus.ts`       | watch `agent_update` where `parentAgentId === rootAgentId`; if no child currently focused, set `focusedAgentId = childId`, stamp `paseo.chat-thread-id`, post a "🔧 handed off to `<worktree>`" divider; ignore a second concurrent child; on child terminal state set `focusedAgentId = rootAgentId` and post the child's summary |
-| `turn-stream.ts` | allow the streamed source to switch mid-iteration when focus changes                                                                                                                                                                                                                                                               |
-| `bridge.ts`      | detect `@cto ↑` reply → pop focus to `rootAgentId` without stopping the child                                                                                                                                                                                                                                                      |
+| File        | Change                                                                                                                                                                                                                                                                                                                             |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `focus.ts`  | watch `agent_update` where `parentAgentId === rootAgentId`; if no child currently focused, set `focusedAgentId = childId`, stamp `paseo.chat-thread-id`, post a "🔧 handed off to `<worktree>`" divider; ignore a second concurrent child; on child terminal state set `focusedAgentId = rootAgentId` and post the child's summary |
+| `bridge.ts` | detect `@cto ↑` reply → pop focus to `rootAgentId` without stopping the child; poll the current `focusedAgentId` timeline for output                                                                                                                                                                                               |
 
 **Tests**
 
@@ -369,13 +348,17 @@ completion; one child at a time; escape hatch.
 - `package.json`, `package-lock.json` — added `packages/chat` workspace and `build:chat`.
 - `packages/chat/package.json`, `packages/chat/tsconfig.json`, `packages/chat/README.md` — new package scaffold and operator setup docs.
 - `packages/chat/src/config.ts`, `paseo-client.ts`, `index.ts` — boot/config/daemon connection/Chat SDK Slack wiring.
-- `packages/chat/src/bridge.ts`, `prompt.ts`, `turn-stream.ts`, `render.ts`, `focus.ts`, `permissions.ts` — intake-to-agent flow, streaming, prompt assembly, subagent focus relay, permission handling.
+- `packages/chat/src/bridge.ts`, `prompt.ts`, `render.ts`, `focus.ts`, `permissions.ts` — intake-to-agent flow, timeline-polled output relay, prompt assembly, subagent focus relay, permission handling.
 - `packages/chat/src/intake/slack.ts` — Slack message normalization, commands, context capture, image attachments, sender identity.
 - `packages/chat/src/state/json-state.ts`, `thread-session-store.ts`, `chat-state-adapter.ts` — durable state, dedup/delivery receipts, Chat SDK state adapter.
 
 ## Follow-ups (v2+, do not scope-creep into v1)
 
+- Agent-initiated chat tools and outbound bindings: `chat.startConversation`, `chat.askPerson`,
+  `chat.askChannel`, `chat.reply`.
+- Handoff card with a **Back to office agent** button for focus transitions.
 - `inbound-http.ts` + GitHub PR-merge webhook + Resend email intake.
 - Remote mode (relay + E2EE), second Chat SDK adapter (Discord/Telegram).
 - Optional multi-repo routing (intake profiles + LLM classification).
-- Outbound file attachments; concurrency caps; per-channel access policy.
+- Outbound file attachments; concurrency caps; per-channel access policy; richer remote-safe people
+  directory sync and ask timeout/cancel semantics.

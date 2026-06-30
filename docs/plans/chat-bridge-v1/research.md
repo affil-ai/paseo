@@ -80,9 +80,8 @@ turn_canceled`. `turnId` is stripped at the wire — group by start/end stream e
 
 - All Slack I/O via `chat` + `@chat-adapter/slack`. Callbacks: `bot.onNewMention`,
   `bot.onDirectMessage`, `bot.onSubscribedMessage`. Reactions via `sentMessage.addReaction` /
-  `adapter.addReaction`. Streaming via `thread.post(asyncIterable)` yielding `StreamChunk`
-  (`markdown_text` / `task_update` / `plan_update`); `StreamingPlan` for grouping + `endWith`
-  buttons.
+  `adapter.addReaction`. Assistant replies use normal `thread.post({ markdown })` /
+  `adapter.postMessage(...)` calls; do not use Chat SDK native streaming for v1.
 - **Concurrency:** construct the bot with `concurrency: "queue"` (serial per thread, parallel
   across threads).
 - **Dedup:** Chat SDK `dedupeTtlMs` (~10 min) + our own event-receipt keys.
@@ -111,6 +110,6 @@ turn_canceled`. `turnId` is stripped at the wire — group by start/end stream e
 ## Recommended direction
 
 Build the bridge as the thin transport adapter described in `docs/chat-bridge.md`: a
-`DaemonClient` over `127.0.0.1`, Chat SDK over Socket Mode, file-backed state, and four glue
-modules (turn-stream, render, permissions, focus). Everything intelligent lives in the office
-agent and its prompt.
+`DaemonClient` over `127.0.0.1`, Chat SDK over Socket Mode, file-backed state, and glue modules
+for timeline polling, Slack rendering, permissions, and focus. Everything intelligent lives in
+the office agent and its prompt.
