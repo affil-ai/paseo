@@ -40,7 +40,7 @@ import {
 import { useStatusModeWorkspacePlacements } from "@/hooks/use-status-mode-workspaces";
 import { useSidebarViewStore, type SidebarGroupMode } from "@/stores/sidebar-view-store";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
-import { useHosts } from "@/runtime/host-runtime";
+import { readInitialDaemonConnectionHint, useHosts } from "@/runtime/host-runtime";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -443,6 +443,7 @@ function SidebarFooter({
   handleOpenHostSettings: (serverId: string) => void;
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
+  const authenticatedUserEmail = readInitialDaemonConnectionHint()?.authenticatedUserEmail ?? null;
 
   return (
     <View style={styles.sidebarFooter}>
@@ -480,6 +481,11 @@ function SidebarFooter({
           icon={Settings}
           theme={theme}
         />
+        {authenticatedUserEmail ? (
+          <Text style={styles.footerUserEmail} numberOfLines={1} selectable={false}>
+            {authenticatedUserEmail}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -1082,7 +1088,7 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    flexShrink: 0,
+    flex: 1,
   },
   footerIconButton: {
     width: 28,
@@ -1091,6 +1097,11 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     paddingVertical: theme.spacing[1],
     paddingHorizontal: theme.spacing[1],
+  },
+  footerUserEmail: {
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
   },
   tooltipRow: {
     flexDirection: "row",

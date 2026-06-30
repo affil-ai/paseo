@@ -1285,6 +1285,7 @@ const INITIAL_DAEMON_CONNECTION_HINT_GLOBAL_KEY = "__PASEO_INITIAL_DAEMON_CONNEC
 export interface InitialDaemonConnectionHint {
   listen: string;
   useTls?: boolean;
+  authenticatedUserEmail?: string;
 }
 
 function isInitialConnectionHintRecord(value: unknown): value is Record<string, unknown> {
@@ -1306,9 +1307,12 @@ export function readInitialDaemonConnectionHint(input?: {
   if (!listen) {
     return null;
   }
+  const authenticatedUserEmail =
+    typeof value.authenticatedUserEmail === "string" ? value.authenticatedUserEmail.trim() : "";
   return {
     listen,
     useTls: value.useTls === true,
+    ...(authenticatedUserEmail ? { authenticatedUserEmail } : {}),
   };
 }
 
