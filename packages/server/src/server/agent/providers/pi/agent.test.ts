@@ -22,6 +22,8 @@ const EMPTY_GLOBAL_MCP_CONFIG_PATH = path.join(
   mkdtempSync(path.join(tmpdir(), "paseo-pi-empty-global-mcp-")),
   "mcp.json",
 );
+const PASEO_PI_ACK_BEFORE_TOOLS_PROMPT =
+  "For each new user request, if tool use is needed, emit a concise user-visible acknowledgement before your first tool call. Do not acknowledge before later tool calls in the same request.";
 
 function createClient(
   pi = new FakePi(),
@@ -608,6 +610,7 @@ describe("PiRpcAgentSession", () => {
     expect(actualLaunch).toMatchObject({
       cwd: "/workspace/project",
       session: "/tmp/native-pi-session",
+      systemPrompt: PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
     });
     expect(actualLaunch.extensionPaths).toHaveLength(1);
     expect(actualLaunch.argv).toEqual([
@@ -620,6 +623,8 @@ describe("PiRpcAgentSession", () => {
       "high",
       "--session",
       "/tmp/native-pi-session",
+      "--append-system-prompt",
+      PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
       "--extension",
       actualLaunch.extensionPaths[0],
     ]);
@@ -636,10 +641,11 @@ describe("PiRpcAgentSession", () => {
       }),
     );
 
+    const expectedPrompt = `Agent prompt\n\nDaemon prompt\n\n${PASEO_PI_ACK_BEFORE_TOOLS_PROMPT}`;
     const actualLaunch = pi.recordedLaunches[0]!;
     expect(actualLaunch).toMatchObject({
       cwd: "/tmp/paseo-pi-rpc-test",
-      systemPrompt: "Agent prompt\n\nDaemon prompt",
+      systemPrompt: expectedPrompt,
     });
     expect(actualLaunch.extensionPaths).toHaveLength(1);
     expect(actualLaunch.argv).toEqual([
@@ -649,7 +655,7 @@ describe("PiRpcAgentSession", () => {
       "--thinking",
       "medium",
       "--append-system-prompt",
-      "Agent prompt\n\nDaemon prompt",
+      expectedPrompt,
       "--extension",
       actualLaunch.extensionPaths[0],
     ]);
@@ -676,12 +682,13 @@ describe("PiRpcAgentSession", () => {
       },
     );
 
+    const expectedPrompt = `Agent prompt\n\nDaemon prompt\n\n${PASEO_PI_ACK_BEFORE_TOOLS_PROMPT}`;
     expect(pi.recordedLaunches).toHaveLength(1);
     const actualLaunch = pi.recordedLaunches[0]!;
     expect(actualLaunch).toMatchObject({
       cwd: "/workspace/project",
       session: "/tmp/native-pi-session",
-      systemPrompt: "Agent prompt\n\nDaemon prompt",
+      systemPrompt: expectedPrompt,
     });
     expect(actualLaunch.extensionPaths).toHaveLength(1);
     expect(actualLaunch.argv).toEqual([
@@ -695,7 +702,7 @@ describe("PiRpcAgentSession", () => {
       "--session",
       "/tmp/native-pi-session",
       "--append-system-prompt",
-      "Agent prompt\n\nDaemon prompt",
+      expectedPrompt,
       "--extension",
       actualLaunch.extensionPaths[0],
     ]);
@@ -912,6 +919,8 @@ describe("PiRpcAgentClient", () => {
       "high",
       "--session",
       sessionFile,
+      "--append-system-prompt",
+      PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
       "--extension",
       actualLaunch.extensionPaths[0],
     ]);
@@ -1245,6 +1254,8 @@ describe("PiRpcAgentClient", () => {
       "rpc",
       "--thinking",
       "medium",
+      "--append-system-prompt",
+      PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
       "--mcp-config",
       actualLaunch.mcpConfigPath,
       "--extension",
@@ -1382,6 +1393,8 @@ describe("PiRpcAgentClient", () => {
       "rpc",
       "--thinking",
       "medium",
+      "--append-system-prompt",
+      PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
       "--extension",
       actualLaunch.extensionPaths[0],
     ]);
