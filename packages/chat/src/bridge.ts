@@ -1,12 +1,13 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import {
   emoji,
   LinkButton,
   Actions,
   Card,
+  type Adapter,
   type AdapterPostableMessage,
   type Message,
-  type StreamChunk,
   type Thread,
 } from "chat";
 import type { ChatBridgeConfig } from "./config.js";
@@ -20,8 +21,11 @@ import {
 import { assembleFollowupPrompt, assembleInitialPrompt, loadOfficePrompt } from "./prompt.js";
 import { slackMarkdownFixups } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
-import { CHAT_THREAD_LABEL, ThreadSessionStore } from "./state/thread-session-store.js";
-import { turnStream } from "./turn-stream.js";
+import {
+  CHAT_THREAD_LABEL,
+  ThreadSessionStore,
+  type ThreadSession,
+} from "./state/thread-session-store.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,6 +40,7 @@ export class ChatBridge {
     private readonly store: ThreadSessionStore,
     private readonly permissions: PermissionBridge,
     private readonly focus: FocusRelay,
+    private readonly fallbackAdapter?: Pick<Adapter, "postMessage">,
   ) {
     this.customOfficePrompt = loadOfficePrompt(config);
   }
@@ -44,6 +49,47 @@ export class ChatBridge {
 
   getThread(externalThreadId: string): Thread | null {
     return this.threads.get(externalThreadId) ?? null;
+  }
+
+  async handleAgentTurnStarted(agentId: string, eventSeq?: number): Promise<void> {
+    const session = await this.findLinkedSessionForAgent(agentId);
+    if (!session) return;
+    const thread = this.getThread(session.externalThreadId);
+    if (!thread && !this.fallbackAdapter) return;
+    if (session.activeRelayId) return;
+
+    const relayId = `ui:${agentId}:${eventSeq ?? Date.now()}`;
+    const sinceSeq = await this.getTimelineNextSeq(agentId);
+    await this.store.updateSession(session.externalThreadId, (current) => {
+      if (current.activeRelayId) return current;
+      current.activeRelayId = relayId;
+    });
+    if (!(await this.isRelayCurrent(session.externalThreadId, relayId))) return;
+
+    this.startBackgroundRelay({
+      thread,
+      externalThreadId: session.externalThreadId,
+      agentId,
+      messageId: relayId,
+      source: "ui",
+      sinceSeq,
+      relayId,
+    });
+  }
+
+  private async findLinkedSessionForAgent(agentId: string): Promise<ThreadSession | null> {
+    const directSession = await this.store.findSessionByAgent(agentId);
+    if (directSession) return directSession;
+
+    const result = await this.client.fetchAgent(agentId).catch(() => null);
+    const labels = result?.agent.labels ?? {};
+    const externalThreadId = labels[CHAT_THREAD_LABEL];
+    if (externalThreadId) return this.store.getSession(externalThreadId);
+
+    const parentAgentId = getParentAgentIdFromLabels(labels);
+    if (!parentAgentId) return null;
+    const sessions = Object.values((await this.store.load()).sessions);
+    return sessions.find((session) => session.rootAgentId === parentAgentId) ?? null;
   }
 
   async handleMessage(
@@ -221,7 +267,7 @@ export class ChatBridge {
   }
 
   private startBackgroundRelay(input: {
-    thread: Thread;
+    thread: Thread | null;
     externalThreadId: string;
     agentId: string;
     messageId: string;
@@ -242,7 +288,7 @@ export class ChatBridge {
   }
 
   private async relayTurn(input: {
-    thread: Thread;
+    thread: Thread | null;
     externalThreadId: string;
     agentId: string;
     messageId: string;
@@ -250,35 +296,33 @@ export class ChatBridge {
     sinceSeq: number;
     relayId: string;
   }): Promise<void> {
-    const receipt = `slack:${input.externalThreadId}:${input.messageId}:${input.source}:stream`;
+    const receipt = `slack:${input.externalThreadId}:${input.messageId}:${input.source}:turn`;
     if (!(await this.store.markDeliveryStarted(receipt))) return;
 
-    const streamedAssistantText = await this.drainTurnStream(
-      turnStream(this.client, {
-        externalThreadId: input.externalThreadId,
-        agentId: input.agentId,
-        showReasoning: this.config.showReasoning,
-        store: this.store,
-        focus: this.focus,
-        thread: input.thread,
-      }),
-    );
-
-    if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) {
-      await this.store.markDeliveryCompleted(receipt);
-      return;
-    }
-
-    const finalText = await this.waitForFinalAssistantText(input.agentId, input.sinceSeq);
-    if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) {
-      await this.store.markDeliveryCompleted(receipt);
-      return;
-    }
-
-    const replyText = finalText || streamedAssistantText || "Done.";
-    await this.postMessage(input.thread, input.externalThreadId, {
-      markdown: slackMarkdownFixups(replyText),
+    const firstReply = { text: null as string | null };
+    const finalText = await this.waitForAssistantTextBlocks({
+      agentId: input.agentId,
+      sinceSeq: input.sinceSeq,
+      externalThreadId: input.externalThreadId,
+      relayId: input.relayId,
+      onFirstText: async (text) => {
+        firstReply.text = text;
+        await this.postMessage(input.thread, input.externalThreadId, {
+          markdown: slackMarkdownFixups(text),
+        });
+      },
     });
+    if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) {
+      await this.store.markDeliveryCompleted(receipt);
+      return;
+    }
+
+    const replyText = finalText || "Done.";
+    if (replyText.trim() !== firstReply.text?.trim()) {
+      await this.postMessage(input.thread, input.externalThreadId, {
+        markdown: slackMarkdownFixups(replyText),
+      });
+    }
 
     await this.store.updateSession(input.externalThreadId, (current) => {
       if (current.activeRelayId === input.relayId) current.activeRelayId = null;
@@ -291,14 +335,52 @@ export class ChatBridge {
     return session?.activeRelayId === relayId;
   }
 
-  private async drainTurnStream(stream: AsyncIterable<StreamChunk>): Promise<string> {
-    let assistantText = "";
-    for await (const chunk of stream) {
-      // Intentionally drained for lifecycle/focus side effects only. Slack should get one final
-      // assistant reply, not intermediate streamed/partial messages.
-      if (chunk.type === "markdown_text") assistantText += chunk.text;
+  private async waitForAssistantTextBlocks(input: {
+    agentId: string;
+    sinceSeq: number;
+    externalThreadId: string;
+    relayId: string;
+    onFirstText: (text: string) => Promise<void>;
+  }): Promise<string> {
+    let firstTextPosted = false;
+    let finalText = "";
+
+    while (await this.isRelayCurrent(input.externalThreadId, input.relayId)) {
+      const timeline = await this.client.fetchAgentTimeline(input.agentId, {
+        direction: "tail",
+        projection: "projected",
+        limit: 200,
+      });
+      const assistantEntries = timeline.entries.filter(
+        (entry) => entry.seqStart >= input.sinceSeq && entry.item.type === "assistant_message",
+      );
+
+      const firstEntry = assistantEntries[0];
+      if (!firstTextPosted && firstEntry?.item.type === "assistant_message") {
+        const firstText = firstEntry.item.text.trim();
+        const firstEntryIndex = timeline.entries.findIndex(
+          (entry) => entry.seqStart === firstEntry.seqStart,
+        );
+        const firstBlockClosed =
+          firstEntryIndex >= 0 && firstEntryIndex < timeline.entries.length - 1;
+        const status = timeline.agent?.status;
+        const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
+        if (firstText && (firstBlockClosed || agentStopped)) {
+          firstTextPosted = true;
+          await input.onFirstText(firstText);
+        }
+      }
+
+      const lastEntry = assistantEntries.at(-1);
+      finalText =
+        lastEntry?.item.type === "assistant_message" ? lastEntry.item.text.trim() : finalText;
+
+      const status = timeline.agent?.status;
+      if (status && status !== "initializing" && status !== "running") return finalText;
+      await sleep(1_000);
     }
-    return assistantText.trim();
+
+    return finalText;
   }
 
   private async getTimelineNextSeq(agentId: string): Promise<number> {
@@ -333,14 +415,16 @@ export class ChatBridge {
   }
 
   private async postMessage(
-    thread: Thread,
+    thread: Thread | null,
     externalThreadId: string,
     message: string | AdapterPostableMessage,
   ): Promise<void> {
-    if (thread.id === externalThreadId) {
+    if (thread?.id === externalThreadId) {
       await thread.post(message);
       return;
     }
-    await thread.adapter.postMessage(externalThreadId, message);
+    const adapter = thread?.adapter ?? this.fallbackAdapter;
+    if (!adapter) throw new Error("No Slack adapter available to post linked thread response");
+    await adapter.postMessage(externalThreadId, message);
   }
 }

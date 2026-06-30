@@ -1984,6 +1984,18 @@ describe("readInitialDaemonConnectionHint", () => {
     });
   });
 
+  it("preserves Cloudflare Access user email when present", () => {
+    (globalThis as Record<string, unknown>).__PASEO_INITIAL_DAEMON_CONNECTION__ = {
+      listen: "paseo.example.com:443",
+      authenticatedUserEmail: " user@affil.ai ",
+    };
+    expect(readInitialDaemonConnectionHint({ isWebRuntime: true })).toEqual({
+      listen: "paseo.example.com:443",
+      useTls: false,
+      authenticatedUserEmail: "user@affil.ai",
+    });
+  });
+
   it("ignores invalid shapes", () => {
     (globalThis as Record<string, unknown>).__PASEO_INITIAL_DAEMON_CONNECTION__ = "localhost:6767";
     expect(readInitialDaemonConnectionHint({ isWebRuntime: true })).toBeNull();

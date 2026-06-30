@@ -95,6 +95,8 @@ const QUESTION_COMMENT_HEADER = "Comment";
 const PI_ASK_USER_FREEFORM_SENTINEL = "✏️ Type custom response...";
 const COMBINED_ASK_USER_METADATA = "ask_user_select_optional_comment";
 const PI_GLOBAL_MCP_CONFIG_PATH = join(homedir(), ".pi", "agent", "mcp.json");
+const PASEO_PI_ACK_BEFORE_TOOLS_PROMPT =
+  "For each new user request, if tool use is needed, emit a concise user-visible acknowledgement before your first tool call. Do not acknowledge before later tool calls in the same request.";
 
 const PiGlobalMcpConfigSchema = z
   .object({
@@ -1940,6 +1942,7 @@ export class PiRpcAgentClient implements AgentClient {
         systemPrompt: composeSystemPromptParts(
           config.systemPrompt,
           config.daemonAppendSystemPrompt,
+          PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
         ),
         env: launchContext?.env,
         mcpConfigPath: mcpConfig?.path,
@@ -1992,6 +1995,7 @@ export class PiRpcAgentClient implements AgentClient {
         systemPrompt: composeSystemPromptParts(
           resumeConfig.config.systemPrompt,
           resumeConfig.config.daemonAppendSystemPrompt,
+          PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
         ),
         mcpConfigPath: mcpConfig?.path,
         extensionPaths: [paseoExtension.path],

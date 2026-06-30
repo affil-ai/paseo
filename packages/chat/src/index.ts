@@ -16,14 +16,13 @@ export async function main(): Promise<void> {
   const chatState = new FileChatStateAdapter(config.stateDir);
   const permissions = new PermissionBridge(client, state);
   const focus = new FocusRelay(client, state);
-  const bridge = new ChatBridge(config, client, state, permissions, focus);
-
   const slack = createSlackAdapter({
     mode: config.slackMode === "http" ? "webhook" : "socket",
     botToken: process.env.SLACK_BOT_TOKEN,
     appToken: process.env.SLACK_APP_TOKEN,
     signingSecret: process.env.SLACK_SIGNING_SECRET,
   });
+  const bridge = new ChatBridge(config, client, state, permissions, focus, slack);
   const chat = new Chat({
     adapters: { slack },
     state: chatState,
@@ -40,6 +39,11 @@ export async function main(): Promise<void> {
   chat.onSubscribedMessage((thread, message) =>
     bridge.handleMessage(thread, message, "subscribed"),
   );
+
+  client.on("agent_stream", async (message) => {
+    if (message.payload.event.type !== "turn_started") return;
+    await bridge.handleAgentTurnStarted(message.payload.agentId, message.payload.seq);
+  });
 
   client.on("agent_permission_request", async (message) => {
     const session = await state.findSessionByAgent(message.payload.agentId);
