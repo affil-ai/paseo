@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRenderedMarkdownFile } from "@/components/file-pane-render-mode";
+import { isRenderedHtmlFile, isRenderedMarkdownFile } from "@/components/file-pane-render-mode";
 
 describe("isRenderedMarkdownFile", () => {
   it("detects .md files", () => {
@@ -19,5 +19,18 @@ describe("isRenderedMarkdownFile", () => {
   it("does not treat other text files as rendered markdown", () => {
     expect(isRenderedMarkdownFile("src/index.ts")).toBe(false);
     expect(isRenderedMarkdownFile("README.md.txt")).toBe(false);
+  });
+});
+
+describe("isRenderedHtmlFile", () => {
+  it("detects .html and .htm files", () => {
+    expect(isRenderedHtmlFile("artifact.html")).toBe(true);
+    expect(isRenderedHtmlFile("reports/demo.HTM")).toBe(true);
+  });
+
+  it("does not treat lookalike paths as rendered HTML", () => {
+    expect(isRenderedHtmlFile("artifact.xhtml")).toBe(false);
+    expect(isRenderedHtmlFile("artifact.html.txt")).toBe(false);
+    expect(isRenderedHtmlFile("src/index.ts")).toBe(false);
   });
 });
