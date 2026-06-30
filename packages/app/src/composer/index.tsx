@@ -233,13 +233,10 @@ function renderContextWindowMeter(
   );
 }
 
-function resolveContextWindowPlacement(
-  meter: ReactElement | null,
-  isMobile: boolean,
-): { beforeVoiceContent: ReactNode; footerInlineContent: ReactNode } {
-  if (isMobile) {
-    return { beforeVoiceContent: null, footerInlineContent: meter };
-  }
+function resolveContextWindowPlacement(meter: ReactElement | null): {
+  beforeVoiceContent: ReactNode;
+  footerInlineContent: ReactNode;
+} {
   return {
     beforeVoiceContent: <View style={styles.contextWindowMeterSlot}>{meter}</View>,
     footerInlineContent: null,
@@ -1696,8 +1693,8 @@ export function Composer({
     ],
   );
   const { beforeVoiceContent, footerInlineContent } = useMemo(
-    () => resolveContextWindowPlacement(contextWindowMeter, isCompactLayout),
-    [contextWindowMeter, isCompactLayout],
+    () => resolveContextWindowPlacement(contextWindowMeter),
+    [contextWindowMeter],
   );
 
   const githubSearchQueryTrimmed = githubSearchQuery.trim();
@@ -2084,7 +2081,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[1],
   },
   contextWindowMeterSlot: {
-    width: 28,
     height: 28,
     alignItems: "center",
     justifyContent: "center",

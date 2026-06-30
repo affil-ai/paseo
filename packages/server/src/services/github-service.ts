@@ -43,6 +43,7 @@ const GitHubPullRequestSummarySchema = z.object({
   headRefName: z.string().catch(""),
   labels: z.array(LabelSchema).catch([]),
   updatedAt: z.string().catch(""),
+  isDraft: z.boolean().catch(false),
 });
 
 const PullRequestCheckRunNodeSchema = z.object({
@@ -519,6 +520,7 @@ export interface GitHubPullRequestSummary {
   headRefName: string;
   labels: string[];
   updatedAt: string;
+  isDraft: boolean;
 }
 
 export interface GitHubPullRequestCheckoutTarget {
@@ -779,6 +781,7 @@ export interface GitHubSearchResult {
     baseRefName?: string | null;
     headRefName?: string | null;
     updatedAt?: string;
+    isDraft?: boolean;
   }>;
   githubFeaturesEnabled: boolean;
 }
@@ -1111,7 +1114,7 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
               "--search",
               input.query ?? "",
               "--json",
-              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt",
+              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
               "--limit",
               String(input.limit ?? 20),
             ],
@@ -1160,7 +1163,7 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
               "view",
               String(input.number),
               "--json",
-              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt",
+              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
             ],
             { cwd: input.cwd },
           );
@@ -1446,6 +1449,7 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
             baseRefName: item.baseRefName,
             headRefName: item.headRefName,
             updatedAt: item.updatedAt,
+            isDraft: item.isDraft,
           });
         }
       }
@@ -2203,6 +2207,7 @@ function toPullRequestSummary(
     headRefName: item.headRefName,
     labels: item.labels.map((label) => label.name ?? "").filter((name) => name.length > 0),
     updatedAt: item.updatedAt,
+    isDraft: item.isDraft,
   };
 }
 

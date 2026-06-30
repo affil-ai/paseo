@@ -71,7 +71,6 @@ export const ptBR: TranslationResources = {
     },
     input: {
       accessibilityLabel: "Enviar mensagem ao agente...",
-      focusHint: "{{shortcut}} para focar",
       addAttachment: "Adicionar anexo",
       interruptAgent: "Interromper agente",
       queueMessage: "Enfileirar mensagem",
@@ -783,6 +782,7 @@ export const ptBR: TranslationResources = {
     },
     sections: {
       sessions: "Histórico",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Configurar scripts de worktree",
@@ -1608,7 +1608,6 @@ export const ptBR: TranslationResources = {
         toggleSettings: "Alternar Configurações",
         toggleFocusMode: "Alternar modo de foco",
         cycleTheme: "Alternar tema",
-        focusMessageInput: "Focar entrada de mensagem",
         cycleAgentMode: "Alternar modo do agente",
         toggleVoiceMode: "Alternar modo de voz",
         startStopDictation: "Iniciar/parar ditado",

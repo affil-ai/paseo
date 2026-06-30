@@ -415,6 +415,10 @@ export function buildSessionsRoute() {
   return "/sessions" as const;
 }
 
+export function buildDashboardRoute() {
+  return "/dashboard" as const;
+}
+
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }

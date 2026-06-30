@@ -54,8 +54,7 @@ import { useDismissKeyboardOnOpen } from "@/components/ui/keyboard-dismiss";
 import { useWebElementScrollbar } from "@/components/use-web-scrollbar";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { useIosHardwareKeyboardSubmit } from "@/hooks/use-ios-hardware-keyboard-submit";
-import { formatShortcut, type ShortcutKey } from "@/utils/format-shortcut";
-import { getShortcutOs } from "@/utils/shortcut-platform";
+import type { ShortcutKey } from "@/utils/format-shortcut";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { isWeb } from "@/constants/platform";
@@ -721,23 +720,6 @@ function MessageInputOverlay({
   return null;
 }
 
-function FocusHint({
-  visible,
-  focusInputKeys,
-  label,
-}: {
-  visible: boolean;
-  focusInputKeys: ShortcutChord | null | undefined;
-  label: string;
-}) {
-  if (!visible || !focusInputKeys || !label.trim()) return null;
-  return (
-    <Text style={styles.focusHintText} pointerEvents="none">
-      {label}
-    </Text>
-  );
-}
-
 function VoiceButtonTooltip({
   onVoicePress,
   isDictationStartEnabled,
@@ -1252,7 +1234,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       autoFocus,
       autoFocusKey,
       disabled,
-      isPaneFocused,
       leftContent,
       beforeVoiceContent,
       rightContent,
@@ -1278,7 +1259,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const voice = useVoiceOptional();
     const voiceMuteToggleKeys = useShortcutKeys("voice-mute-toggle");
     const dictationToggleKeys = useShortcutKeys("dictation-toggle");
-    const focusInputKeys = useShortcutKeys("focus-message-input");
     const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
     const [isInputFocused, setIsInputFocused] = useState(false);
     const rootRef = useRef<View | null>(null);
@@ -1843,13 +1823,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               autoFocus={isWeb && autoFocus}
             />
             {inputScrollbar}
-            <FocusHint
-              visible={isWeb && isPaneFocused && !isInputFocused && !value}
-              focusInputKeys={focusInputKeys}
-              label={t("composer.input.focusHint", {
-                shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
-              })}
-            />
           </View>
 
           {/* Button row */}
@@ -1954,14 +1927,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   textInputScrollWrapper: {
     position: "relative",
-  },
-  focusHintText: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    opacity: 0.5,
   },
   textInput: {
     width: "100%",

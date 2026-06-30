@@ -1622,6 +1622,8 @@ export const GitHubSearchItemSchema = z.object({
   baseRefName: z.string().nullable().optional(),
   headRefName: z.string().nullable().optional(),
   updatedAt: z.string().optional(),
+  // COMPAT(githubSearchIsDraft): added in v0.1.103, drop the optional gate when floor >= v0.1.103.
+  isDraft: z.boolean().optional(),
 });
 
 export const GitHubSearchKindSchema = z.enum(["github-issue", "github-pr"]);

@@ -71,7 +71,6 @@ export const es: TranslationResources = {
     },
     input: {
       accessibilityLabel: "Agente de mensajes...",
-      focusHint: "{{shortcut}}para enfocar",
       addAttachment: "Agregar archivo adjunto",
       interruptAgent: "agente de interrupción",
       queueMessage: "mensaje de cola",
@@ -792,6 +791,7 @@ export const es: TranslationResources = {
     },
     sections: {
       sessions: "Historial",
+      dashboard: "Dashboard",
     },
     worktreeSetup: {
       title: "Configurar secuencias de comandos del árbol de trabajo",
@@ -1624,7 +1624,6 @@ export const es: TranslationResources = {
         toggleSettings: "Alternar configuración",
         toggleFocusMode: "Alternar modo de enfoque",
         cycleTheme: "Tema del ciclo",
-        focusMessageInput: "Entrada de mensaje de enfoque",
         cycleAgentMode: "Alternar modo del agente",
         toggleVoiceMode: "Alternar modo de voz",
         startStopDictation: "Iniciar dictado/stop",

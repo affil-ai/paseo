@@ -2721,6 +2721,7 @@ describe("GitHubService", () => {
           headRefName: "feature",
           labels: ["bug"],
           updatedAt: "",
+          isDraft: false,
         },
       ],
       [
@@ -2734,6 +2735,7 @@ describe("GitHubService", () => {
           headRefName: "feature",
           labels: ["bug"],
           updatedAt: "",
+          isDraft: false,
         },
       ],
     ]);
@@ -2842,6 +2844,7 @@ describe("GitHubService", () => {
           baseRefName: "main",
           headRefName: "feature",
           updatedAt: "2026-04-18T13:00:00Z",
+          isDraft: false,
         },
         {
           kind: "issue",
@@ -2880,7 +2883,7 @@ describe("GitHubService", () => {
           "--search",
           "cache",
           "--json",
-          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt",
+          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
           "--limit",
           "5",
         ],
@@ -2919,7 +2922,7 @@ describe("GitHubService", () => {
         "--search",
         "793",
         "--json",
-        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt",
+        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
         "--limit",
         "5",
       ],
@@ -2955,6 +2958,7 @@ describe("GitHubService", () => {
           baseRefName: "main",
           headRefName: "feature",
           updatedAt: "2026-04-18T13:00:00Z",
+          isDraft: false,
         },
       ],
     });
@@ -2968,7 +2972,7 @@ describe("GitHubService", () => {
           "--search",
           "cache",
           "--json",
-          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt",
+          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
           "--limit",
           "5",
         ],

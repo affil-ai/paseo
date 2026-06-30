@@ -1,5 +1,15 @@
 import { router, usePathname } from "expo-router";
-import { FolderPlus, History, Home, Plus, Search, Server, Settings, X } from "lucide-react-native";
+import {
+  FolderPlus,
+  History,
+  Home,
+  LayoutDashboard,
+  Plus,
+  Search,
+  Server,
+  Settings,
+  X,
+} from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -52,6 +62,7 @@ import { canCloseLeftSidebarGesture } from "@/utils/sidebar-animation-state";
 import {
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
+  buildDashboardRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -88,6 +99,7 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
+  handleDashboard: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -102,6 +114,7 @@ interface SidebarLabels {
   switchHost: string;
   searchHosts: string;
   sessions: string;
+  dashboard: string;
   closeSidebar: string;
 }
 
@@ -222,6 +235,10 @@ export const LeftSidebar = memo(function LeftSidebar({
     router.push(buildSessionsRoute());
   }, []);
 
+  const handleDashboardNavigate = useCallback(() => {
+    router.push(buildDashboardRoute());
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -232,6 +249,7 @@ export const LeftSidebar = memo(function LeftSidebar({
       switchHost: t("sidebar.host.switchTitle"),
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
+      dashboard: t("sidebar.sections.dashboard"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -269,6 +287,7 @@ export const LeftSidebar = memo(function LeftSidebar({
         handleAddHost={handleAddHostMobile}
         handleOpenHostSettings={handleOpenHostSettingsMobile}
         handleViewMoreNavigate={handleViewMoreNavigate}
+        handleDashboard={handleDashboardNavigate}
       />
     );
   }
@@ -285,6 +304,7 @@ export const LeftSidebar = memo(function LeftSidebar({
       handleAddHost={handleAddHostDesktop}
       handleOpenHostSettings={handleOpenHostSettingsDesktop}
       handleViewMore={handleViewMoreNavigate}
+      handleDashboard={handleDashboardNavigate}
     />
   );
 });
@@ -517,9 +537,11 @@ function MobileSidebar({
   isOpen,
   closeSidebar,
   handleViewMoreNavigate,
+  handleDashboard,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const isSessionsActive = pathname.includes("/sessions");
+  const isDashboardActive = pathname.includes("/dashboard");
   const {
     translateX,
     backdropOpacity,
@@ -546,6 +568,13 @@ function MobileSidebar({
     closeSidebar();
     handleViewMoreNavigate();
   }, [backdropOpacity, closeSidebar, handleViewMoreNavigate, translateX, windowWidth]);
+
+  const handleDashboardPress = useCallback(() => {
+    translateX.value = -windowWidth;
+    backdropOpacity.value = 0;
+    closeSidebar();
+    handleDashboard();
+  }, [backdropOpacity, closeSidebar, handleDashboard, translateX, windowWidth]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -713,6 +742,14 @@ function MobileSidebar({
                 testID="sidebar-sessions"
                 variant="compact"
               />
+              <SidebarHeaderRow
+                icon={LayoutDashboard}
+                label={labels.dashboard}
+                onPress={handleDashboardPress}
+                isActive={isDashboardActive}
+                testID="sidebar-dashboard"
+                variant="compact"
+              />
             </View>
             <WorkspacesSectionHeader />
             <Pressable
@@ -794,9 +831,11 @@ function DesktopSidebar({
   insetsTop,
   isOpen,
   handleViewMore,
+  handleDashboard,
 }: DesktopSidebarProps) {
   const pathname = usePathname();
   const isSessionsActive = pathname.includes("/sessions");
+  const isDashboardActive = pathname.includes("/dashboard");
   const padding = useWindowControlsPadding("sidebar");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -876,6 +915,14 @@ function DesktopSidebar({
               onPress={handleViewMore}
               isActive={isSessionsActive}
               testID="sidebar-sessions"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={LayoutDashboard}
+              label={labels.dashboard}
+              onPress={handleDashboard}
+              isActive={isDashboardActive}
+              testID="sidebar-dashboard"
               variant="compact"
             />
           </View>
