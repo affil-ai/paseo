@@ -69,7 +69,6 @@ export const en = {
     },
     input: {
       accessibilityLabel: "Message agent...",
-      focusHint: "{{shortcut}} to focus",
       addAttachment: "Add attachment",
       interruptAgent: "Interrupt agent",
       queueMessage: "Queue message",
@@ -1593,7 +1592,6 @@ export const en = {
         toggleSettings: "Toggle settings",
         toggleFocusMode: "Toggle focus mode",
         cycleTheme: "Cycle theme",
-        focusMessageInput: "Focus message input",
         cycleAgentMode: "Cycle agent mode",
         toggleVoiceMode: "Toggle voice mode",
         startStopDictation: "Start/stop dictation",

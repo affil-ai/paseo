@@ -71,7 +71,6 @@ export const ar: TranslationResources = {
     },
     input: {
       accessibilityLabel: "وكيل الرسائل...",
-      focusHint: "{{shortcut}}للتركيز",
       addAttachment: "إضافة مرفق",
       interruptAgent: "عامل المقاطعة",
       queueMessage: "رسالة قائمة الانتظار",
@@ -1587,7 +1586,6 @@ export const ar: TranslationResources = {
         toggleSettings: "تبديل الإعدادات",
         toggleFocusMode: "تبديل وضع التركيز",
         cycleTheme: "موضوع الدورة",
-        focusMessageInput: "التركيز على إدخال الرسالة",
         cycleAgentMode: "تبديل وضع الوكيل",
         toggleVoiceMode: "تبديل الوضع الصوتي",
         startStopDictation: "بدء إملاء /stop",

@@ -72,7 +72,6 @@ export const fr: TranslationResources = {
     },
     input: {
       accessibilityLabel: "Agent de messagerie...",
-      focusHint: "{{shortcut}}pour se concentrer",
       addAttachment: "Ajouter une pièce jointe",
       interruptAgent: "Agent d'interruption",
       queueMessage: "Message de file d'attente",
@@ -1629,7 +1628,6 @@ export const fr: TranslationResources = {
         toggleSettings: "Basculer les paramètres",
         toggleFocusMode: "Basculer le mode de mise au point",
         cycleTheme: "Thème du cycle",
-        focusMessageInput: "Saisie du message de focus",
         cycleAgentMode: "Parcourir les modes de l'agent",
         toggleVoiceMode: "Changer le mode vocal",
         startStopDictation: "Démarrer la dictée/stop",

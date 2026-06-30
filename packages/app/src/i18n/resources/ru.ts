@@ -71,7 +71,6 @@ export const ru: TranslationResources = {
     },
     input: {
       accessibilityLabel: "Агент сообщений...",
-      focusHint: "{{shortcut}}, чтобы сосредоточиться",
       addAttachment: "Добавить вложение",
       interruptAgent: "Агент прерываний",
       queueMessage: "Сообщение в очереди",
@@ -1617,7 +1616,6 @@ export const ru: TranslationResources = {
         toggleSettings: "Переключить настройки",
         toggleFocusMode: "Переключить режим фокусировки",
         cycleTheme: "Циклическая тема",
-        focusMessageInput: "Фокус ввода сообщения",
         cycleAgentMode: "Переключить режим агента",
         toggleVoiceMode: "Переключить голосовой режим",
         startStopDictation: "Начать диктовку /stop",

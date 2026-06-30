@@ -71,7 +71,6 @@ export const zhCN: TranslationResources = {
     },
     input: {
       accessibilityLabel: "给 Agent 发消息...",
-      focusHint: "{{shortcut}} 聚焦",
       addAttachment: "添加附件",
       interruptAgent: "中断 Agent",
       queueMessage: "消息排队",
@@ -1568,7 +1567,6 @@ export const zhCN: TranslationResources = {
         toggleSettings: "切换设置",
         toggleFocusMode: "切换专注模式",
         cycleTheme: "循环切换主题",
-        focusMessageInput: "聚焦消息输入框",
         cycleAgentMode: "循环切换代理模式",
         toggleVoiceMode: "切换语音模式",
         startStopDictation: "开始/停止听写",

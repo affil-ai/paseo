@@ -151,7 +151,6 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "toggle-settings": "settings.shortcuts.help.toggleSettings",
   "toggle-focus": "settings.shortcuts.help.toggleFocusMode",
   "cycle-theme": "settings.shortcuts.help.cycleTheme",
-  "focus-message-input": "settings.shortcuts.help.focusMessageInput",
   "cycle-agent-mode": "settings.shortcuts.help.cycleAgentMode",
   "voice-toggle": "settings.shortcuts.help.toggleVoiceMode",
   "dictation-toggle": "settings.shortcuts.help.startStopDictation",
@@ -885,32 +884,6 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   },
 
   // --- Message input ---
-  {
-    id: "message-input-focus-cmd-l-mac",
-    action: "message-input.action",
-    combo: "Cmd+L",
-    when: { mac: true, commandCenter: false },
-    payload: { type: "message-input", kind: "focus" },
-    help: {
-      id: "focus-message-input",
-      section: "agent-input",
-      label: "Focus message input",
-      keys: ["mod", "L"],
-    },
-  },
-  {
-    id: "message-input-focus-ctrl-l-non-mac",
-    action: "message-input.action",
-    combo: "Ctrl+L",
-    when: { mac: false, commandCenter: false, terminal: false },
-    payload: { type: "message-input", kind: "focus" },
-    help: {
-      id: "focus-message-input",
-      section: "agent-input",
-      label: "Focus message input",
-      keys: ["mod", "L"],
-    },
-  },
   {
     id: "message-input-mode-cycle-shift-tab",
     action: "message-input.action",

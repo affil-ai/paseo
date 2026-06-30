@@ -71,7 +71,6 @@ export const ja: TranslationResources = {
     },
     input: {
       accessibilityLabel: "エージェントにメッセージ...",
-      focusHint: "{{shortcut}}でフォーカス",
       addAttachment: "添付ファイルを追加",
       interruptAgent: "エージェントを中断",
       queueMessage: "メッセージをキューに追加",
@@ -1603,7 +1602,6 @@ export const ja: TranslationResources = {
         toggleSettings: "設定を切り替え",
         toggleFocusMode: "フォーカスモードを切り替え",
         cycleTheme: "テーマを順に切り替え",
-        focusMessageInput: "メッセージ入力にフォーカス",
         cycleAgentMode: "エージェントモードを順に切り替え",
         toggleVoiceMode: "音声モードを切り替え",
         startStopDictation: "音声入力を開始/停止",
