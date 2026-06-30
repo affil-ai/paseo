@@ -20,7 +20,8 @@ import { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { lineNumberGutterWidth } from "@/components/code-insets";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
-import { isRenderedMarkdownFile } from "@/components/file-pane-render-mode";
+import { isRenderedHtmlFile, isRenderedMarkdownFile } from "@/components/file-pane-render-mode";
+import { HtmlArtifactPreview } from "@/components/html-artifact-preview";
 import { isWeb } from "@/constants/platform";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
@@ -202,6 +203,8 @@ function FilePreviewBody({
   const filePath = location.path;
   const isMarkdownFile =
     preview?.kind === "text" && isRenderedMarkdownFile(filePath) && !location.lineStart;
+  const isHtmlFile =
+    preview?.kind === "text" && isRenderedHtmlFile(filePath) && !location.lineStart;
 
   const previewScrollRef = useRef<RNScrollView>(null);
   const webScrollbarStyle = useWebScrollbarStyle();
@@ -210,12 +213,12 @@ function FilePreviewBody({
   });
 
   const highlightedLines = useMemo(() => {
-    if (!preview || preview.kind !== "text" || isMarkdownFile) {
+    if (!preview || preview.kind !== "text" || isMarkdownFile || isHtmlFile) {
       return null;
     }
 
     return highlightCode(preview.content ?? "", filePath);
-  }, [isMarkdownFile, preview, filePath]);
+  }, [isHtmlFile, isMarkdownFile, preview, filePath]);
 
   const gutterWidth = useMemo(() => {
     if (!highlightedLines) return 0;
@@ -287,6 +290,10 @@ function FilePreviewBody({
           {scrollbar.overlay}
         </View>
       );
+    }
+
+    if (isHtmlFile) {
+      return <HtmlArtifactPreview html={preview.content ?? ""} filePath={filePath} />;
     }
 
     const lines = highlightedLines ?? [[{ text: preview.content ?? "", style: null }]];
