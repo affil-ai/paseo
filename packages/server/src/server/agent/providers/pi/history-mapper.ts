@@ -23,6 +23,13 @@ function isTextContentBlock(block: unknown): block is PiTextContent {
   );
 }
 
+function joinPiTextBlock(previousText: string, nextText: string): string {
+  if (!previousText || !nextText || /\s$/.test(previousText) || /^\s/.test(nextText)) {
+    return `${previousText}${nextText}`;
+  }
+  return `${previousText}\n\n${nextText}`;
+}
+
 export function getUserMessageText(content: string | (PiTextContent | PiImageContent)[]): string {
   if (typeof content === "string") {
     return content;
@@ -65,16 +72,22 @@ export async function* streamPiHistory(
     }
 
     if (message.role === "assistant") {
+      let previousTextBlock = "";
       for (const content of message.content) {
         if (content.type === "text" && content.text) {
+          const text = joinPiTextBlock(previousTextBlock, content.text).slice(
+            previousTextBlock.length,
+          );
+          previousTextBlock = `${previousTextBlock}${text}`;
           yield {
             type: "timeline",
             provider,
-            item: { type: "assistant_message", text: content.text },
+            item: { type: "assistant_message", text },
           };
           continue;
         }
 
+        previousTextBlock = "";
         if (content.type === "thinking" && content.thinking) {
           yield {
             type: "timeline",

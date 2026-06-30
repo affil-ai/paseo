@@ -447,6 +447,19 @@ function parsePersistenceMetadata(metadata: AgentMetadata | undefined): PiPersis
   };
 }
 
+function shouldInsertPiTextBlockSeparator(input: {
+  hasTextInMessage: boolean;
+  previousTextEndedWithWhitespace: boolean;
+  nextText: string;
+}): boolean {
+  return (
+    input.hasTextInMessage &&
+    !input.previousTextEndedWithWhitespace &&
+    input.nextText.length > 0 &&
+    !/^\s/.test(input.nextText)
+  );
+}
+
 function buildResumeConfig(
   metadata: PiPersistenceMetadata,
   overrides: Partial<AgentSessionConfig> | undefined,
@@ -1097,6 +1110,9 @@ export class PiRpcAgentSession implements AgentSession {
   private readonly seenUserEntryIds = new Set<string>();
   private readonly pendingUserMessages: PendingPiUserMessage[] = [];
   private readonly pendingExtensionResults = new Map<string, PendingExtensionResult>();
+  private currentAssistantMessageHasText = false;
+  private currentAssistantTextEndedWithWhitespace = true;
+  private pendingAssistantTextBlockBoundary = false;
   private outOfBandCompactionEmit: ((event: AgentStreamEvent) => void) | null = null;
   private outOfBandCompactionStarted = false;
   private outOfBandCompactionCompleted = false;
@@ -1678,6 +1694,18 @@ export class PiRpcAgentSession implements AgentSession {
     return false;
   }
 
+  private resetCurrentAssistantTextBlockState(): void {
+    this.currentAssistantMessageHasText = false;
+    this.currentAssistantTextEndedWithWhitespace = true;
+    this.pendingAssistantTextBlockBoundary = false;
+  }
+
+  private handleMessageStart(event: Extract<PiAgentSessionEvent, { type: "message_start" }>): void {
+    if (event.message.role === "assistant") {
+      this.resetCurrentAssistantTextBlockState();
+    }
+  }
+
   private handleRuntimeEvent(event: PiRuntimeEvent): void {
     if (event.type === "extension_ui_request") {
       this.handleExtensionUiRequest(event);
@@ -1717,6 +1745,7 @@ export class PiRpcAgentSession implements AgentSession {
         });
         return;
       case "turn_start":
+        this.resetCurrentAssistantTextBlockState();
         this.emit({
           type: "turn_started",
           provider: PI_PROVIDER,
@@ -1724,6 +1753,7 @@ export class PiRpcAgentSession implements AgentSession {
         });
         return;
       case "message_start":
+        this.handleMessageStart(event);
         return;
       case "message_end":
         this.handleMessageEnd(event, turnId);
@@ -1830,14 +1860,36 @@ export class PiRpcAgentSession implements AgentSession {
     if (event.message.role !== "assistant") {
       return;
     }
+    if (event.assistantMessageEvent.type === "text_start") {
+      if (this.currentAssistantMessageHasText) {
+        this.pendingAssistantTextBlockBoundary = true;
+      }
+      return;
+    }
     if (event.assistantMessageEvent.type === "text_delta") {
+      const rawText = event.assistantMessageEvent.delta ?? "";
+      const separator =
+        this.pendingAssistantTextBlockBoundary &&
+        shouldInsertPiTextBlockSeparator({
+          hasTextInMessage: this.currentAssistantMessageHasText,
+          previousTextEndedWithWhitespace: this.currentAssistantTextEndedWithWhitespace,
+          nextText: rawText,
+        })
+          ? "\n\n"
+          : "";
+      const text = `${separator}${rawText}`;
+      if (rawText.length > 0) {
+        this.pendingAssistantTextBlockBoundary = false;
+        this.currentAssistantMessageHasText = true;
+        this.currentAssistantTextEndedWithWhitespace = /\s$/.test(rawText);
+      }
       this.emit({
         type: "timeline",
         provider: PI_PROVIDER,
         turnId,
         item: {
           type: "assistant_message",
-          text: event.assistantMessageEvent.delta ?? "",
+          text,
         },
       });
       return;
@@ -1870,6 +1922,11 @@ export class PiRpcAgentSession implements AgentSession {
         });
       }
       this.completeTurn(turnId, []);
+      return;
+    }
+
+    if (event.message.role === "assistant") {
+      this.resetCurrentAssistantTextBlockState();
       return;
     }
 

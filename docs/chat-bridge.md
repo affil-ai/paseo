@@ -57,7 +57,7 @@ Slack output must stay in the user's message thread:
 - Always send assistant output as replies to the Slack message thread, never as new top-level messages.
 - Do **not** post intermediate assistant/tool output in Slack v1; it is too noisy and Slack's native streaming error UI is confusing.
 - Post the first complete assistant text block for a turn, then post the final assistant text block when the agent stops. If first and final are the same text, post it only once.
-- Fetch assistant text from the daemon's projected timeline and post it as normal thread replies. Do not use native Slack streaming.
+- Fetch assistant text from the daemon's canonical timeline and post complete assistant text blocks as normal thread replies. Do not use native Slack streaming.
 
 ## Hard constraint: Chat SDK is the _only_ Slack client
 

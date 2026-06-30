@@ -487,6 +487,50 @@ describe("PiRpcAgentSession", () => {
     ]);
   });
 
+  test("preserves paragraph boundaries between live assistant text blocks", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn("hello");
+    fakeSession.emit({
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_start" },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_delta", delta: "This is good." },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_end" },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_start" },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_delta", delta: "Done.\n\n- Final summary" },
+    });
+    fakeSession.finishTurn();
+
+    await events.nextTurnCompletion();
+
+    expect(events.timelineItems()).toEqual([
+      { type: "assistant_message", text: "This is good." },
+      { type: "assistant_message", text: "\n\nDone.\n\n- Final summary" },
+    ]);
+  });
+
   test("emits live user messages with captured Pi tree entry ids", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();
