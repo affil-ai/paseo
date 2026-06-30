@@ -23,6 +23,7 @@ export interface ServiceProxyRouteEntry extends ServiceProxyRoute {
   localHostname?: string;
   publicHostname?: string | null;
   publicBaseUrl?: string | null;
+  legacyHostnames?: string[];
 }
 
 export interface ServiceProxyUrlProjection {
@@ -256,6 +257,15 @@ function stripHopByHopHeaders(
   return out;
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function appendForwardedFor(existing: string | string[] | undefined, next: string): string {
+  const existingValue = firstHeaderValue(existing);
+  return existingValue ? `${existingValue}, ${next}` : next;
+}
+
 function proxyHttpRequest({
   req,
   res,
@@ -269,9 +279,14 @@ function proxyHttpRequest({
 }): void {
   const hostHeader = req.headers.host ?? route.hostname;
   const forwardedHeaders = stripHopByHopHeaders(req.headers);
-  forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
-  forwardedHeaders["x-forwarded-host"] = String(hostHeader).replace(/:\d+$/, "");
-  forwardedHeaders["x-forwarded-proto"] = req.protocol;
+  forwardedHeaders["x-forwarded-for"] = appendForwardedFor(
+    req.headers["x-forwarded-for"],
+    req.socket.remoteAddress ?? "127.0.0.1",
+  );
+  forwardedHeaders["x-forwarded-host"] =
+    firstHeaderValue(req.headers["x-forwarded-host"]) ?? String(hostHeader).replace(/:\d+$/, "");
+  forwardedHeaders["x-forwarded-proto"] =
+    firstHeaderValue(req.headers["x-forwarded-proto"]) ?? req.protocol;
 
   const proxyReq = http.request(
     {
@@ -316,9 +331,14 @@ function proxyUpgradeRequest({
   const hostHeader = req.headers.host ?? route.hostname;
   const targetSocket = net.connect({ host: "127.0.0.1", port: route.port }, () => {
     const forwardedHeaders = stripHopByHopHeaders(req.headers);
-    forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
-    forwardedHeaders["x-forwarded-host"] = String(hostHeader).replace(/:\d+$/, "");
-    forwardedHeaders["x-forwarded-proto"] = "http";
+    forwardedHeaders["x-forwarded-for"] = appendForwardedFor(
+      req.headers["x-forwarded-for"],
+      req.socket.remoteAddress ?? "127.0.0.1",
+    );
+    forwardedHeaders["x-forwarded-host"] =
+      firstHeaderValue(req.headers["x-forwarded-host"]) ?? String(hostHeader).replace(/:\d+$/, "");
+    forwardedHeaders["x-forwarded-proto"] =
+      firstHeaderValue(req.headers["x-forwarded-proto"]) ?? "http";
     forwardedHeaders.connection = "Upgrade";
     forwardedHeaders.upgrade = req.headers.upgrade ?? "websocket";
 
@@ -421,25 +441,31 @@ export class ServiceProxyRouteRegistry {
     if (routes.length === 0) {
       return false;
     }
-    const updates = routes.map((route) => ({
-      oldHostname: route.hostname,
-      entry: this.toStoredEntry({
-        ...route,
-        hostname: buildLocalServiceHostname({
-          projectSlug: route.projectSlug,
-          branchName: params.newBranch,
-          scriptName: route.scriptName,
+    const updates = routes.map((route) => {
+      const previousHostnames = this.getRouteHostnames(route);
+      return {
+        oldHostname: route.hostname,
+        entry: this.toStoredEntry({
+          ...route,
+          hostname: buildLocalServiceHostname({
+            projectSlug: route.projectSlug,
+            branchName: params.newBranch,
+            scriptName: route.scriptName,
+          }),
+          publicHostname: route.publicBaseUrl
+            ? buildPublicServiceHostname({
+                projectSlug: route.projectSlug,
+                branchName: params.newBranch,
+                scriptName: route.scriptName,
+                publicBaseUrl: route.publicBaseUrl,
+              })
+            : null,
+          legacyHostnames: Array.from(
+            new Set([...(route.legacyHostnames ?? []), ...previousHostnames]),
+          ),
         }),
-        publicHostname: route.publicBaseUrl
-          ? buildPublicServiceHostname({
-              projectSlug: route.projectSlug,
-              branchName: params.newBranch,
-              scriptName: route.scriptName,
-              publicBaseUrl: route.publicBaseUrl,
-            })
-          : null,
-      }),
-    }));
+      };
+    });
 
     if (
       updates.every(
@@ -656,11 +682,22 @@ export class ServiceProxyRouteRegistry {
   }
 
   private toStoredEntry(entry: ServiceProxyRouteEntry): ServiceProxyRouteEntry {
-    const { publicHostname, publicBaseUrl, ...requiredEntry } = entry;
+    const { publicHostname, publicBaseUrl, legacyHostnames, ...requiredEntry } = entry;
+    const normalizedLegacyHostnames = legacyHostnames
+      ?.map((host) => host.toLowerCase())
+      .filter(
+        (host, index, hosts) =>
+          host !== requiredEntry.hostname.toLowerCase() &&
+          host !== publicHostname?.toLowerCase() &&
+          hosts.indexOf(host) === index,
+      );
     return {
       ...requiredEntry,
       ...(publicHostname ? { publicHostname } : {}),
       ...(publicBaseUrl ? { publicBaseUrl } : {}),
+      ...(normalizedLegacyHostnames && normalizedLegacyHostnames.length > 0
+        ? { legacyHostnames: normalizedLegacyHostnames }
+        : {}),
     };
   }
 
@@ -670,11 +707,13 @@ export class ServiceProxyRouteRegistry {
   }
 
   private getRouteHostnames(
-    entry: Pick<ServiceProxyRouteEntry, "hostname" | "publicHostname">,
+    entry: Pick<ServiceProxyRouteEntry, "hostname" | "publicHostname" | "legacyHostnames">,
   ): string[] {
-    return [entry.hostname, ...(entry.publicHostname ? [entry.publicHostname] : [])].map((host) =>
-      host.toLowerCase(),
-    );
+    return [
+      entry.hostname,
+      ...(entry.publicHostname ? [entry.publicHostname] : []),
+      ...(entry.legacyHostnames ?? []),
+    ].map((host) => host.toLowerCase());
   }
 
   private addHostnameToWorkspaceIndex(workspaceId: string, hostname: string): void {
@@ -951,9 +990,14 @@ class NodeServiceProxySubsystem implements ServiceProxySubsystem {
   ): void {
     const hostHeader = req.headers.host ?? route.hostname;
     const forwardedHeaders = stripHopByHopHeaders(req.headers);
-    forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
-    forwardedHeaders["x-forwarded-host"] = String(hostHeader).replace(/:\d+$/, "");
-    forwardedHeaders["x-forwarded-proto"] = req.protocol;
+    forwardedHeaders["x-forwarded-for"] = appendForwardedFor(
+      req.headers["x-forwarded-for"],
+      req.socket.remoteAddress ?? "127.0.0.1",
+    );
+    forwardedHeaders["x-forwarded-host"] =
+      firstHeaderValue(req.headers["x-forwarded-host"]) ?? String(hostHeader).replace(/:\d+$/, "");
+    forwardedHeaders["x-forwarded-proto"] =
+      firstHeaderValue(req.headers["x-forwarded-proto"]) ?? req.protocol;
 
     const proxyReq = http.request(
       {
@@ -991,9 +1035,15 @@ class NodeServiceProxySubsystem implements ServiceProxySubsystem {
     const hostHeader = req.headers.host ?? route.hostname;
     const targetSocket = net.connect({ host: "127.0.0.1", port: route.port }, () => {
       const forwardedHeaders = stripHopByHopHeaders(req.headers);
-      forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
-      forwardedHeaders["x-forwarded-host"] = String(hostHeader).replace(/:\d+$/, "");
-      forwardedHeaders["x-forwarded-proto"] = "http";
+      forwardedHeaders["x-forwarded-for"] = appendForwardedFor(
+        req.headers["x-forwarded-for"],
+        req.socket.remoteAddress ?? "127.0.0.1",
+      );
+      forwardedHeaders["x-forwarded-host"] =
+        firstHeaderValue(req.headers["x-forwarded-host"]) ??
+        String(hostHeader).replace(/:\d+$/, "");
+      forwardedHeaders["x-forwarded-proto"] =
+        firstHeaderValue(req.headers["x-forwarded-proto"]) ?? "http";
       forwardedHeaders.connection = "Upgrade";
       forwardedHeaders.upgrade = req.headers.upgrade ?? "websocket";
 

@@ -276,6 +276,32 @@ describe("service proxy subsystem shape", () => {
     expect(serviceProxy.getRouteEntry("api.services.example.com")).toMatchObject({ port: 3000 });
   });
 
+  it("keeps previous hostnames as aliases when workspace branch routes are replaced", () => {
+    const serviceProxy = new ServiceProxyRouteRegistry();
+    const initialRoute = serviceProxy.registerWorkspaceService({
+      workspaceId: "workspace-a",
+      projectSlug: "repo",
+      branchName: "feature/old",
+      scriptName: "api",
+      port: 3000,
+      publicBaseUrl: "https://services.example.com",
+    });
+
+    const oldLocal = initialRoute.hostname;
+    const oldPublic = initialRoute.publicHostname;
+    expect(oldPublic).toBeTruthy();
+    expect(
+      serviceProxy.replaceWorkspaceBranchRoutes({ workspaceId: "workspace-a", newBranch: "main" }),
+    ).toBe(true);
+
+    expect(serviceProxy.getRouteEntry("api--repo.localhost")).toMatchObject({ port: 3000 });
+    expect(serviceProxy.getRouteEntry("api--repo.services.example.com")).toMatchObject({
+      port: 3000,
+    });
+    expect(serviceProxy.getRouteEntry(oldLocal)).toMatchObject({ port: 3000 });
+    expect(serviceProxy.getRouteEntry(oldPublic)).toMatchObject({ port: 3000 });
+  });
+
   it("allows same workspace/script replacement", () => {
     const serviceProxy = createServiceProxySubsystem({ logger });
     serviceProxy.registerWorkspaceService({
