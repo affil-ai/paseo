@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type {
   DaemonClient,
   FetchAgentTimelinePayload,
@@ -91,6 +92,50 @@ export class ChatBridge {
     return this.threads.get(externalThreadId) ?? null;
   }
 
+  async recoverRelaysAfterRestart(): Promise<void> {
+    const sessions = Object.values((await this.store.load()).sessions);
+    for (const session of sessions) {
+      const agentId = session.focusedAgentId;
+      const timeline = await this.client
+        .fetchAgentTimeline(agentId, {
+          direction: "tail",
+          projection: "canonical",
+          limit: 200,
+        })
+        .catch((error) => {
+          console.warn("Failed to inspect linked agent for Slack relay recovery", {
+            agentId,
+            externalThreadId: session.externalThreadId,
+            error,
+          });
+          return null;
+        });
+      if (!timeline) continue;
+
+      const status = timeline.agent?.status;
+      const staleRelayWasActive = Boolean(session.activeRelayId);
+      const agentIsRunning = status === "initializing" || status === "running";
+      if (!staleRelayWasActive && !agentIsRunning) continue;
+
+      const relayId = `recovery:${agentId}:${Date.now()}`;
+      await this.store.updateSession(session.externalThreadId, (current) => {
+        current.activeRelayId = relayId;
+      });
+      if (!(await this.isRelayCurrent(session.externalThreadId, relayId))) continue;
+
+      this.startBackgroundRelay({
+        thread: this.getThread(session.externalThreadId),
+        externalThreadId: session.externalThreadId,
+        agentId,
+        messageId: relayId,
+        source: "recovery",
+        sinceSeq: 0,
+        relayId,
+        postFirstReply: false,
+      });
+    }
+  }
+
   async handleAgentTurnStarted(agentId: string, eventSeq?: number): Promise<void> {
     const session = await this.findLinkedSessionForAgent(agentId);
     if (!session) return;
@@ -114,6 +159,7 @@ export class ChatBridge {
       source: "ui",
       sinceSeq,
       relayId,
+      postFirstReply: true,
     });
   }
 
@@ -137,7 +183,9 @@ export class ChatBridge {
     message: Message,
     source: "mention" | "dm" | "subscribed",
   ): Promise<void> {
-    const normalized = await normalizeMessage(thread, message);
+    const normalized = await normalizeMessage(thread, message, {
+      attachmentDir: join(this.config.stateDir, "inbound-attachments"),
+    });
     this.threads.set(normalized.externalThreadId, thread);
     const existing = await this.store.getSession(normalized.externalThreadId);
     if (shouldIgnoreAmbient(thread, message, Boolean(existing))) return;
@@ -195,6 +243,7 @@ export class ChatBridge {
           assembleFollowupPrompt(normalized.sender, normalized.cleanedText),
           {
             images: normalized.images,
+            attachments: normalized.attachments,
           },
         );
       }
@@ -206,6 +255,7 @@ export class ChatBridge {
         source,
         sinceSeq,
         relayId,
+        postFirstReply: true,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -244,6 +294,7 @@ export class ChatBridge {
         threadContext: thread.isDM ? "" : await captureThreadContext(thread, message.id),
       }),
       images: normalized.images,
+      attachments: normalized.attachments,
       labels: { [CHAT_THREAD_LABEL]: normalized.externalThreadId },
     });
 
@@ -314,6 +365,7 @@ export class ChatBridge {
     source: string;
     sinceSeq: number;
     relayId: string;
+    postFirstReply: boolean;
   }): void {
     void this.relayTurn(input).catch(async (error) => {
       console.warn("Slack relay failed", error);
@@ -335,6 +387,7 @@ export class ChatBridge {
     source: string;
     sinceSeq: number;
     relayId: string;
+    postFirstReply: boolean;
   }): Promise<void> {
     const receipt = `slack:${input.externalThreadId}:${input.messageId}:${input.source}:turn`;
     if (!(await this.store.markDeliveryStarted(receipt))) return;
@@ -346,10 +399,12 @@ export class ChatBridge {
       externalThreadId: input.externalThreadId,
       relayId: input.relayId,
       onFirstText: async (text) => {
-        firstReply.text = text;
-        await this.postMessage(input.thread, input.externalThreadId, {
-          markdown: slackMarkdownFixups(text),
-        });
+        if (input.postFirstReply) {
+          firstReply.text = text;
+          await this.postMessage(input.thread, input.externalThreadId, {
+            markdown: slackMarkdownFixups(text),
+          });
+        }
       },
     });
     if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) {

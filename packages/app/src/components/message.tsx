@@ -63,6 +63,7 @@ import Animated, {
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { MarkdownRenderer, type MarkdownStyles } from "@/components/markdown/renderer";
+import type { AttachmentMetadata } from "@/attachments/types";
 import type { TodoEntry, UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
@@ -368,6 +369,11 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flexWrap: "wrap",
   },
+  inlineImageThumbnail: {
+    width: 96,
+    height: 96,
+    backgroundColor: theme.colors.surface2,
+  },
   attachmentPreviewContainer: {
     flexDirection: "row",
     gap: theme.spacing[2],
@@ -417,14 +423,38 @@ const attachmentFileIcon = (
 
 interface UserMessageImagePillProps {
   image: UserMessageImageAttachment;
-  onOpen: (image: UserMessageImageAttachment) => void;
+  onOpen: (image: AttachmentMetadata) => void;
   accessibilityLabel: string;
+}
+
+function isInlineUserMessageImage(
+  image: UserMessageImageAttachment,
+): image is Extract<UserMessageImageAttachment, { data: string }> {
+  return "data" in image;
 }
 
 function UserMessageImagePill({ image, onOpen, accessibilityLabel }: UserMessageImagePillProps) {
   const handlePress = useCallback(() => {
-    onOpen(image);
+    if (!isInlineUserMessageImage(image)) {
+      onOpen(image);
+    }
   }, [onOpen, image]);
+
+  const inlineSource = useMemo(
+    () => ({
+      uri: isInlineUserMessageImage(image) ? `data:${image.mimeType};base64,${image.data}` : "",
+    }),
+    [image],
+  );
+
+  if (isInlineUserMessageImage(image)) {
+    return (
+      <AttachmentFrame accessibilityLabel={accessibilityLabel}>
+        <Image source={inlineSource} style={userMessageStylesheet.inlineImageThumbnail} />
+      </AttachmentFrame>
+    );
+  }
+
   return (
     <AttachmentFrame onPress={handlePress} accessibilityLabel={accessibilityLabel}>
       <AttachmentThumbnail metadata={image} />
@@ -498,7 +528,7 @@ export const UserMessage = memo(function UserMessage({
   const isCompact = useIsCompactFormFactor();
   const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
-  const [lightboxMetadata, setLightboxMetadata] = useState<UserMessageImageAttachment | null>(null);
+  const [lightboxMetadata, setLightboxMetadata] = useState<AttachmentMetadata | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const hasText = message.trim().length > 0;

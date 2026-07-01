@@ -134,36 +134,37 @@ type ChatBinding =
       kind: "inbound-session";
       externalThreadId: string;
       rootAgentId: string;
-      focusedAgentId: string;
     }
   | {
       kind: "outbound-conversation";
       externalThreadId: string;
-      ownerAgentId: string;
+      officeAgentId: string;
       pendingRequestId?: string;
       subscribed: boolean;
     };
 ```
 
-Current v1 code has the first shape as `ThreadSession { rootAgentId, focusedAgentId,
-activeChildAgentId, activeRelayId, muted }` in `ThreadSessionStore`. Evolve that store into the
-union above rather than treating Chat SDK subscription state as the product state.
+Current v1 code has the first shape as `ThreadSession { rootAgentId, activeRelayId, muted }`
+in `ThreadSessionStore`. Evolve that store into the union above rather than treating Chat SDK
+subscription state as the product state.
 
 ### Routing rules
 
 - Human starts a new DM, mention, or unclaimed Slack thread → create a new office agent and an
   `inbound-session` binding.
-- Existing bound external thread → route replies to the bound `focusedAgentId` / `ownerAgentId`.
-- Agent starts an outbound conversation → create or reuse a Slack DM/thread, post via Chat SDK,
-  and bind replies back to that **same existing agent** (`outbound-conversation`). No new Paseo
-  agent is created.
-- Agent creates another Paseo agent/workspace using existing Paseo tools → the current chat
-  binding follows focus to that agent in the same external thread. Chat tools do not create agents.
+- Existing bound external thread → route replies to the bound office agent (`rootAgentId` /
+  `officeAgentId`).
+- The office agent starts an outbound conversation → create or reuse a Slack DM/thread, post via
+  Chat SDK, and bind replies back to that same office agent (`outbound-conversation`). No new
+  Paseo agent is created, and child/coding agents cannot own chat bindings.
+- The office agent creates another Paseo agent/workspace using existing Paseo tools → the chat
+  binding stays attached to the office agent. Chat tools do not create agents, and chat replies
+  never target the spawned agent directly.
 
-### Agent-visible chat tools
+### Office-agent-visible chat tools
 
-Agents must not use raw Slack APIs or tokens. They should receive person/thread primitives through
-a Paseo-owned tool surface, for example:
+The office agent must not use raw Slack APIs or tokens. It should receive person/thread primitives
+through a Paseo-owned tool surface, for example:
 
 ```ts
 chat.startConversation({ destination: { kind: "person", key: "vivek" }, message: "..." });
@@ -176,28 +177,30 @@ Paseo/MCP tools backed by a chat service API**, not as bridge-local Slack tools.
 owns the agent tool catalog and audit trail; `packages/chat` owns transport. A local
 `ChatBridgeService` can register with the daemon over the existing WebSocket/client path (or a
 small local RPC) so the daemon tool calls `packages/chat`, and `packages/chat` uses Chat SDK to
-post + persist the binding. This keeps agents on stable `chat.*` primitives, keeps Slack tokens
-inside the bridge, and avoids coupling the agent runtime to one adapter.
+post + persist the binding. This keeps the office agent on stable `chat.*` primitives, keeps Slack
+tokens inside the bridge, and avoids coupling the agent runtime to one adapter. Child/coding agents
+should not call chat tools directly; they report to the office agent, and the office agent decides
+what to say externally.
 
 ### Outbound modes
 
-1. **Fire-and-subscribe / same-agent conversation.** Agent sends a message to a person; bridge
-   creates or reuses a Slack DM/thread; replies route back to the same existing agent via
-   `client.sendAgentMessage(...)`. Use for quick async input, file requests, or permission
+1. **Fire-and-subscribe / office-agent conversation.** The office agent sends a message to a
+   person; bridge creates or reuses a Slack DM/thread; replies route back to that same office agent
+   via `client.sendAgentMessage(...)`. Use for quick async input, file requests, or permission
    confirmations. No new Paseo agent.
-2. **Ask-and-wait / same-agent blocking question.** `chat.askPerson(...)` posts a question and
+2. **Ask-and-wait / office-agent blocking question.** `chat.askPerson(...)` posts a question and
    stores a pending request. The tool call (or permission-like wait) resolves when the person
-   replies, with timeout/cancel semantics. Still the same existing agent; the current task is
-   waiting for human input.
-3. **New agents stay in the existing Paseo focus model.** If the current agent wants a new
-   agent/workspace, it uses normal Paseo tools (`create_agent`, `create_worktree`, etc.). The
-   bridge follows focus in the same bound chat thread. Chat tools never create agents.
+   replies, with timeout/cancel semantics. Still the same office agent; the current task is waiting
+   for human input.
+3. **New agents stay behind the office agent.** If the office agent wants a new agent/workspace,
+   it uses normal Paseo tools (`create_agent`, `create_worktree`, etc.). The bridge keeps talking
+   only to the office agent. Chat tools never create agents.
 
 ### People resolution and guardrails
 
 - Resolve `person: "vivek"` through bridge/daemon config: aliases, Slack user IDs, emails, and
-  optionally `memory/people/*.md` metadata. Agents see people keys; raw Slack tokens and adapter
-  user IDs stay behind the bridge.
+  optionally `memory/people/*.md` metadata. The office agent sees people keys; raw Slack tokens and
+  adapter user IDs stay behind the bridge.
 - Persist outbound bindings and pending `askPerson` requests under `$PASEO_HOME/chat-bridge/`
   with the same atomic JSON + Zod pattern as inbound sessions. On restart, reload bindings,
   subscriptions, pending request deadlines, and delivery receipts; expired asks resolve as
@@ -210,7 +213,7 @@ inside the bridge, and avoids coupling the agent runtime to one adapter.
 
 The model is deliberately simple:
 
-- **One inbound chat thread = one Paseo workspace = one long-lived "office agent."** Agent-initiated outbound conversations bind to the existing agent. If that agent starts another Paseo agent/workspace, the same chat thread follows focus; no extra chat thread is created by default.
+- **One inbound chat thread = one Paseo workspace = one long-lived "office agent."** Agent-initiated outbound conversations bind to the office agent. If that agent starts another Paseo agent/workspace, Slack still talks only to the office agent; no extra chat thread is created by default.
 - The office agent's workspace is a **`directory` workspace** backed by the configured **office
   repo** — the CTO-office repo that holds the agent's schema (`AGENTS.md`), memory, and shared
   skills (see [office-brain.md](office-brain.md)). It sits alongside your other product repos,
@@ -275,46 +278,34 @@ The Paseo tool catalog the agent gets includes (non-exhaustive): `create_agent`,
 `set_agent_mode`, `respond_to_permission`. This is why no "router / profiles / execution
 modes" layer is needed in the bridge — the agent already has the primitives.
 
-### Subagent focus relay
+### Office-agent-only chat boundary
 
-When the office agent spawns a coding subagent, the action moves to a **different `agentId`**
-(the parent stays `idle` while the child runs — `agent-lifecycle.md` keeps status literal).
-We want the Slack thread to follow the work, so the bridge tracks a **focused agent** per
-thread and routes replies/output to that agent.
+The chat bridge interfaces with **one agent per binding: the office agent**. When the office
+agent spawns a coding subagent, the bridge does not track that child as chat state, does not poll
+its timeline, does not route replies to it, and does not expose a "focused agent" concept in
+Slack. The office agent remains the conversational supervisor and the only agent the bridge sends
+messages to.
 
 ```ts
 type ThreadSession = {
   externalThreadId: string;
   rootAgentId: string; // the office agent — always
-  focusedAgentId: string; // who we currently poll for output + route replies to
   // ...dedup keys, muted, artifacts, timestamps (see State storage)
 };
 ```
 
 Rules (all decided):
 
-- **Focus-follow.** The bridge tracks `focusedAgentId`. When it observes an `agent_update`
-  whose `parentAgentId === rootAgentId` (the office agent just spawned a child), it **shifts
-  focus to the child**, posts a small handoff message in the same thread (v1: plain divider; v2:
-  Chat SDK card, e.g. "🔧 Focus moved to coding agent: `fix-onboarding`", with a **Back to office
-  agent** button), and polls the child's projected timeline for assistant text. Replies route to
-  the focused agent (`sendAgentMessage(focusedAgentId, …)`).
-- **One focused child at a time.** The bridge tracks at most one child. If the office agent
-  spawns a _second_ concurrent child, the bridge does **not** hijack the thread for it — the
-  second child still runs (visible in the office agent's subagents track / its worktree), but
-  its output is not relayed. This keeps the linear Slack thread coherent.
-- **No sub-subagents.** Focus never descends past depth 1. If the coding child spawns its own
-  children, their work surfaces only as the child's tool cards, never as a focus hop.
-- **Escape hatch.** v1 supports `@cto ↑` to pop focus back to the office agent without waiting
-  for the child to finish. v2 adds the required **Back to office agent** button on the handoff
-  card; button actions use a bridge-owned action id (for example
-  `paseo-focus:root:<externalThreadId>`) and never go through the agent. The child keeps running
-  in its track/worktree; the office agent fields the aside.
-- **Auto-return on completion.** When the focused child reaches a terminal state
-  (`turn_completed` / archived), focus auto-pops back to the office agent, which narrates the
-  result ("opened PR #42"). Focus does **not** snap back to a finished child — completion posts
-  the child's summary line, but the supervisor always regains the thread, so you're never stuck
-  talking to a finished agent.
+- **Stable conversation owner.** Replies in a bound Slack thread always call
+  `sendAgentMessage(rootAgentId, …)` for inbound sessions, or `sendAgentMessage(officeAgentId, …)`
+  for agent-initiated outbound conversations.
+- **No child chat tracking.** The bridge does not persist `focusedAgentId`,
+  `activeChildAgentId`, or `activeWorkAgentId`. A child agent is a normal Paseo subagent visible
+  in the app's subagents track/worktree UI, not a chat endpoint.
+- **No child output relay.** Child progress reaches Slack only if the office agent summarizes it in
+  its own assistant messages. The bridge never streams or polls a child timeline directly.
+- **No escape hatch.** Because Slack never leaves the office agent, there is no `@cto ↑` command
+  and no **Back to office agent** button.
 
 ## UI model
 
@@ -359,10 +350,10 @@ workspace row under it:
   (`agent-lifecycle.md`: running subagents contribute `running` to the parent's owning
   workspace), so thread B shows an activity dot while its coding child runs.
 - **Worktree name** — visible under the repo's project.
-- **`paseo.chat-thread-id` label (new).** The bridge stamps every agent it touches — the
-  office agent _and_ every child it relays — with a `paseo.chat-thread-id` label. This lets any
-  client group/filter "everything from this Slack thread" regardless of which project the
-  worktrees landed in. It's the one small addition needed for clean cross-project grouping.
+- **`paseo.chat-thread-id` label (new).** The bridge stamps the office agent it creates with a
+  `paseo.chat-thread-id` label. Because the bridge does not interface with child agents, it does
+  not stamp or relay children; child association comes from the normal parent/subagent relation in
+  the Paseo UI.
 
 ## Release roadmap
 
@@ -379,16 +370,16 @@ needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is 
 - One inbound thread = one workspace = one office agent, on a single configured `directory`
   workspace (the office repo). **No per-thread worktree, no repo routing, no classifier.**
 - Timeline-polled Slack relay: first complete assistant text block plus final assistant text block; no native Slack streaming.
-- **Subagent focus relay:** focus-follow, one child at a time, escape hatch, auto-return
-  (see [Subagent focus relay](#subagent-focus-relay)).
+- **Office-agent-only chat boundary:** replies and relay stay on the office agent even when it
+  delegates to subagents (see [Office-agent-only chat boundary](#office-agent-only-chat-boundary)).
 - `:eyes:` acknowledgement reaction; compact "Working on it" card with a `View chat` deep-link button.
 - Permission prompts → Slack buttons; agent **questions** → numbered card answered by reply.
 - Mute / unmute / `aside -` (Feature 2).
 - Configurable **default provider** — **Pi**, with a backing model of **Codex `gpt-5.5`
   (medium)** — used for every office agent the bridge creates.
 - Assembled initial prompt with the configurable **office system prompt** block.
-- Inbound image attachments → agent.
-- `paseo.chat-thread-id` label stamped on the office agent and every relayed child.
+- Inbound image and file attachments → agent.
+- `paseo.chat-thread-id` label stamped on the office agent.
 - Health/config command (Feature 5).
 - Start-failure and turn-error messages surfaced to the thread.
 - The intake & relay mechanics below: serial-per-thread queue, inbound dedup + **outbound
@@ -397,11 +388,11 @@ needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is 
 - Idempotency, thread linking, and restart-resilient state (file-backed store).
 
 **v1 exit criteria:** from Slack you can start the office agent, ask it to answer/analyze/act,
-receive first/final assistant updates, have it delegate code work to a coding subagent and watch
-the thread _follow that child_ and come back, answer its permission prompts, reply to continue it,
-and mute it. From an agent, an explicit same-agent outbound chat tool can message a configured
-person and bind replies back to the owner agent. Both inbound and outbound bindings survive a
-daemon or bridge restart.
+receive first/final assistant updates, have it delegate code work to a coding subagent while Slack
+continues talking only to the office agent, answer the office agent's permission prompts, reply to
+continue it, and mute it. From an agent, an explicit same-agent outbound chat tool can message a
+configured person and bind replies back to the office agent. Both inbound and outbound bindings
+survive a daemon or bridge restart.
 
 ### v2 — "Webhooks + richer I/O + remote" (introduces a public inbound HTTP server)
 
@@ -414,8 +405,6 @@ otherwise outbound-only), which unlocks webhook-driven features. v2 delivers:
 - **Agent-initiated chat tools** — `chat.startConversation`, `chat.reply`, `chat.askPerson`, and
   `chat.askChannel`, with executor-discovered channel destinations, durable outbound bindings,
   pending asks, restart recovery, and audit records.
-- **Focus UX upgrade** — when focus shifts to a spawned child/subagent, post a transition card with
-  a **Back to office agent** button.
 - **Bidirectional file attachments** — agent-produced files posted back to the thread.
 - **Second chat adapter** (Discord or Telegram) to prove the platform-agnostic seam.
 - **Remote deployment mode** — bridge on a different host than the daemon, connecting over the
@@ -439,7 +428,7 @@ The core feature. A bot that listens for and acts on:
 - **Direct mentions** (`@bot <task>`) in any channel → starts a new office agent + workspace.
 - **DMs** → starts a new office agent.
 - **Subscribed-thread follow-ups** → replies in a thread already linked to an agent
-  continue the **focused** agent (`sendAgentMessage`).
+  continue the office agent (`sendAgentMessage`).
 
 Chat SDK exposes these as `bot.onNewMention`, `bot.onDirectMessage`, and
 `bot.onSubscribedMessage` (the three callbacks t3code registers in `ExternalChat.ts`).
@@ -450,7 +439,7 @@ Behaviors to bring across from t3code:
   skip already-processed events. t3code stores receipts in an `external_event_receipts`
   table; the Paseo bridge keeps the same in its store.
 - **Thread linking:** `externalThreadId = [teamId:]channelId:threadTs` ↔ the `ThreadSession`
-  (`rootAgentId` + `focusedAgentId`). This is the bridge's central map.
+  (`rootAgentId`). This is the bridge's central map.
 - **Thread context capture:** on a fresh mention inside an existing human thread, gather
   prior messages (t3code caps at ~30 messages / ~8,000 chars) and prepend them to the
   initial prompt so the agent has context.
@@ -484,7 +473,7 @@ Once a session is active in a thread, it belongs to **everyone in the channel**,
 person who started it (the same model Claude Tag uses — see
 [Prior art](#prior-art-claude-tag)). Any channel member can reply in the thread to add context,
 redirect, answer a question, or pick up the result — the bridge routes their reply to the
-focused agent via `sendAgentMessage`, tagged with that sender's identity. No re-mention
+office agent via `sendAgentMessage`, tagged with that sender's identity. No re-mention
 required; `onSubscribedMessage` already fires for any thread participant. The "Open in Paseo"
 deep link on each delivery is the shared, read-only record of the full tool-call timeline that
 anyone in the channel can open.
@@ -576,16 +565,16 @@ URLs.
 
 ### 6. Agent-initiated chat — **v2**
 
-Agents can explicitly contact people or channels through `chat.*` tools without raw Slack
-APIs/tokens. This is v2 scope: `chat.startConversation` / `chat.reply` post through Chat SDK and
-persist an `outbound-conversation` binding so replies go back to the same focused agent;
+The office agent can explicitly contact people or channels through `chat.*` tools without raw
+Slack APIs/tokens. This is v2 scope: `chat.startConversation` / `chat.reply` post through Chat SDK
+and persist an `outbound-conversation` binding so replies go back to the same office agent;
 `chat.askPerson` / `chat.askChannel` add pending waits with timeout/cancel/restart semantics. The
-agent can use executor MCP to discover channels it can access, then pass those destinations to the
-chat tools.
+office agent can use executor MCP to discover channels it can access, then pass those destinations
+to the chat tools.
 
-Chat tools intentionally do **not** create agents. If an agent needs a new workspace/agent in a
-project, it uses the normal Paseo agent/workspace tools and the bridge focus relay keeps the same
-chat thread pointed at the focused agent. Every outbound chat tool call records an audit entry.
+Chat tools intentionally do **not** create agents. If the office agent needs a new workspace/agent
+in a project, it uses the normal Paseo agent/workspace tools; the bridge keeps the same chat thread
+pointed at the office agent. Every outbound chat tool call records an audit entry.
 Ordinary assistant text is not interpreted as a request to DM someone.
 
 ## Standing work (routines)
@@ -636,11 +625,12 @@ provider/model), exactly as it decides everything else. The bridge's job is tran
 model routing. The default is config (`provider` / `model` / `modeId` in `config.ts`) so it can
 be changed in one place.
 
-## Attachments — **v1 inbound images / v2 outbound files**
+## Attachments — **v1 inbound images/files / v2 outbound files**
 
-Inbound (v1): read Slack image attachments via Chat SDK's `attachment.fetchData()` and pass
-them to `createAgent`/`sendAgentMessage` (which accept `images`/`attachments`) — **not** via
-raw `files.info` + bot token. Outbound (v2): agent-produced files post back with
+Inbound (v1): read Slack image/file attachments via Chat SDK's `attachment.fetchData()` and pass
+images through `images` and non-image files through `attachments` as local `uploaded_file`
+references — **not** via raw `files.info` + bot token. If an attachment cannot be fetched, include
+its name/type/URL in the prompt as text. Outbound (v2): agent-produced files post back with
 `thread.post({ files: [{ data, filename }] })` — e.g. a generated report, diff, or screenshot.
 Both directions stay inside Chat SDK per the hard constraint above.
 
@@ -679,7 +669,7 @@ before sending the prompt. For UI-originated turns on an agent that is linked to
 the bridge observes `turn_started` and starts the same relay. A background relay polls
 `fetchAgentTimeline(..., { projection: "projected" })` for assistant messages at or after that
 sequence. It posts the first complete assistant block once it is no longer the newest row (or
-the agent has stopped), then keeps polling until the focused agent is no longer
+the agent has stopped), then keeps polling until the office agent is no longer
 `initializing`/`running` and posts the last assistant block as the final reply. Replies are sent
 with `thread.post(...)` or `adapter.postMessage(...)` against the normalized Slack thread id.
 
@@ -695,7 +685,7 @@ When an agent needs approval the daemon emits `agent_permission_request`. The br
   (each `{ id, label, behavior, variant }`) which map 1:1 to Slack buttons posted as normal
   Chat SDK card/action messages.
 - On click, resolves with `client.respondToPermission(agentId, request.id, { behavior,
-selectedActionId })` — for the **focused** agent.
+selectedActionId })` — for the office agent.
 - The `question` permission kind is also how interactive "agent asks the user a question"
   flows surface (t3code's `user-input.requested`).
 - To guarantee prompts fire, create office agents with a permission-prompting mode (Claude
@@ -722,9 +712,11 @@ skipping them produces double-posts, loops, or dropped messages. Most are **v1**
 - **Outbound delivery receipts + active relay guard.** Before _every_ post, check a
   delivery-receipt key (encodes source, phase, threadId, turnId, messageId). Skip if already
   `completed`. Each session also stores `activeRelayId`; background relays must re-read the
-  session before posting and drop stale output if a newer Slack message has superseded them.
-  This prevents double-posting after retries and prevents interrupted turns from posting stale
-  final answers.
+  session before posting and drop stale output if a newer Slack message has superseded them. On
+  bridge startup, persisted sessions are inspected and any running/stale relay is resumed with a
+  final-only recovery relay, so an agent that finishes after a bridge restart still posts its
+  completion back to Slack. This prevents double-posting after retries and prevents interrupted
+  turns from posting stale final answers.
 - **Per-thread lock.** A short-TTL lock per thread (the in-process mutex from the
   `StateAdapter`) guards the read-modify-write of thread state.
 
@@ -747,7 +739,7 @@ Treat `mpim` (group DM) like a channel, not a DM.
 
 ### Inbound text cleaning — **v1**
 
-Before building the prompt, clean the message: strip the bot's own mention (`<@U…>` / `@U…`), resolve other Slack user mentions to readable handles/names, strip client attributions, and append non-image attachments as `Attachments:\n- name (mime): url` text lines while images go through the native `images` path. Keep a separate raw-text copy for mention-detection/routing vs. the cleaned text sent to the agent.
+Before building the prompt, clean the message: strip the bot's own mention (`<@U…>` / `@U…`), resolve other Slack user mentions to readable handles/names, strip client attributions, fetch Slack attachments through Chat SDK, pass images through the native `images` path, pass fetched non-image files as `uploaded_file` attachments, and append unfetchable non-image attachments as `Attachments:\n- name (mime): url` text lines. Keep a separate raw-text copy for mention-detection/routing vs. the cleaned text sent to the agent.
 
 ### Output relay rules — **v1**
 
@@ -766,10 +758,10 @@ Before building the prompt, clean the message: strip the bot's own mention (`<@U
 - **Start failure → posted.** If creating/continuing an agent throws, post
   `"I couldn't start a task from this message. Reason: <message>"` to the thread.
 - **Turn failure (`status: "error"`):** post a short "the agent hit an error" line when timeline polling observes the agent stopped in an error state.
-- **Agent asks a question** (`agent_permission_request` kind `question`): post a numbered
+- **Office agent asks a question** (`agent_permission_request` kind `question`): post a numbered
   question card; the user's next thread reply is the answer (strip `<@…>`; support
-  single-answer-applies-to-all vs `Q1: … Q2: …`). Rides the same permission plumbing as
-  buttons, against the focused agent.
+  single-answer-applies-to-all vs `Q1: … Q2: …`). Rides the same permission plumbing as buttons,
+  against the office agent.
 
 ### Subscription lifecycle — **v1**
 
@@ -790,9 +782,9 @@ replies route via `onSubscribedMessage`. The subscription set is persisted (our
 
 ### Deep links — **v1**
 
-Build a link back to the agent in the Paseo app/web UI (`/h/[serverId]/agent/[agentId]`) for
-the compact "Working on it" card and its `View chat` affordance. Needs a configured app base URL.
-When focus is on a child, the bridge can optionally surface a second deep link to the child.
+Build a link back to the office agent in the Paseo app/web UI (`/h/[serverId]/agent/[agentId]`)
+for the compact "Working on it" card and its `View chat` affordance. Needs a configured app base
+URL. The bridge does not link directly to child agents from chat.
 
 ## Proposed package layout (design sketch — not built)
 
@@ -810,8 +802,6 @@ packages/chat/
     paseo-client.ts       # connect() helper mirroring packages/cli/src/utils/client.ts (reconnect: enabled)
     bridge.ts             # core: handleMessage — filters/gates, new-thread vs follow-up, dedup,
                           #   timeline-polling output relay
-    focus.ts              # [v1] focus pointer: detect parentAgentId child, switch relay target,
-                          #   one-child rule, escape hatch (@cto ↑), auto-return on completion
     state/
       json-state.ts       # [v1] shared atomic JSON load/save + write-queue (mirrors loop-service.ts)
       chat-state-adapter.ts # [v1] file-backed Chat SDK StateAdapter (subscriptions/cache persisted; locks in-process)
@@ -838,7 +828,7 @@ The package `README.md` would be operational setup; this doc is the system-level
 
 **v1** is exactly the diagram in [Core concept](#core-concept-the-bridge-is-just-another-daemon-client):
 an outbound-only process (`DaemonClient` over `127.0.0.1`, Slack over Socket Mode), file-backed
-state, and the timeline-relay/render/permissions/focus glue. No inbound listener, no HTTP server,
+state, and the timeline-relay/render/permissions glue. No inbound listener, no HTTP server,
 no database.
 
 **v2 introduces an inbound HTTP server (`inbound-http.ts`).** This is the one structural
@@ -879,9 +869,8 @@ There are **two logical state stores, both file-backed:**
    `externalThreadId → ChatBinding`, pending `askPerson` waits, event-receipt dedup keys,
    outbound delivery receipts, audit records, and (v2) PR artifact links. Keep the logical tables
    t3code used (`external_thread_links`, `external_event_receipts`, `artifact_links`) as JSON
-   collections, but make the domain shape explicit: inbound sessions have `rootAgentId` /
-   `focusedAgentId`; outbound conversations have `ownerAgentId`, `focusedAgentId`, `subscribed`,
-   and optional `pendingRequestId`.
+   collections, but make the domain shape explicit: inbound sessions have `rootAgentId`; outbound conversations have `officeAgentId`,
+   `subscribed`, and optional `pendingRequestId`.
 
 **Implementation — reuse Paseo's primitives, don't reinvent:**
 
@@ -911,20 +900,19 @@ interface change as a small, contained fix.
 5. `client.createAgent({ provider: "pi", model: "openai-codex/gpt-5.5", modeId: "medium",
 workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalThreadId } })`
    (provider/model/mode come from config; the default is Pi + Codex gpt-5.5 medium).
-6. Persist `ThreadSession { rootAgentId: agentId, focusedAgentId: agentId }`; react `:eyes:` on
+6. Persist `ThreadSession { rootAgentId: agentId }`; react `:eyes:` on
    the triggering message; post the compact "Working on it" card with a `View chat` button.
-7. Poll the focused agent's projected timeline. Post the first complete assistant text block,
+7. Poll the office agent's projected timeline. Post the first complete assistant text block,
    keep polling until the agent stops, then post the final assistant text block. If the agent
-   spawns a coding subagent mid-turn, focus can switch to the child and stamp the same
-   `paseo.chat-thread-id` label on it; on completion, focus returns to root.
+   spawns a coding subagent mid-turn, the bridge does not track or relay that child; the office
+   agent remains responsible for summarizing progress back to Slack.
 
 **Reply** (`bot.onSubscribedMessage`): dedup → look up `ThreadSession` (respect `muted`, except explicit bot mentions bypass mute) →
-if it's the escape hatch (`@cto ↑`), pop focus to `rootAgentId` → `client.sendAgentMessage(
-focusedAgentId, text)` → poll projected timeline → post first complete assistant text and final assistant text.
+`client.sendAgentMessage(rootAgentId, text)` → poll projected timeline → post first complete assistant text and final assistant text.
 
-**Permission mid-turn:** permission requests are posted as standalone buttons/cards; the click
-handler calls `respondToPermission` on the focused agent, the agent continues, and the bridge
-still posts only the first complete assistant text and final assistant text for the turn.
+**Permission mid-turn:** office-agent permission requests are posted as standalone buttons/cards;
+the click handler calls `respondToPermission` on the office agent, the agent continues, and the
+bridge still posts only the first complete assistant text and final assistant text for the turn.
 
 ## Research gotchas to preserve
 
@@ -944,10 +932,10 @@ still posts only the first complete assistant text and final assistant text for 
 - **Turn relay is timeline-polled.** Capture the timeline sequence before sending a prompt,
   then poll projected timeline entries at or after that sequence. Agent status from the
   timeline tells the bridge when the final assistant block is ready.
-- **Subagent relationship + label.** Spawned coding agents carry `paseo.parent-agent-id`
-  (set by `create_agent` with `relationship: { kind: "subagent" }`) — that's how the bridge
-  detects a handoff for focus relay. The bridge additionally stamps `paseo.chat-thread-id` on
-  the office agent and every relayed child for cross-project grouping.
+- **Subagent relationship stays in Paseo, not chat.** Spawned coding agents carry
+  `paseo.parent-agent-id` (set by `create_agent` with `relationship: { kind: "subagent" }`) so
+  the Paseo UI can show them in the office agent's subagents track. The chat bridge does not
+  observe them as chat targets or stamp them with chat labels.
 - **Permissions are low-level only.** Listen on `agent_permission_request`; resolve via
   `respondToPermission(agentId, request.id, { behavior, selectedActionId })`. Pending requests
   also appear on `AgentSnapshotPayload.pendingPermissions`.
@@ -969,7 +957,7 @@ still posts only the first complete assistant text and final assistant text for 
 
 - [architecture.md](architecture.md) — client/daemon model, WebSocket protocol, agent lifecycle.
 - [agent-lifecycle.md](agent-lifecycle.md) — subagents, `paseo.parent-agent-id`, the subagents
-  track, parent/child status and archive cascade (the basis for focus relay + the UI model).
+  track, parent/child status and archive cascade (the basis for the UI model).
 - `packages/cli/src/utils/client.ts` — the daemon connection pattern to mirror.
 - `packages/cli/src/commands/agent/run.ts` — create-agent sequence (note: the office agent uses
   a `directory` workspace, not the run command's worktree path).
@@ -988,19 +976,20 @@ still posts only the first complete assistant text and final assistant text for 
 ## Decisions (resolved)
 
 - **The bridge is a transport adapter, not an orchestrator → v1.** It does intake, thread↔agent
-  mapping, timeline-polled output relay, focus relay, and permission relay. Routing/tools/worktree decisions live
+  mapping, timeline-polled output relay, and permission relay. Routing/tools/worktree decisions live
   in the agent. This is the core model change from t3code.
 - **One thread = one workspace = one office agent on a configured `directory` folder → v1.**
   No per-thread worktree, no per-repo profiles, no classifier. The office repo sits alongside
   the other product repos; the agent reaches across them.
 - **Worktrees are agent-initiated → v1.** The agent calls `create_worktree` + `create_agent`
   only when a task needs isolated code changes.
-- **Subagent focus relay → v1.** Focus-follow, **one focused child at a time**, **no
-  sub-subagents**, escape hatch (`@cto ↑`), auto-return to the office agent on child completion.
+- **Office-agent-only chat boundary → v1.** The bridge never routes Slack replies to child
+  agents, never polls child timelines, and never tracks active child work. Subagents remain normal
+  Paseo UI/lifecycle objects owned by the office agent.
 - **UI surfacing → v1.** The office repo is a Project; each thread is a `directory` workspace;
   coding subagents appear both in the office agent's subagents track and as a worktree workspace
-  under the real repo's project. The bridge stamps `paseo.chat-thread-id` for cross-project
-  grouping.
+  under the real repo's project. The bridge stamps `paseo.chat-thread-id` only on the office
+  agent; child grouping comes from `paseo.parent-agent-id`.
 - **Teardown policy → v1.** A thread's office agent is archived (`client.archiveAgent`) and its
   store entry dropped on an explicit `@bot done` / thread-archive signal or when it reaches a
   terminal `closed` state. Idle agents are left alive so a later reply can resume them. Archive
@@ -1020,7 +1009,7 @@ still posts only the first complete assistant text and final assistant text for 
 - **Public-inbound hosting → v2.** v1 is Socket Mode only. The `inbound-http` server arrives in
   v2 behind TLS/a tunnel with per-route signature verification.
 - **Sender identity + multiplayer steering → v1.** The bridge resolves the Slack sender per
-  message and prepends an identity block; anyone in the channel can steer the focused agent.
+  message and prepends an identity block; anyone in the channel can steer the office agent.
   See [Sender identity](#sender-identity--v1) and [office-brain.md](office-brain.md).
 - **Shared-channel access posture → principles now, enforcement v2.** Adopt Claude Tag's
   Agent-Proxy principles without building a proxy: (a) the office agent runs in a
@@ -1067,9 +1056,6 @@ design borrows vs. where it diverges:
 
 ## Remaining open questions (genuinely undecided)
 
-- **Reply target while a child is focused vs the office agent.** Decided: replies go to the
-  _focused_ agent. v1 supports textual escape (`@cto ↑`); v2 adds the visible child-handoff
-  transition card with a **Back to office agent** button that re-targets the office agent.
 - **Concurrency caps:** should one channel/user be limited to N concurrent office agents to
   avoid runaway resource use? Likely a v2 config knob.
 - **Second adapter choice for v2:** Discord vs Telegram first — driven by which you actually

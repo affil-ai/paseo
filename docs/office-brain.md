@@ -297,7 +297,7 @@ Slack thread → office agent (cwd: office repo)
   ├─ reads AGENTS.md (schema, seeded type vocabulary) + memory/index.md (routing)
   ├─ query  → search subagent → compact synthesis (keeps main context clean)
   ├─ act    → executor MCP (Sheets / GitHub / Linear / …); re-fetch live when freshness matters
-  ├─ code   → worktree subagent off a product repo (chat-bridge focus-relay flow)
+  ├─ code   → worktree subagent off a product repo (Slack still talks to the office agent)
   └─ teardown → CAPTURE: update memory/ pages + append log.md
                  → deterministic lint gate (grep) blocks on unresolved contradictions
 
@@ -387,7 +387,7 @@ deliberately take and leave:
 ## Reference pointers
 
 - [chat-bridge.md](chat-bridge.md) — the office agent, its `directory` workspace, subagent
-  focus-relay, thread teardown (the capture trigger), sender-identity resolution,
+  office-agent-only chat boundary, thread teardown (the capture trigger), sender-identity resolution,
   `create_schedule`/subagent primitives.
 - [Claude Tag announcement](https://www.anthropic.com/news/introducing-claude-tag) and
   [memory](https://claude.com/docs/claude-tag/users/memory) /

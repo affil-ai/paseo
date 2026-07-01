@@ -4,7 +4,7 @@ Source references: [prd.md](prd.md), [docs/chat-bridge.md](../../chat-bridge.md)
 Date created: 2026-06-29
 
 > This plan assumes v1's `packages/chat` exists with Chat SDK Slack intake, `ThreadSessionStore`,
-> `FocusRelay`, `PermissionBridge`, `CHAT_THREAD_LABEL`, file-backed Chat SDK `StateAdapter`, and
+> `PermissionBridge`, `CHAT_THREAD_LABEL`, file-backed Chat SDK `StateAdapter`, and
 > timeline-polled relay.
 
 ## Goal
@@ -15,14 +15,15 @@ channels and threads they can access, but all posting and binding persistence go
 chat bridge and Chat SDK.
 
 Starting a new agent/workspace is **not** a chat tool. The agent uses existing Paseo tools for
-that. The bridge observes the agent relationship and shifts focus in the same bound chat thread.
+that. The bridge keeps the bound chat thread attached to the office agent and does not observe or
+route to spawned agents.
 
 ## Architecture decision
 
 Use a **daemon-owned tool surface backed by `packages/chat` transport/state**:
 
 ```txt
-agent -> daemon Paseo tool handler -> ChatBridge service client -> packages/chat -> Chat SDK
+office agent -> daemon Paseo tool handler -> ChatBridge service client -> packages/chat -> Chat SDK
                                            |                         |
                                            |                         v
                                            |                 ChatBinding store
@@ -32,13 +33,14 @@ agent -> daemon Paseo tool handler -> ChatBridge service client -> packages/chat
 
 Why:
 
-- The daemon knows the current caller `agentId` and can attach audit/tool timeline context without
-  trusting the model to pass its own agent id.
+- The daemon knows the current caller `agentId`, verifies it is the office agent for the binding,
+  and can attach audit/tool timeline context without trusting the model to pass its own agent id.
 - `packages/chat` already owns Chat SDK adapters, subscriptions, delivery receipts, and external
   thread normalization.
-- Agents get stable person/channel/conversation primitives, not Slack tokens or adapter clients.
-- New agents stay in the existing Paseo lifecycle (`create_agent`, `create_worktree`, focus relay),
-  so users do not have to juggle extra chat threads just because the office agent delegated work.
+- The office agent gets stable person/channel/conversation primitives, not Slack tokens or adapter clients.
+- New agents stay in the existing Paseo lifecycle (`create_agent`, `create_worktree`) behind the
+  office agent, so users do not have to juggle extra chat threads just because the office
+  agent delegated work.
 
 ## Slice 1 — Chat service API between daemon tools and `packages/chat`
 
@@ -56,7 +58,7 @@ Slack adapter internals.
 ```ts
 interface ChatBridgeService {
   startConversation(input: {
-    callerAgentId: string;
+    officeAgentId: string;
     destination: ChatDestination;
     message: string;
     subscribe?: boolean;
@@ -64,14 +66,14 @@ interface ChatBridgeService {
   }): Promise<{ conversationId: string; externalThreadId: string }>;
 
   reply(input: {
-    callerAgentId: string;
+    officeAgentId: string;
     conversationId?: string;
     message: string;
     idempotencyKey?: string;
   }): Promise<{ conversationId: string; externalThreadId: string }>;
 
   ask(input: {
-    callerAgentId: string;
+    officeAgentId: string;
     destination: ChatDestination;
     question: string;
     timeoutMinutes: number;
@@ -103,8 +105,8 @@ Pick the smallest reliable local-only seam:
 
 ## Slice 2 — Evolve `ThreadSessionStore` to `ChatBindingStore`
 
-**Goal**: represent inbound sessions, outbound same-agent conversations, pending asks, focus, and
-audit records explicitly.
+**Goal**: represent inbound sessions, outbound same-agent conversations, pending asks, and audit
+records explicitly.
 
 **Files**
 
@@ -119,8 +121,6 @@ const ChatBindingSchema = z.discriminatedUnion("kind", [
     kind: z.literal("inbound-session"),
     externalThreadId: z.string(),
     rootAgentId: z.string(),
-    focusedAgentId: z.string(),
-    activeChildAgentId: z.string().nullable().default(null),
     activeRelayId: z.string().nullable().default(null),
     muted: z.boolean().default(false),
     title: z.string().nullable().default(null),
@@ -131,8 +131,7 @@ const ChatBindingSchema = z.discriminatedUnion("kind", [
     kind: z.literal("outbound-conversation"),
     conversationId: z.string(),
     externalThreadId: z.string(),
-    ownerAgentId: z.string(),
-    focusedAgentId: z.string(), // defaults to ownerAgentId
+    officeAgentId: z.string(),
     destination: ChatDestinationSchema,
     subscribed: z.boolean().default(true),
     pendingRequestId: z.string().optional(),
@@ -161,7 +160,7 @@ state files survive upgrade.
 - [ ] Existing v1 sessions load as inbound bindings.
 - [ ] Outbound bindings persist and reload after process restart.
 - [ ] Lookup by caller agent returns zero/one/many current/default bindings deterministically.
-- [ ] Focus lookup can find bindings by `rootAgentId`, `ownerAgentId`, or `focusedAgentId`.
+- [ ] Binding lookup can find conversations by `rootAgentId` or `officeAgentId`.
 
 ## Slice 3 — Destination resolution
 
@@ -211,11 +210,16 @@ If executor can see a channel but the Chat SDK bot cannot post, the tool returns
 - [ ] Channel name ambiguity returns choices instead of guessing.
 - [ ] Slack permalink resolves to an existing thread or channel destination.
 
-## Slice 4 — Subscription, reply routing, and focus
+## Slice 4 — Subscription and reply routing
 
-**Goal**: outbound-created conversations receive future replies and route them to the owning or
-focused agent. If the owning agent starts another Paseo agent/subagent, the same chat thread can
-follow focus instead of creating another external thread.
+**Goal**: outbound-created conversations receive future replies and route them to the office agent.
+If the office agent starts another Paseo agent/subagent, the same chat thread remains attached to
+the office agent instead of creating another external thread or talking to the child.
+
+**Inbound normalization requirement**: all Slack replies routed through this slice must preserve
+full URLs from Chat SDK `message.links[*].url`. Do not rely on `message.text` alone because Slack
+can render long links as shortened display text. If the exact URL is not already present in the
+cleaned text, append it under a compact `Links:` section before building the sender-prefixed prompt.
 
 **Flow: start channel/person conversation**
 
@@ -223,8 +227,7 @@ follow focus instead of creating another external thread.
 2. Post through Chat SDK (`thread.post` / adapter post target).
 3. Normalize created external thread id.
 4. `thread.subscribe()` if requested/default.
-5. Persist `outbound-conversation { ownerAgentId, focusedAgentId: ownerAgentId, externalThreadId,
-conversationId, subscribed }`.
+5. Persist `outbound-conversation { officeAgentId, externalThreadId, conversationId, subscribed }`.
 6. Return opaque `conversationId` to agent.
 
 **Flow: inbound reply**
@@ -234,23 +237,18 @@ conversationId, subscribed }`.
 3. Look up `ChatBinding`.
 4. If pending request exists, resolve pending ask first.
 5. Else route:
-   - `inbound-session` → `sendAgentMessage(focusedAgentId, sender-prefixed text)`
-   - `outbound-conversation` → `sendAgentMessage(focusedAgentId, sender-prefixed text)`
-6. Start timeline-polled relay back to the same external thread.
+   - `inbound-session` → `sendAgentMessage(rootAgentId, sender-prefixed text)`
+   - `outbound-conversation` → `sendAgentMessage(officeAgentId, sender-prefixed text)`
+6. Start timeline-polled relay from the office agent back to the same external thread.
 
 **Flow: agent creates another Paseo agent**
 
 1. Agent uses existing Paseo tools (`create_worktree` + `create_agent`, or `create_agent` in a
    project/workspace) with the proper relationship metadata.
-2. Bridge observes `agent_update` / labels (`paseo.parent-agent-id`) as v1 focus relay already does.
-3. If the parent/owner agent has a bound chat thread and no other child is currently focused, update
-   that binding's `focusedAgentId` to the new agent.
-4. Post a Chat SDK transition card in the same thread: "🔧 Focus moved to <agent title>" with a
-   **Back to office agent** button. The button uses a bridge-owned action id and immediately sets
-   `focusedAgentId` back to the owner/root agent; it does not ask the focused child.
-5. Replies in the same chat thread route to the new focused agent.
-6. On completion, `@cto ↑`, or the **Back to office agent** button, focus returns to the original
-   owner/root agent.
+2. The bridge takes no chat action for the spawned agent: no binding update, no child timeline
+   polling, no child permission relay, and no handoff card.
+3. The office agent remains responsible for supervising the child and summarizing progress back to
+   Slack in its own messages.
 
 **Restart recovery**
 
@@ -266,22 +264,60 @@ On bridge boot:
 
 **Done when**
 
-- [ ] Start outbound conversation, restart bridge, reply in Slack, and the focused agent receives
+- [ ] Start outbound conversation, restart bridge, reply in Slack, and the office agent receives
       the reply.
-- [ ] Owner agent starts a new Paseo agent; the same chat thread routes replies to the new focused
-      agent and the transition card includes a working **Back to office agent** button.
+- [ ] Office agent starts a new Paseo agent; the same chat thread continues routing replies to the
+      office agent and no child handoff/chat target is created.
 - [ ] Subscribed thread with no binding is ignored/logged, not routed arbitrarily.
 
-## Slice 5 — Blocking asks
+## Slice 5 — URL-preserving inbound prompt normalization
+
+**Goal**: agents always receive full URLs from Slack replies, even when Slack displays a shortened
+label in the message text.
+
+**Files**
+
+- `packages/chat/src/intake/slack.ts`
+- `packages/chat/src/intake/slack.test.ts`
+
+**Implementation notes**
+
+- Chat SDK exposes parsed links on `Message.links`; for Slack these are extracted from `rich_text`
+  link blocks when present, with a fallback to legacy `<url>` / `<url|text>` mrkdwn parsing.
+- Extend `normalizeMessage()` to append full URLs from `message.links[*].url` under `Links:` when
+  the exact URL is not already included in the cleaned text or attachment text.
+- Keep mention cleanup and attachment normalization separate from link preservation: the visible
+  user text should remain readable, while the appended links provide lossless machine context.
+- Apply the same helper to inbound sessions and outbound-conversation replies so v2 subscribed
+  threads do not regress relative to v1.
+
+**Regression tests**
+
+- [ ] `message.text = "facebook.com/p/Aunt-Kara-Mo…"` and
+      `message.links = [{ url: "https://www.facebook.com/p/Aunt-Kara-Mo-615.../" }]` produces a
+      prompt containing the full URL.
+- [ ] If the exact full URL is already present in cleaned text, no duplicate `Links:` entry is
+      added.
+- [ ] Multiple links are preserved in order and deduped.
+- [ ] Attachment fallback URLs and `message.links` URLs can both appear without one suppressing the
+      other unless they are exact duplicates.
+
+**Done when**
+
+- [ ] Slack's shortened displayed URL text no longer causes the office agent to receive a truncated
+      URL.
+- [ ] The behavior is covered by targeted tests for `normalizeMessage()`.
+
+## Slice 6 — Blocking asks
 
 **Goal**: `chat.askPerson` / `chat.askChannel` let an agent wait for human input safely.
 
 **Tool behavior**
 
 - Posts question to destination.
-- Stores `pendingRequest` with `requestId`, `conversationId`, `callerAgentId`, `deadline`.
+- Stores `pendingRequest` with `requestId`, `conversationId`, `officeAgentId`, `deadline`.
 - Suspends/resolves tool call if daemon tool runtime supports long waits; otherwise returns
-  `requestId` and uses a follow-up message to the owning agent when answered.
+  `requestId` and uses a follow-up message to the office agent when answered.
 - First qualifying human reply resolves the request with sender identity + answer text.
 - Timeout returns `{ status: "timeout", answer: null }`.
 - Cancel/teardown returns `{ status: "canceled", answer: null }`.
@@ -292,7 +328,7 @@ If daemon tools cannot hold a long-running promise robustly across restart, impl
 permission-like agent interrupts:
 
 1. tool posts question and returns `pending` + request id;
-2. bridge sends answer back to owning agent as a normal `sendAgentMessage` when received;
+2. bridge sends answer back to the office agent as a normal `sendAgentMessage` when received;
 3. agent prompt/tool docs instruct it to wait for that answer before proceeding.
 
 Prefer true blocking if the tool runtime can support it cleanly.
@@ -303,7 +339,7 @@ Prefer true blocking if the tool runtime can support it cleanly.
 - [ ] Ask times out after deadline.
 - [ ] Ask survives bridge restart.
 
-## Slice 6 — Policy, auditing, and UX errors
+## Slice 7 — Policy, auditing, and UX errors
 
 **Goal**: production safety without hard-locking channels to a static allowlist.
 
@@ -321,7 +357,7 @@ Prefer true blocking if the tool runtime can support it cleanly.
 type ChatAuditRecord = {
   id: string;
   timestamp: string;
-  callerAgentId: string;
+  officeAgentId: string;
   toolName: string;
   destination: ChatDestination;
   resolvedExternalThreadId?: string;
@@ -360,13 +396,14 @@ Use targeted checks only:
 ## Acceptance tests
 
 - Agent discovers `#growth` via executor MCP, passes channel id to `chat.startConversation`, bridge
-  posts a new thread, and replies route back to the focused agent.
-- Agent asks Vivek a question; Vivek replies; tool resumes or agent receives answer with sender
-  identity.
+  posts a new thread, and replies route back to the office agent.
+- Office agent asks Vivek a question; Vivek replies; tool resumes or the office agent receives the
+  answer with sender identity.
 - Bridge restarts between ask and reply; answer still routes correctly.
 - `chat.reply({ message })` uses current binding; ambiguous/no binding errors are clear.
-- Owner agent starts another Paseo agent/workspace; the same chat thread follows focus to that new
-  agent instead of creating a second chat thread, and the transition card includes **Back to office
-  agent**.
+- A Slack reply whose displayed text contains a shortened URL still reaches the office agent with
+  the full URL from Chat SDK `message.links`.
+- Office agent starts another Paseo agent/workspace; the same chat thread stays attached to the
+  office agent instead of creating a second chat thread or routing to the child.
 - Channel posting is not statically allowlist-gated by default.
 - No raw Slack posting API exists outside Chat SDK.

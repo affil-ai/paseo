@@ -42,17 +42,18 @@ turn_canceled`. `turnId` is stripped at the wire — group by start/end stream e
   `plan`. Schemas in `packages/protocol/src/messages.ts` (`AgentTimelineItem`,
   `ToolCallDetail`, `AgentStreamEventPayload`).
 
-## Subagents (focus relay)
+## Subagents (office-agent-only boundary)
 
 - `create_agent` with `relationship: { kind: "subagent" }` stamps `paseo.parent-agent-id` on
   the child; surfaced as `agent.parentAgentId` (`agent-lifecycle.md:22`).
-- Parent stays `idle` while the child runs (status is literal). So the bridge must detect the
-  child via an `agent_update` whose `parentAgentId === rootAgentId` and **switch the streamed
-  source** to the child.
+- Parent stays `idle` while the child runs (status is literal). The bridge does **not** compensate
+  by switching to the child. Slack remains attached to the office agent, which supervises and
+  summarizes child work.
 - The office agent creates children **itself** via its Paseo tools (`create_worktree` +
-  `create_agent`). The bridge does not initiate worktrees.
-- **REC:** the bridge stamps a `paseo.chat-thread-id` label on the office agent and every
-  relayed child (for cross-project grouping in the UI).
+  `create_agent`). The bridge does not initiate worktrees and does not track children as chat
+  state.
+- **REC:** the bridge stamps a `paseo.chat-thread-id` label on the office agent only. Child
+  association comes from the normal parent/subagent relationship in the UI.
 
 ## Permissions
 
@@ -111,5 +112,5 @@ turn_canceled`. `turnId` is stripped at the wire — group by start/end stream e
 
 Build the bridge as the thin transport adapter described in `docs/chat-bridge.md`: a
 `DaemonClient` over `127.0.0.1`, Chat SDK over Socket Mode, file-backed state, and glue modules
-for timeline polling, Slack rendering, permissions, and focus. Everything intelligent lives in
-the office agent and its prompt.
+for timeline polling, Slack rendering, and permissions. Everything intelligent lives in the
+office agent and its prompt.

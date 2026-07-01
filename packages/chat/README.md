@@ -1,6 +1,6 @@
 # @getpaseo/chat
 
-Slack bridge for Office. It runs next to the local daemon, listens for Slack mentions/DMs through Chat SDK, starts one office agent per Slack thread, and streams each turn back to Slack.
+Slack bridge for Office. It runs next to the local daemon, listens for Slack mentions/DMs through Chat SDK, starts one office agent per Slack thread, and relays office-agent turns back to Slack.
 
 ## Environment
 
@@ -36,7 +36,7 @@ SLACK_APP_TOKEN=xapp-... \
 node packages/chat/dist/index.js
 ```
 
-Mention the bot in Slack or DM it. Replies in the same thread continue the focused Office agent.
+Mention the bot in Slack or DM it. Replies in the same thread continue the Office agent.
 
 ## HTTP mode with a tunnel
 

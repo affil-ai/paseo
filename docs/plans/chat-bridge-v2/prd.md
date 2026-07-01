@@ -6,8 +6,8 @@ Date created: 2026-06-29
 ## Problem statement
 
 v1 lets humans start and continue office-agent sessions from Slack. v2 makes the bridge
-bidirectional: an existing Paseo agent can explicitly start or continue chat conversations with
-people or channels, while Slack/Chat SDK remains behind the bridge.
+bidirectional: the office agent can explicitly start or continue chat conversations with people or
+channels, while Slack/Chat SDK remains behind the bridge.
 
 The production model is:
 
@@ -24,22 +24,25 @@ people, and links — then pass those discovered destination references to the P
 bridge validates and posts through Chat SDK.
 
 Starting another agent is **not** a chat tool. If the office agent wants a new agent/workspace in a
-project, it should use the existing Paseo agent/workspace tools. The chat bridge then follows focus
-in the same bound chat thread instead of creating another chat thread for the user to juggle.
+project, it should use the existing Paseo agent/workspace tools. The chat bridge keeps the same
+bound chat thread attached to the office agent instead of creating another chat thread for the
+user to juggle or talking to the child directly.
 
 ## Goals
 
-- Let an existing agent message a person, channel, or existing chat binding through explicit
+- Let the office agent message a person, channel, or existing chat binding through explicit
   `chat.*` tools.
 - Let an agent discover available Slack channels/threads using executor MCP, then start
   conversations in channels it has access to — without requiring every channel to be pre-allowlisted.
 - Keep Slack tokens and posting mechanics inside `packages/chat` / Chat SDK.
-- Persist bindings so replies route back to the correct owning/focused agent after restart.
+- Persist bindings so replies route back to the correct office agent after restart.
 - Support blocking human input with `chat.askPerson` / `chat.askChannel` semantics and
   timeout/cancel/restart recovery.
-- Preserve the existing focus model: if the current agent starts another Paseo agent/subagent, the
-  existing chat binding follows the focused agent in the same external thread and shows a visible
-  **Back to office agent** button.
+- Preserve the office-agent-only chat boundary: if the office agent starts another Paseo
+  agent/subagent, the existing chat binding stays with the office agent and never exposes the child
+  as a chat target.
+- Preserve full inbound URLs from Slack even when Slack displays shortened link labels, so agents
+  receive the actual destination URL rather than Slack's rendered/truncated text.
 
 ## Non-goals
 
@@ -60,24 +63,23 @@ type ChatBinding =
       kind: "inbound-session";
       externalThreadId: string;
       rootAgentId: string;
-      focusedAgentId: string;
     }
   | {
       kind: "outbound-conversation";
       conversationId: string;
       externalThreadId: string;
-      ownerAgentId: string;
-      focusedAgentId: string;
+      officeAgentId: string;
       destination: ChatDestination;
       subscribed: boolean;
       pendingRequestId?: string;
     };
 ```
 
-`focusedAgentId` is what lets a chat binding follow a newly-created agent in the same thread. For
-inbound sessions this is already the v1 focus relay. For outbound conversations, it should default
-to `ownerAgentId` and shift if the owner creates a child/subagent that should take over the same
-conversation.
+A binding has exactly one conversational owner. For inbound sessions that is `rootAgentId` (the
+office agent). For outbound conversations that is `officeAgentId` (the office agent that called
+the chat tool). The bridge does not store `focusedAgentId`, `activeChildAgentId`, or
+`activeWorkAgentId` and does not shift chat ownership when the office agent creates a child/subagent.
+Child/coding agents should report to the office agent; they do not own chat bindings.
 
 ### Destination references
 
@@ -116,22 +118,41 @@ chat.askChannel({
 ```
 
 For channel conversations, `startConversation` posts a **new top-level channel message** and then
-subscribes to the created thread. Replies in that thread route back to the owning/focused agent.
-For an existing thread, the agent uses `conversationId` or a Slack permalink discovered via
+subscribes to the created thread. Replies in that thread route back to the office agent.
+For an existing thread, the office agent uses `conversationId` or a Slack permalink discovered via
 executor MCP and normalized by the chat tool.
 
-## How agents know where to message
+## Slack URL preservation
 
-Agents should have three ways to select a destination:
+Slack may render pasted links as shortened display labels (for example, a long Facebook URL shown
+as `facebook.com/p/Aunt-Kara-Mo…`). Chat SDK normalizes Slack messages with both `message.text`
+and `message.links`; the bridge must treat `message.links[*].url` as the authoritative URL source
+for agent prompts and reply routing context.
 
-1. **Current binding** — if the agent was started from Slack or already owns an outbound
+Requirements:
+
+- When normalizing inbound Slack messages, include every `message.links[*].url` in the prompt unless
+  the exact URL already appears in the cleaned text.
+- Do not rely on `message.text` alone for URLs; it may contain Slack's display label rather than the
+  full destination.
+- Preserve a user's visible text as-is, but append a compact `Links:` section with full URLs when
+  needed.
+- This applies to v2 outbound-conversation replies too: once the bridge subscribes to a thread it
+  started, human replies in that thread must use the same URL-preserving normalization path as v1
+  inbound sessions.
+
+## How the office agent knows where to message
+
+The office agent should have three ways to select a destination:
+
+1. **Current binding** — if the office agent was started from Slack or already owns an outbound
    conversation, `chat.reply({ message })` replies to the current/default binding.
 2. **Configured people aliases** — `person: "vivek"` resolves through people config and/or office
    memory metadata to a Slack DM target.
-3. **Executor-discovered channels/threads** — the agent uses executor MCP Slack tools to search or
-   list accessible Slack channels, inspect channel names/purposes/recent messages/permalinks, then
-   passes a channel ID/name/permalink to `chat.startConversation`, `chat.askChannel`, or
-   `chat.reply`.
+3. **Executor-discovered channels/threads** — the office agent uses executor MCP Slack tools to
+   search or list accessible Slack channels, inspect channel names/purposes/recent
+   messages/permalinks, then passes a channel ID/name/permalink to `chat.startConversation`,
+   `chat.askChannel`, or `chat.reply`.
 
 This is intentionally not a locked-down channel allowlist. Production policy is **capability and
 audit based**:
@@ -139,7 +160,7 @@ audit based**:
 - If the executor can discover a channel and the Chat SDK bot can post there, the chat tool may post.
 - Optional deny/allow policy can restrict sensitive channels, but it is not required for ordinary
   usage.
-- Every outbound post is audited with caller agent, destination, message preview, and resolved
+- Every outbound post is audited with office agent, destination, message preview, and resolved
   external thread.
 
 ## Subscription model
@@ -148,8 +169,8 @@ Subscription has two layers:
 
 1. **Transport subscription** — Chat SDK `thread.subscribe()` ensures future external replies fire
    `onSubscribedMessage`. This is persisted through the bridge's Chat SDK `StateAdapter`.
-2. **Product binding** — `ChatBinding` says which agent owns the external thread and which focused
-   agent should receive replies.
+2. **Product binding** — `ChatBinding` says which office agent owns the external thread and should
+   receive replies.
 
 On restart, the bridge loads both stores:
 
@@ -164,18 +185,17 @@ subscription alone never implies ownership.
 ## Routing rules
 
 - Human new DM/mention/unclaimed thread → create `inbound-session` and new office agent.
-- Human reply in bound inbound thread → route to `focusedAgentId`.
-- Human reply in bound outbound same-agent thread → route to `focusedAgentId` (initially
-  `ownerAgentId`).
-- Agent `chat.reply()` without `conversationId` → resolve default binding for caller agent; error
-  if none or ambiguous.
-- Agent `chat.startConversation(destination=person|channel)` → post through Chat SDK, subscribe,
-  store `outbound-conversation`, route replies back to caller/focused agent.
-- Agent `chat.askPerson` / `chat.askChannel` → same as start conversation plus pending request;
+- Human reply in bound inbound thread → route to `rootAgentId`.
+- Human reply in bound outbound same-agent thread → route to `officeAgentId`.
+- Office agent `chat.reply()` without `conversationId` → resolve default binding for the office
+  agent; error if none or ambiguous.
+- Office agent `chat.startConversation(destination=person|channel)` → post through Chat SDK,
+  subscribe, store `outbound-conversation`, route replies back to the office agent.
+- Office agent `chat.askPerson` / `chat.askChannel` → same as start conversation plus pending request;
   reply resolves the wait, timeout/cancel resolves explicitly.
-- Agent creates another Paseo agent/workspace using existing Paseo tools → bridge observes the
-  agent relationship and shifts `focusedAgentId` for the existing binding. No new chat thread is
-  created unless the agent separately calls `chat.startConversation` for a different audience.
+- Office agent creates another Paseo agent/workspace using existing Paseo tools → the binding
+  remains attached to the office agent. No new chat thread is created unless the office agent
+  separately calls `chat.startConversation` for a different audience.
 
 ## Permission and privacy posture
 
@@ -193,12 +213,12 @@ Outbound contact must be explicit tool use. The production guardrails are:
 
 ## Success criteria
 
-- An agent can discover a Slack channel through executor MCP, start a new subscribed thread in that
-  channel via `chat.startConversation`, and receive replies back into the same focused agent.
-- An agent can ask a person or channel a blocking question and resume when someone replies, across a
-  bridge restart.
+- The office agent can discover a Slack channel through executor MCP, start a new subscribed thread
+  in that channel via `chat.startConversation`, and receive replies back into the same office
+  agent.
+- The office agent can ask a person or channel a blocking question and resume when someone replies,
+  across a bridge restart.
 - `chat.reply()` replies to the current/default binding without the agent knowing Slack IDs.
 - Channel posts are audited and not restricted to a hardcoded allowlist by default.
-- If the office agent starts a new Paseo agent/workspace, the current chat thread follows focus to
-  that agent instead of creating a second chat thread, with a **Back to office agent** button on
-  the transition message.
+- If the office agent starts a new Paseo agent/workspace, the current chat thread stays attached
+  to the office agent instead of creating a second chat thread or routing replies to the child.
