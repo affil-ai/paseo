@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
 import { z } from "zod";
 
@@ -176,6 +177,8 @@ interface PiRpcAgentClientOptions {
 interface PiPromptPayload {
   text: string;
   images?: PiImageContent[];
+  timelineImages?: Array<{ data: string; mimeType: string }>;
+  timelineAttachments?: AgentAttachment[];
 }
 
 interface PiModelReference {
@@ -240,6 +243,8 @@ interface PiCapturedEntry extends PiCapturedUserMessageEntry {
 interface PendingPiUserMessage {
   text: string;
   turnId: string | undefined;
+  images?: Array<{ data: string; mimeType: string }>;
+  attachments?: AgentAttachment[];
 }
 
 interface PendingExtensionResult {
@@ -384,6 +389,8 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
 
   const textParts: string[] = [];
   const images: PiImageContent[] = [];
+  const timelineImages: Array<{ data: string; mimeType: string }> = [];
+  const timelineAttachments: AgentAttachment[] = [];
 
   for (const block of prompt) {
     if (block.type === "text") {
@@ -397,9 +404,11 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
         data: block.data,
         mimeType: block.mimeType,
       });
+      timelineImages.push({ data: block.data, mimeType: block.mimeType });
       continue;
     }
 
+    timelineAttachments.push(block);
     textParts.push(renderPromptAttachmentAsText(block));
   }
 
@@ -408,6 +417,10 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
   };
   if (images.length > 0) {
     payload.images = images;
+    payload.timelineImages = timelineImages;
+  }
+  if (timelineAttachments.length > 0) {
+    payload.timelineAttachments = timelineAttachments;
   }
   return payload;
 }
@@ -1103,6 +1116,7 @@ export class PiRpcAgentSession implements AgentSession {
   private activeAskUserDialog: ActiveAskUserDialog | null = null;
   private pendingCombinedAskUserResponse: PendingCombinedAskUserResponse | null = null;
   private activeTurnId: string | null = null;
+  private activePromptPayload: PiPromptPayload | null = null;
   private lastKnownThinkingOptionId: string | null;
   currentLeafOverrideId: string | null | undefined;
   private readonly capturedUserEntries: PiCapturedEntry[] = [];
@@ -1165,6 +1179,7 @@ export class PiRpcAgentSession implements AgentSession {
     const payload = convertPromptInput(prompt);
     const turnId = randomUUID();
     this.activeTurnId = turnId;
+    this.activePromptPayload = payload;
 
     void this.runtimeSession.prompt(payload.text, payload.images).catch((error) => {
       const failedTurnId = this.activeTurnId ?? turnId;
@@ -1597,6 +1612,10 @@ export class PiRpcAgentSession implements AgentSession {
           type: "user_message",
           text: pending.text,
           messageId: entry.id,
+          ...(pending.images && pending.images.length > 0 ? { images: pending.images } : {}),
+          ...(pending.attachments && pending.attachments.length > 0
+            ? { attachments: pending.attachments }
+            : {}),
         },
       });
     }
@@ -1937,7 +1956,16 @@ export class PiRpcAgentSession implements AgentSession {
     if (!text) {
       return;
     }
-    this.pendingUserMessages.push({ text, turnId });
+    this.pendingUserMessages.push({
+      text,
+      turnId,
+      ...(this.activePromptPayload?.timelineImages?.length
+        ? { images: this.activePromptPayload.timelineImages }
+        : {}),
+      ...(this.activePromptPayload?.timelineAttachments?.length
+        ? { attachments: this.activePromptPayload.timelineAttachments }
+        : {}),
+    });
     void this.requestEntryCapture("message_end").catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       this.emit({

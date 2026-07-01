@@ -52,7 +52,9 @@ export type StreamItem =
   | ActivityLogItem
   | CompactionItem;
 
-export type UserMessageImageAttachment = AttachmentMetadata;
+export type UserMessageImageAttachment =
+  | AttachmentMetadata
+  | { id: string; data: string; mimeType: string; fileName?: string | null };
 
 export interface UserMessageItem {
   kind: "user_message";
@@ -200,6 +202,8 @@ function buildUserMessageItem(input: {
   text: string;
   timestamp: Date;
   optimistic?: UserMessageItem | null;
+  images?: Array<{ data: string; mimeType: string }>;
+  attachments?: AgentAttachment[];
 }): UserMessageItem {
   if (input.optimistic) {
     return {
@@ -221,6 +225,18 @@ function buildUserMessageItem(input: {
     id: input.id,
     text: input.text,
     timestamp: input.timestamp,
+    ...(input.images && input.images.length > 0
+      ? {
+          images: input.images.map((image, index) => ({
+            id: `${input.id}:image:${index}`,
+            data: image.data,
+            mimeType: image.mimeType,
+          })),
+        }
+      : {}),
+    ...(input.attachments && input.attachments.length > 0
+      ? { attachments: input.attachments }
+      : {}),
   };
 }
 
@@ -280,6 +296,8 @@ function appendUserMessage(
   text: string,
   timestamp: Date,
   messageId?: string,
+  images?: Array<{ data: string; mimeType: string }>,
+  attachments?: AgentAttachment[],
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
   if (!hasContent) {
@@ -298,6 +316,8 @@ function appendUserMessage(
     text: chunk,
     timestamp,
     optimistic,
+    images,
+    attachments,
   });
 
   if (optimisticIndex >= 0) {
@@ -755,7 +775,16 @@ function reduceTimelineEvent(
   const item = event.item;
   switch (item.type) {
     case "user_message":
-      return finalizeActiveThoughts(appendUserMessage(state, item.text, timestamp, item.messageId));
+      return finalizeActiveThoughts(
+        appendUserMessage(
+          state,
+          item.text,
+          timestamp,
+          item.messageId,
+          item.images,
+          item.attachments,
+        ),
+      );
     case "assistant_message":
       return finalizeActiveThoughts(
         appendAssistantMessage(state, item.text, timestamp, source, item.messageId),

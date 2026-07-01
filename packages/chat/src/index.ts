@@ -54,6 +54,9 @@ export async function main(): Promise<void> {
   });
 
   await chat.initialize();
+  void bridge.recoverRelaysAfterRestart().catch((error) => {
+    console.warn("Slack relay recovery failed", error);
+  });
   const httpServer =
     config.slackMode === "http"
       ? startInboundHttpServer({ chat, host: config.httpHost, port: config.httpPort })

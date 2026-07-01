@@ -1,3 +1,7 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { Attachment, Message, Thread } from "chat";
 
 export interface SenderIdentity {
@@ -15,6 +19,7 @@ export interface NormalizedMessage {
   command: ThreadCommand;
   sender: SenderIdentity;
   images: Array<{ data: string; mimeType: string }>;
+  attachments: AgentAttachment[];
   attachmentText: string;
 }
 
@@ -100,36 +105,95 @@ export async function resolveSender(message: Message): Promise<SenderIdentity> {
   };
 }
 
+interface NormalizeMessageOptions {
+  attachmentDir: string;
+}
+
+async function attachmentDataToBuffer(attachment: Attachment): Promise<Buffer | null> {
+  const data: unknown =
+    attachment.data ?? (attachment.fetchData ? await attachment.fetchData() : null);
+  if (!data) return null;
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof Blob) return Buffer.from(await data.arrayBuffer());
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  return null;
+}
+
+function isImageAttachment(attachment: Attachment): boolean {
+  return attachment.type === "image" || Boolean(attachment.mimeType?.startsWith("image/"));
+}
+
+function sanitizeFileName(value: string): string {
+  const name = basename(value)
+    .replace(/[^a-zA-Z0-9._ -]/g, "_")
+    .trim();
+  return name.length > 0 && name !== "." && name !== ".." ? name : "attachment";
+}
+
+function attachmentLabel(attachment: Attachment): string {
+  return `${attachment.name ?? attachment.url ?? "attachment"}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}${attachment.url ? `: ${attachment.url}` : ""}`;
+}
+
 async function attachmentToImage(
   attachment: Attachment,
 ): Promise<{ data: string; mimeType: string } | null> {
-  if (attachment.type !== "image") return null;
-  const mimeType = attachment.mimeType ?? "image/png";
-  let data: Buffer | Blob | null = null;
-  if (attachment.data instanceof Buffer) {
-    data = attachment.data;
-  } else if (attachment.fetchData) {
-    data = await attachment.fetchData();
-  }
-  if (!data || !(data instanceof Buffer)) return null;
-  return { data: data.toString("base64"), mimeType };
+  if (!isImageAttachment(attachment)) return null;
+  const data = await attachmentDataToBuffer(attachment);
+  if (!data) return null;
+  return { data: data.toString("base64"), mimeType: attachment.mimeType ?? "image/png" };
+}
+
+async function attachmentToUploadedFile(
+  attachment: Attachment,
+  options: NormalizeMessageOptions,
+): Promise<AgentAttachment | null> {
+  const data = await attachmentDataToBuffer(attachment);
+  if (!data) return null;
+
+  const fileName = sanitizeFileName(attachment.name ?? "attachment");
+  const id = `slack_${randomUUID()}`;
+  const attachmentDir = join(options.attachmentDir, id);
+  const path = join(attachmentDir, fileName);
+  await mkdir(attachmentDir, { recursive: true });
+  await writeFile(path, data);
+
+  return {
+    type: "uploaded_file",
+    id,
+    fileName,
+    mimeType: attachment.mimeType ?? "application/octet-stream",
+    size: data.byteLength,
+    path,
+  };
 }
 
 export async function normalizeMessage(
   thread: Thread,
   message: Message,
+  options: NormalizeMessageOptions,
 ): Promise<NormalizedMessage> {
   const images: Array<{ data: string; mimeType: string }> = [];
+  const attachments: AgentAttachment[] = [];
   const attachmentLines: string[] = [];
-  for (const attachment of message.attachments) {
+  for (const attachment of message.attachments ?? []) {
     const image = await attachmentToImage(attachment);
     if (image) {
       images.push(image);
+      const uploadedImage = await attachmentToUploadedFile(attachment, options);
+      if (uploadedImage) {
+        attachments.push(uploadedImage);
+      }
       continue;
     }
-    attachmentLines.push(
-      `- ${attachment.name ?? attachment.url ?? "attachment"}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}${attachment.url ? `: ${attachment.url}` : ""}`,
-    );
+
+    const uploadedFile = await attachmentToUploadedFile(attachment, options);
+    if (uploadedFile) {
+      attachments.push(uploadedFile);
+      continue;
+    }
+
+    attachmentLines.push(`- ${attachmentLabel(attachment)}`);
   }
   const attachmentText =
     attachmentLines.length > 0 ? `Attachments:\n${attachmentLines.join("\n")}` : "";
@@ -144,6 +208,7 @@ export async function normalizeMessage(
     command: parseCommand(message.text),
     sender: await resolveSender(message),
     images,
+    attachments,
     attachmentText,
   };
 }

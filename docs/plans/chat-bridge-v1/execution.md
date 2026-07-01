@@ -19,8 +19,8 @@ Date created: 2026-06-27
 
 Ship `@getpaseo/chat`: a standalone Node process that bridges Slack (via Chat SDK, Socket Mode)
 to the local Paseo daemon, so a `@cto` mention starts an office agent whose final answer is posted
-back into the thread, with subagent focus relay, permissions, mute, and restart-safe state — no
-database and no public product HTTP surface.
+back into the thread, with permissions, mute, and restart-safe state — no database and no public
+product HTTP surface.
 
 ## Locked decisions
 
@@ -31,16 +31,18 @@ database and no public product HTTP surface.
   provider `pi`, model `openai-codex/gpt-5.5`, mode `medium` (all from config).
 - Chat SDK is the only Slack client; bot built with `concurrency: "queue"`.
 - File-backed state under `$PASEO_HOME/chat-bridge/`; copy `writeJsonFileAtomic` locally.
-- `ThreadSession { rootAgentId, focusedAgentId, muted, activeRelayId }` keyed by `externalThreadId`.
-- Focus relay: one child at a time, no sub-subagents, `@cto ↑` escape hatch, auto-return.
-- Stamp `paseo.chat-thread-id` on the office agent and every relayed child.
+- `ThreadSession { rootAgentId, muted, activeRelayId }` keyed by `externalThreadId`.
+- Office-agent-only chat boundary: the bridge never routes replies to child agents, never polls
+  child timelines, and never tracks active child work.
+- Stamp `paseo.chat-thread-id` on the office agent.
 
 ## Out of scope
 
 - Agent-initiated chat tools (`chat.startConversation`, `chat.askPerson`, `chat.askChannel`,
   `chat.reply`) — v2.
 - GitHub/Resend webhooks, remote/relay mode, multi-repo routing, outbound files, public REST API.
-  (All v2+ or dropped.) Minimal Slack webhook mode may exist only to support Chat SDK's own inbound
+  Inbound Slack images/files are v1 and are relayed to the office agent. (All other items v2+ or
+  dropped.) Minimal Slack webhook mode may exist only to support Chat SDK's own inbound
   adapter; it is not the v2 public webhook feature set.
 - The office brain capture/lint implementation (this plan only calls the teardown hook).
 
@@ -102,7 +104,6 @@ database and no public product HTTP surface.
 type ThreadSession = {
   externalThreadId: string;
   rootAgentId: string;
-  focusedAgentId: string;
   muted?: boolean;
   activeRelayId: string | null;
   createdAt: string;
@@ -148,7 +149,7 @@ type ThreadSession = {
 ### Slice 4 — Permissions + questions
 
 **Goal**: permission requests become Slack buttons; agent questions become numbered cards; both
-resolve against the focused agent.
+resolve against the office agent.
 
 **Files**
 
@@ -156,9 +157,9 @@ resolve against the focused agent.
 
 **Change map**
 
-| File             | Change                                                                                                                                                                                                                                                            |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `permissions.ts` | subscribe `agent_permission_request`; for kind `tool` render `actions[]` as standalone Block Kit buttons/cards; for kind `question` render a numbered card; on click/reply call `respondToPermission(focusedAgentId, request.id, { behavior, selectedActionId })` |
+| File             | Change                                                                                                                                                                                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `permissions.ts` | subscribe `agent_permission_request`; for kind `tool` render `actions[]` as standalone Block Kit buttons/cards; for kind `question` render a numbered card; on click/reply call `respondToPermission(rootAgentId, request.id, { behavior, selectedActionId })` |
 
 **Tests**
 
@@ -203,14 +204,14 @@ const agent = await client.createAgent({
   images,
   labels: { "paseo.chat-thread-id": externalThreadId },
 });
-await store.put({ externalThreadId, rootAgentId: agent.id, focusedAgentId: agent.id });
+await store.put({ externalThreadId, rootAgentId: agent.id });
 ```
 
 **Tests**
 
 - [ ] Duplicate `eventId` is skipped (inbound dedup).
 - [ ] Channel ambient message with no mention + no link is ignored; DM is not.
-- [ ] Reply on a linked thread routes to `sendAgentMessage(focusedAgentId, …)`.
+- [ ] Reply on a linked thread routes to `sendAgentMessage(rootAgentId, …)`.
 - [ ] Sender identity block is prepended to the prompt.
 
 **Done when**
@@ -239,33 +240,31 @@ await store.put({ externalThreadId, rootAgentId: agent.id, focusedAgentId: agent
 
 - [x] Office agents start with the assembled prompt (verified in create-agent request path).
 
-### Slice 7 — Subagent focus relay
+### Slice 7 — Office-agent-only delegation boundary
 
-**Goal**: the thread follows a spawned coding child and returns to the office agent on
-completion; one child at a time; escape hatch.
+**Goal**: the office agent can spawn coding subagents with normal Paseo tools while Slack remains
+attached only to the office agent.
 
 **Files**
 
-- `packages/chat/src/focus.ts`
-- `packages/chat/src/bridge.ts` (escape-hatch reply handling and timeline relay target)
+- `packages/chat/src/bridge.ts` (reply routing and timeline relay target)
 
 **Change map**
 
-| File        | Change                                                                                                                                                                                                                                                                                                                             |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `focus.ts`  | watch `agent_update` where `parentAgentId === rootAgentId`; if no child currently focused, set `focusedAgentId = childId`, stamp `paseo.chat-thread-id`, post a "🔧 handed off to `<worktree>`" divider; ignore a second concurrent child; on child terminal state set `focusedAgentId = rootAgentId` and post the child's summary |
-| `bridge.ts` | detect `@cto ↑` reply → pop focus to `rootAgentId` without stopping the child; poll the current `focusedAgentId` timeline for output                                                                                                                                                                                               |
+| File        | Change                                                                                                                                                                                               |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bridge.ts` | always route subscribed replies to `rootAgentId`; always poll the office agent timeline; ignore spawned child agents as chat targets; rely on the office agent to supervise and summarize child work |
 
 **Tests**
 
-- [ ] First child shifts focus + posts divider; second concurrent child does not hijack.
-- [ ] Child terminal state returns focus to root and posts a summary line.
-- [ ] `@cto ↑` re-targets root while the child keeps running.
+- [ ] A child agent starting does not change the thread session or relay target.
+- [ ] Replies during child work still go to the office agent.
+- [ ] No `@cto ↑` / focus escape behavior exists because Slack never leaves the office agent.
 
 **Done when**
 
-- [ ] "fix X and open a PR" relays the coding child's work, then "opened PR #N" from the office
-      agent. _Focus relay code implemented; pending Slack/manual subagent test._
+- [ ] "fix X and open a PR" keeps Slack attached to the office agent, and the office agent reports
+      the child result itself. _Pending Slack/manual subagent test._
 
 ### Slice 8 — Mute / unmute / aside + errors + teardown
 
@@ -316,8 +315,8 @@ completion; one child at a time; escape hatch.
 ## Cross-slice acceptance criteria
 
 - [ ] Mention → office agent starts → final answer posts in the thread. _Pending Slack manual test._
-- [ ] Reply (from any channel member) continues the focused agent. _Pending Slack manual test._
-- [ ] Coding subagent work is relayed into the thread, then focus returns to the office agent. _Pending Slack manual test._
+- [ ] Reply (from any channel member) continues the office agent. _Pending Slack manual test._
+- [ ] Coding subagent work is supervised and summarized by the office agent; the bridge never relays the child directly. _Pending Slack manual test._
 - [ ] Permission prompts and questions are answerable from Slack. _Pending Slack manual test._
 - [ ] Mute/unmute/aside/done work. _Pending Slack manual test._
 - [x] No double-post after a bridge restart mid-thread (delivery receipts).
@@ -339,7 +338,7 @@ completion; one child at a time; escape hatch.
 - Implemented `packages/chat` as a Socket Mode-only Chat SDK process. Slack calls are routed through `chat` / `@chat-adapter/slack`; there are no direct Slack Web API imports or fetches.
 - The state layer is file-backed under `PASEO_CHAT_STATE_DIR` / `$PASEO_HOME/chat-bridge`, with atomic JSON writes and Chat SDK `StateAdapter` persistence.
 - Permission buttons use Chat SDK cards/actions. Question prompts are stored as pending per thread and resolved by the next thread reply.
-- Focus relay watches `agent_update` labels for `paseo.parent-agent-id`; it stamps `paseo.chat-thread-id` on the first focused child and ignores concurrent second children.
+- The bridge intentionally does not watch child-agent focus or stamp chat labels on children; subagents stay behind the office agent.
 - The office-brain teardown capture hook is intentionally not implemented yet because the office-brain feature is still scoped as not implemented; `@cto done` archives and unlinks the thread.
 - Manual Slack end-to-end verification is still pending because Slack app credentials are required.
 
@@ -348,15 +347,14 @@ completion; one child at a time; escape hatch.
 - `package.json`, `package-lock.json` — added `packages/chat` workspace and `build:chat`.
 - `packages/chat/package.json`, `packages/chat/tsconfig.json`, `packages/chat/README.md` — new package scaffold and operator setup docs.
 - `packages/chat/src/config.ts`, `paseo-client.ts`, `index.ts` — boot/config/daemon connection/Chat SDK Slack wiring.
-- `packages/chat/src/bridge.ts`, `prompt.ts`, `render.ts`, `focus.ts`, `permissions.ts` — intake-to-agent flow, timeline-polled output relay, prompt assembly, subagent focus relay, permission handling.
-- `packages/chat/src/intake/slack.ts` — Slack message normalization, commands, context capture, image attachments, sender identity.
+- `packages/chat/src/bridge.ts`, `prompt.ts`, `render.ts`, `permissions.ts` — intake-to-agent flow, timeline-polled output relay, prompt assembly, permission handling.
+- `packages/chat/src/intake/slack.ts` — Slack message normalization, commands, context capture, image/file attachments, sender identity.
 - `packages/chat/src/state/json-state.ts`, `thread-session-store.ts`, `chat-state-adapter.ts` — durable state, dedup/delivery receipts, Chat SDK state adapter.
 
 ## Follow-ups (v2+, do not scope-creep into v1)
 
 - Agent-initiated chat tools and outbound bindings: `chat.startConversation`, `chat.askPerson`,
   `chat.askChannel`, `chat.reply`.
-- Handoff card with a **Back to office agent** button for focus transitions.
 - `inbound-http.ts` + GitHub PR-merge webhook + Resend email intake.
 - Remote mode (relay + E2EE), second Chat SDK adapter (Discord/Telegram).
 - Optional multi-repo routing (intake profiles + LLM classification).

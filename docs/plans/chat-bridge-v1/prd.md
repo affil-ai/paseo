@@ -24,9 +24,9 @@ optional multi-repo routing are explicitly v2 and out of scope here.
 - Tag `@cto` (the bot) in a channel or DM → a new office agent starts in a fresh Paseo
   workspace and the bridge posts the first complete assistant text block plus the final assistant
   text block back into the Slack thread.
-- Reply in a linked thread → continues the same focused agent.
-- When the office agent spawns a coding subagent, the thread **follows that child** (focus
-  relay), then returns to the office agent when the child finishes.
+- Reply in a linked thread → continues the same office agent.
+- When the office agent spawns a coding subagent, the thread stays attached to the office agent;
+  the bridge does not route replies to or relay output from the child.
 - Permission prompts and agent questions surface as Slack buttons / numbered cards.
 - The bridge survives a daemon or bridge restart without double-posting or losing thread links.
 
@@ -35,12 +35,10 @@ optional multi-repo routing are explicitly v2 and out of scope here.
 - As a founder, I tag `@cto investigate why trial conversion dropped` in `#growth` and watch it
   pull data, reason, and answer — all in the thread.
 - As a founder, I tag `@cto fix the onboarding crash and open a PR`; the office agent delegates
-  to a coding subagent in a worktree, and the thread shows that child's work, then "opened PR
-  #42".
+  to a coding subagent in a worktree, supervises it, and reports the result back in the thread
+  itself.
 - As any channel member, I reply in a running thread to steer it — without re-mentioning the
   bot.
-- As a founder, I reply `@cto ↑` to pull focus back to the supervisor while a child keeps
-  running.
 - As a founder, I say `@cto mute` to silence a noisy thread, and `@cto done` to wrap it up
   (which also triggers memory capture).
 
@@ -51,9 +49,9 @@ optional multi-repo routing are explicitly v2 and out of scope here.
 - **Default provider is `pi`**, backing model **Codex `gpt-5.5` (medium)**. No per-message
   model-routing tags; the office agent picks other models itself when delegating.
 - **Worktrees are agent-initiated only** — the bridge never cuts one.
-- **Focus relay**: one focused child at a time, no sub-subagents, escape hatch `@cto ↑`,
-  auto-return to the office agent on child completion.
-- **Multiplayer**: any channel member can steer the focused agent; identity is attached per
+- **Office-agent-only chat boundary**: the bridge never routes replies to child agents, never
+  polls child timelines, and never tracks active child work.
+- **Multiplayer**: any channel member can steer the office agent; identity is attached per
   message.
 - **Chat SDK is the only Slack client** — no raw Slack Web API calls.
 - **State is file-backed** under `$PASEO_HOME/chat-bridge/` — no database.
@@ -66,7 +64,7 @@ optional multi-repo routing are explicitly v2 and out of scope here.
 - Public inbound HTTP server (GitHub PR-merge webhook, Resend email intake) — v2.
 - Remote deployment over relay+E2EE — v2 (v1 is `127.0.0.1` only).
 - Multi-repo intake profiles + LLM route classification — v2, optional.
-- Outbound file attachments (agent → Slack files) — v2 (inbound images are in v1).
+- Outbound file attachments (agent → Slack files) — v2 (inbound images/files are in v1).
 - Public programmatic REST API / multi-daemon fan-out — dropped.
 - The office brain's capture/lint _implementation_ — this plan only fires the teardown
   trigger; the brain workflow is scoped in [office-brain.md](../../office-brain.md).
@@ -74,7 +72,7 @@ optional multi-repo routing are explicitly v2 and out of scope here.
 ## Success criteria
 
 From Slack you can: start the office agent, get first/final assistant updates, have it delegate
-code work to a coding subagent and watch the thread follow that child and come back, answer its
+code work to a coding subagent while the thread remains attached to the office agent, answer its
 permission prompts, reply (as any channel member) to continue it, mute it, and wrap it with
 `@cto done` — all surviving a daemon or bridge restart with no double-posts.
 
