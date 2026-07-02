@@ -3,7 +3,6 @@ import type {
   DaemonClient,
   FetchAgentTimelinePayload,
 } from "@getpaseo/client/internal/daemon-client";
-import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import {
   emoji,
   LinkButton,
@@ -27,8 +26,9 @@ import { slackMarkdownFixups } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
 import {
   CHAT_THREAD_LABEL,
+  getBindingOwnerAgentId,
   ThreadSessionStore,
-  type ThreadSession,
+  type ChatBinding,
 } from "./state/thread-session-store.js";
 
 function sleep(ms: number): Promise<void> {
@@ -95,7 +95,7 @@ export class ChatBridge {
   async recoverRelaysAfterRestart(): Promise<void> {
     const sessions = Object.values((await this.store.load()).sessions);
     for (const session of sessions) {
-      const agentId = session.focusedAgentId;
+      const agentId = getBindingOwnerAgentId(session);
       const timeline = await this.client
         .fetchAgentTimeline(agentId, {
           direction: "tail",
@@ -136,6 +136,24 @@ export class ChatBridge {
     }
   }
 
+  async expirePendingRequests(now = new Date()): Promise<void> {
+    const expired = await this.store.expirePendingRequests(now);
+    for (const request of expired) {
+      await this.client
+        .sendAgentMessage(
+          request.officeAgentId,
+          `Chat ask ${request.requestId} timed out without an answer.`,
+        )
+        .catch((error) => {
+          console.warn("Failed to notify office agent of chat ask timeout", {
+            requestId: request.requestId,
+            officeAgentId: request.officeAgentId,
+            error,
+          });
+        });
+    }
+  }
+
   async handleAgentTurnStarted(agentId: string, eventSeq?: number): Promise<void> {
     const session = await this.findLinkedSessionForAgent(agentId);
     if (!session) return;
@@ -163,19 +181,73 @@ export class ChatBridge {
     });
   }
 
-  private async findLinkedSessionForAgent(agentId: string): Promise<ThreadSession | null> {
+  private async findLinkedSessionForAgent(agentId: string): Promise<ChatBinding | null> {
     const directSession = await this.store.findSessionByAgent(agentId);
     if (directSession) return directSession;
 
     const result = await this.client.fetchAgent(agentId).catch(() => null);
     const labels = result?.agent.labels ?? {};
     const externalThreadId = labels[CHAT_THREAD_LABEL];
-    if (externalThreadId) return this.store.getSession(externalThreadId);
+    if (!externalThreadId) return null;
 
-    const parentAgentId = getParentAgentIdFromLabels(labels);
-    if (!parentAgentId) return null;
-    const sessions = Object.values((await this.store.load()).sessions);
-    return sessions.find((session) => session.rootAgentId === parentAgentId) ?? null;
+    const binding = await this.store.getSession(externalThreadId);
+    return binding && getBindingOwnerAgentId(binding) === agentId ? binding : null;
+  }
+
+  private async handleCommand(
+    thread: Thread,
+    message: Message,
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>,
+    existing: ChatBinding | null,
+  ): Promise<boolean> {
+    if (normalized.command === "aside") return true;
+    if (normalized.command === "mute" || normalized.command === "unmute") {
+      if (existing?.kind === "inbound-session") {
+        await this.store.updateSession(normalized.externalThreadId, (binding) => {
+          if (binding.kind === "inbound-session") binding.muted = normalized.command === "mute";
+        });
+      }
+      await this.reactToMuteCommand(thread, message, normalized.command);
+      return true;
+    }
+    if (normalized.command === "escape" && existing) {
+      await this.focus.escapeToRoot(normalized.externalThreadId);
+      await this.postMessage(
+        thread,
+        normalized.externalThreadId,
+        "Chat already belongs to the office agent. Coding children keep reporting through it.",
+      );
+      return true;
+    }
+    if (normalized.command === "done" && existing) {
+      await this.client.archiveAgent(getBindingOwnerAgentId(existing));
+      await this.store.deleteSession(normalized.externalThreadId);
+      await this.postMessage(
+        thread,
+        normalized.externalThreadId,
+        "Done — archived the office agent for this thread.",
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private async answerPendingAsk(
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>,
+  ): Promise<boolean> {
+    const pendingAsk = await this.store.takePendingRequestForThread(normalized.externalThreadId);
+    if (!pendingAsk) return false;
+    await this.store.finishPendingRequest(
+      pendingAsk.requestId,
+      "answered",
+      normalized.cleanedText,
+      normalized.sender.handle ?? normalized.sender.name,
+    );
+    await this.client.sendAgentMessage(
+      pendingAsk.officeAgentId,
+      `Answer to chat ask ${pendingAsk.requestId} from ${normalized.sender.name}:\n\n${normalized.cleanedText}`,
+    );
+    return true;
   }
 
   async handleMessage(
@@ -191,40 +263,12 @@ export class ChatBridge {
     if (shouldIgnoreAmbient(thread, message, Boolean(existing))) return;
     if (!(await this.store.markEventProcessed(normalized.eventId))) return;
     await thread.subscribe();
-
-    if (normalized.command === "aside") return;
-    if (normalized.command === "mute" || normalized.command === "unmute") {
-      if (existing) {
-        await this.store.updateSession(normalized.externalThreadId, (session) => {
-          session.muted = normalized.command === "mute";
-        });
-      }
-      await this.reactToMuteCommand(thread, message, normalized.command);
-      return;
-    }
-    if (normalized.command === "escape" && existing) {
-      await this.focus.escapeToRoot(normalized.externalThreadId);
-      await this.postMessage(
-        thread,
-        normalized.externalThreadId,
-        "Talking to the office agent again. The coding child can keep running in Office.",
-      );
-      return;
-    }
-    if (normalized.command === "done" && existing) {
-      await this.client.archiveAgent(existing.rootAgentId);
-      await this.store.deleteSession(normalized.externalThreadId);
-      await this.postMessage(
-        thread,
-        normalized.externalThreadId,
-        "Done — archived the office agent for this thread.",
-      );
-      return;
-    }
-    if (existing?.muted && !message.isMention) return;
+    if (await this.handleCommand(thread, message, normalized, existing)) return;
+    if (existing?.kind === "inbound-session" && existing.muted && !message.isMention) return;
 
     try {
       const session = existing ?? (await this.startNewSession(thread, message, normalized));
+      if (await this.answerPendingAsk(normalized)) return;
       if (
         await this.permissions.answerPendingQuestion(
           normalized.externalThreadId,
@@ -233,13 +277,14 @@ export class ChatBridge {
       )
         return;
       const relayId = message.id;
-      const sinceSeq = existing ? await this.getTimelineNextSeq(session.focusedAgentId) : 0;
+      const ownerAgentId = getBindingOwnerAgentId(session);
+      const sinceSeq = existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
       await this.store.updateSession(normalized.externalThreadId, (current) => {
         current.activeRelayId = relayId;
       });
       if (existing) {
         await this.client.sendAgentMessage(
-          session.focusedAgentId,
+          ownerAgentId,
           assembleFollowupPrompt(normalized.sender, normalized.cleanedText),
           {
             images: normalized.images,
@@ -250,7 +295,7 @@ export class ChatBridge {
       this.startBackgroundRelay({
         thread,
         externalThreadId: normalized.externalThreadId,
-        agentId: session.focusedAgentId,
+        agentId: ownerAgentId,
         messageId: message.id,
         source,
         sinceSeq,
@@ -300,10 +345,9 @@ export class ChatBridge {
 
     const now = new Date().toISOString();
     const session = {
+      kind: "inbound-session" as const,
       externalThreadId: normalized.externalThreadId,
       rootAgentId: agent.id,
-      focusedAgentId: agent.id,
-      activeChildAgentId: null,
       activeRelayId: null,
       muted: false,
       title,
