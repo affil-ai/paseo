@@ -1117,6 +1117,7 @@ export class PiRpcAgentSession implements AgentSession {
   private pendingCombinedAskUserResponse: PendingCombinedAskUserResponse | null = null;
   private activeTurnId: string | null = null;
   private activePromptPayload: PiPromptPayload | null = null;
+  private readonly locallyCanceledTurnIds = new Set<string>();
   private lastKnownThinkingOptionId: string | null;
   currentLeafOverrideId: string | null | undefined;
   private readonly capturedUserEntries: PiCapturedEntry[] = [];
@@ -1182,17 +1183,17 @@ export class PiRpcAgentSession implements AgentSession {
     this.activePromptPayload = payload;
 
     void this.runtimeSession.prompt(payload.text, payload.images).catch((error) => {
-      const failedTurnId = this.activeTurnId ?? turnId;
-      this.activeTurnId = null;
-      if (isPiRequestAbortError(error)) {
-        emitPiTurnCanceled(
-          (event) => this.emit(event),
-          failedTurnId,
-          toDiagnosticErrorMessage(error),
-        );
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = null;
+      }
+      if (this.locallyCanceledTurnIds.delete(turnId)) {
         return;
       }
-      emitPiTurnFailed((event) => this.emit(event), failedTurnId, toDiagnosticErrorMessage(error));
+      if (isPiRequestAbortError(error)) {
+        emitPiTurnCanceled((event) => this.emit(event), turnId, toDiagnosticErrorMessage(error));
+        return;
+      }
+      emitPiTurnFailed((event) => this.emit(event), turnId, toDiagnosticErrorMessage(error));
     });
 
     return { turnId };
@@ -1285,7 +1286,24 @@ export class PiRpcAgentSession implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
-    await this.runtimeSession.abort();
+    const turnId = this.activeTurnId;
+    if (!turnId) {
+      await this.runtimeSession.abort();
+      return;
+    }
+
+    this.locallyCanceledTurnIds.add(turnId);
+    this.activeTurnId = null;
+    emitPiTurnCanceled((event) => this.emit(event), turnId, "interrupted");
+    void this.runtimeSession.abort().catch((error) => {
+      this.locallyCanceledTurnIds.delete(turnId);
+      this.emit({
+        type: "turn_failed",
+        provider: PI_PROVIDER,
+        turnId,
+        error: toDiagnosticErrorMessage(error),
+      });
+    });
   }
 
   async revertConversation(input: { messageId: string }): Promise<void> {
@@ -2003,6 +2021,12 @@ export class PiRpcAgentSession implements AgentSession {
   }
 
   private completeTurn(turnId: string | undefined, messages: PiAgentMessage[]): void {
+    if (turnId && this.locallyCanceledTurnIds.delete(turnId)) {
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = null;
+      }
+      return;
+    }
     this.activeTurnId = null;
     const terminalResult = latestPiTurnTerminalResult(messages);
     if (terminalResult?.type === "canceled") {
