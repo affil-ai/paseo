@@ -38,6 +38,8 @@ user to juggle or talking to the child directly.
 - Persist bindings so replies route back to the correct office agent after restart.
 - Support blocking human input with `chat.askPerson` / `chat.askChannel` semantics and
   timeout/cancel/restart recovery.
+- Let the office agent explicitly send generated images and files back to the current or selected
+  chat conversation through Chat SDK uploads.
 - Preserve the office-agent-only chat boundary: if the office agent starts another Paseo
   agent/subagent, the existing chat binding stays with the office agent and never exposes the child
   as a chat target.
@@ -47,7 +49,7 @@ user to juggle or talking to the child directly.
 ## Non-goals
 
 - No raw Slack Web API posting path inside agents or daemon tools.
-- No ambient auto-DMs or auto-channel-posts from ordinary assistant text.
+- No ambient auto-DMs, auto-channel-posts, or auto-file-uploads from ordinary assistant text.
 - No bridge-owned task routing/classification.
 - No chat tool that creates a new agent or workspace.
 - No requirement that every postable channel be statically configured up front. Static allowlists
@@ -115,12 +117,46 @@ chat.askChannel({
   question: "Does anyone know whether this partner changed tracking links yesterday?",
   timeoutMinutes: 90,
 });
+
+chat.sendFile({
+  conversationId: "conv_...", // optional when there is a current/default binding
+  path: "/home/olumbe/code/office/reports/partner-analysis.csv",
+  message: "Here is the report CSV.",
+});
+
+chat.sendImage({
+  path: "/home/olumbe/code/office/artifacts/funnel-chart.png",
+  message: "Chart attached.",
+});
 ```
 
 For channel conversations, `startConversation` posts a **new top-level channel message** and then
 subscribes to the created thread. Replies in that thread route back to the office agent.
 For an existing thread, the office agent uses `conversationId` or a Slack permalink discovered via
 executor MCP and normalized by the chat tool.
+
+### Outbound files and images
+
+Outbound media is explicit tool use, not assistant-text scraping. If the office agent generates a
+CSV, PDF, screenshot, chart, or other local artifact, it calls `chat.sendFile` / `chat.sendImage`
+(or `chat.reply` with a `files` array) and passes the file path plus an optional message. The
+bridge posts the bytes through Chat SDK (`thread.post({ markdown, files })`) so Slack receives a
+real file upload in the same thread.
+
+Requirements:
+
+- Do not infer uploads from assistant text like "I saved `/tmp/foo.png`". The agent must call a
+  `chat.*` tool.
+- Support any readable local file; use MIME sniffing/extension fallback for Slack metadata.
+- `chat.sendImage` is a convenience over `chat.sendFile` with image MIME validation and nicer tool
+  docs for generated charts/screenshots.
+- Files route to the current/default binding unless `conversationId` is supplied.
+- For local deployments, the bridge may read the path directly if it runs on the daemon host. For
+  remote bridge deployments, the daemon-side tool must read and stream bytes to the bridge; the
+  bridge must not assume the path exists on its own host.
+- Apply size limits, readable-path validation, and clear errors (`file_not_found`,
+  `file_too_large`, `unsupported_file`, `bridge_unavailable`).
+- Audit file sends with path/filename, size, MIME type, destination, and result.
 
 ## Slack URL preservation
 
@@ -193,6 +229,9 @@ subscription alone never implies ownership.
   subscribe, store `outbound-conversation`, route replies back to the office agent.
 - Office agent `chat.askPerson` / `chat.askChannel` → same as start conversation plus pending request;
   reply resolves the wait, timeout/cancel resolves explicitly.
+- Office agent `chat.sendFile` / `chat.sendImage` → resolve current/default binding or
+  `conversationId`, upload bytes through Chat SDK, and keep replies routed to the same office
+  agent.
 - Office agent creates another Paseo agent/workspace using existing Paseo tools → the binding
   remains attached to the office agent. No new chat thread is created unless the office agent
   separately calls `chat.startConversation` for a different audience.
@@ -210,6 +249,8 @@ Outbound contact must be explicit tool use. The production guardrails are:
 - No raw Slack tokens exposed to agents.
 - If channel posting fails because the bot is not in the channel or lacks access, return a clear
   tool error with suggested next steps.
+- File upload tools validate paths and sizes before posting; failures are returned as tool errors,
+  not partial Slack messages.
 
 ## Success criteria
 
@@ -218,7 +259,10 @@ Outbound contact must be explicit tool use. The production guardrails are:
   agent.
 - The office agent can ask a person or channel a blocking question and resume when someone replies,
   across a bridge restart.
+- The office agent can generate a local image or file and explicitly upload it to the current Slack
+  thread with `chat.sendImage` / `chat.sendFile`.
 - `chat.reply()` replies to the current/default binding without the agent knowing Slack IDs.
 - Channel posts are audited and not restricted to a hardcoded allowlist by default.
 - If the office agent starts a new Paseo agent/workspace, the current chat thread stays attached
   to the office agent instead of creating a second chat thread or routing replies to the child.
+- Outbound file/image sends are audited and never happen implicitly from assistant text.

@@ -357,6 +357,15 @@ export class ChatBridge {
     );
   }
 
+  private async clearActiveRelayIfCurrent(
+    externalThreadId: string,
+    relayId: string,
+  ): Promise<void> {
+    await this.store.updateSession(externalThreadId, (current) => {
+      if (current.activeRelayId === relayId) current.activeRelayId = null;
+    });
+  }
+
   private startBackgroundRelay(input: {
     thread: Thread | null;
     externalThreadId: string;
@@ -369,7 +378,9 @@ export class ChatBridge {
   }): void {
     void this.relayTurn(input).catch(async (error) => {
       console.warn("Slack relay failed", error);
-      if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) return;
+      const wasCurrent = await this.isRelayCurrent(input.externalThreadId, input.relayId);
+      await this.clearActiveRelayIfCurrent(input.externalThreadId, input.relayId);
+      if (!wasCurrent) return;
       const reason = error instanceof Error ? error.message : String(error);
       await this.postMessage(
         input.thread,

@@ -59,6 +59,14 @@ Slack output must stay in the user's message thread:
 - Post the first complete assistant text block for a turn, then post the final assistant text block when the agent stops. If first and final are the same text, post it only once.
 - Fetch assistant text from the daemon's canonical timeline and post complete assistant text blocks as normal thread replies. Do not use native Slack streaming.
 
+Slack input should match the app's default send behavior:
+
+- If a human replies while the bound office agent is still running, the follow-up interrupts the
+  active turn and starts the new prompt, just like pressing Enter in the Paseo UI.
+- Pi allows only one active provider turn at a time, so the daemon/provider interrupt path must
+  acknowledge cancellation before starting the replacement turn; otherwise `A Pi turn is already
+active` can leave the agent in an error state.
+
 ## Hard constraint: Chat SDK is the _only_ Slack client
 
 All Slack interaction goes through Chat SDK (`chat` + `@chat-adapter/slack`). The bridge
@@ -192,7 +200,11 @@ what to say externally.
    stores a pending request. The tool call (or permission-like wait) resolves when the person
    replies, with timeout/cancel semantics. Still the same office agent; the current task is waiting
    for human input.
-3. **New agents stay behind the office agent.** If the office agent wants a new agent/workspace,
+3. **Artifact reply / explicit upload.** `chat.sendFile(...)` / `chat.sendImage(...)` uploads a
+   generated local artifact (CSV, PDF, screenshot, chart, etc.) to the current or selected chat
+   conversation through Chat SDK. Uploads are explicit tool calls; the bridge does not scrape
+   assistant text for file paths.
+4. **New agents stay behind the office agent.** If the office agent wants a new agent/workspace,
    it uses normal Paseo tools (`create_agent`, `create_worktree`, etc.). The bridge keeps talking
    only to the office agent. Chat tools never create agents.
 
@@ -206,8 +218,9 @@ what to say externally.
   subscriptions, pending request deadlines, and delivery receipts; expired asks resolve as
   timeout/canceled rather than hanging forever.
 - Outbound contact requires an explicit `chat.*` tool call. Ordinary assistant messages must not
-  ambiently DM people. Record an audit trail (agent id, requester, person, external thread id,
-  message preview, timestamp) and support an optional allowlist per workspace/person/channel.
+  ambiently DM people or upload files. Record an audit trail (agent id, requester, person,
+  external thread id, message/file preview, timestamp) and support an optional allowlist per
+  workspace/person/channel.
 
 ## Task model
 
@@ -405,7 +418,8 @@ otherwise outbound-only), which unlocks webhook-driven features. v2 delivers:
 - **Agent-initiated chat tools** — `chat.startConversation`, `chat.reply`, `chat.askPerson`, and
   `chat.askChannel`, with executor-discovered channel destinations, durable outbound bindings,
   pending asks, restart recovery, and audit records.
-- **Bidirectional file attachments** — agent-produced files posted back to the thread.
+- **Bidirectional file attachments** — agent-produced files/images posted back to the thread via
+  explicit `chat.sendFile` / `chat.sendImage` tools and Chat SDK uploads.
 - **Second chat adapter** (Discord or Telegram) to prove the platform-agnostic seam.
 - **Remote deployment mode** — bridge on a different host than the daemon, connecting over the
   Paseo relay with E2EE (the same path the mobile app uses), instead of `127.0.0.1`.

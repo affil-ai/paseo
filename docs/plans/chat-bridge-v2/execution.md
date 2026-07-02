@@ -10,9 +10,9 @@ Date created: 2026-06-29
 ## Goal
 
 Add production-ready `chat.*` tools so agents can explicitly message people/channels, ask blocking
-questions, and reply to current/bound conversations. Agents may use executor MCP to discover
-channels and threads they can access, but all posting and binding persistence goes through Paseo's
-chat bridge and Chat SDK.
+questions, reply to current/bound conversations, and send generated files/images back to chat.
+Agents may use executor MCP to discover channels and threads they can access, but all posting,
+file uploads, and binding persistence goes through Paseo's chat bridge and Chat SDK.
 
 Starting a new agent/workspace is **not** a chat tool. The agent uses existing Paseo tools for
 that. The bridge keeps the bound chat thread attached to the office agent and does not observe or
@@ -35,8 +35,8 @@ Why:
 
 - The daemon knows the current caller `agentId`, verifies it is the office agent for the binding,
   and can attach audit/tool timeline context without trusting the model to pass its own agent id.
-- `packages/chat` already owns Chat SDK adapters, subscriptions, delivery receipts, and external
-  thread normalization.
+- `packages/chat` already owns Chat SDK adapters, subscriptions, delivery receipts, external
+  thread normalization, and Chat SDK file upload mechanics.
 - The office agent gets stable person/channel/conversation primitives, not Slack tokens or adapter clients.
 - New agents stay in the existing Paseo lifecycle (`create_agent`, `create_worktree`) behind the
   office agent, so users do not have to juggle extra chat threads just because the office
@@ -69,8 +69,18 @@ interface ChatBridgeService {
     officeAgentId: string;
     conversationId?: string;
     message: string;
+    files?: ChatOutboundFile[];
     idempotencyKey?: string;
   }): Promise<{ conversationId: string; externalThreadId: string }>;
+
+  sendFile(input: {
+    officeAgentId: string;
+    conversationId?: string;
+    destination?: ChatDestination;
+    message?: string;
+    file: ChatOutboundFile;
+    idempotencyKey?: string;
+  }): Promise<{ conversationId: string; externalThreadId: string; fileId?: string }>;
 
   ask(input: {
     officeAgentId: string;
@@ -85,6 +95,14 @@ interface ChatBridgeService {
     answer: string | null;
     status: "answered" | "timeout" | "canceled";
   }>;
+}
+
+interface ChatOutboundFile {
+  bytes?: Uint8Array; // preferred for remote bridge mode
+  path?: string; // allowed only when bridge and daemon share a filesystem
+  filename?: string;
+  mimeType?: string;
+  size?: number;
 }
 ```
 
@@ -101,6 +119,7 @@ Pick the smallest reliable local-only seam:
 **Done when**
 
 - [ ] Daemon can call `packages/chat` service methods in-process/local-only.
+- [ ] Service supports text-only posts and posts with one or more `ChatOutboundFile` uploads.
 - [ ] If the bridge is not running, tool errors are clear: "Chat bridge is not connected.".
 
 ## Slice 2 — Evolve `ThreadSessionStore` to `ChatBindingStore`
@@ -148,7 +167,7 @@ const ChatBindingSchema = z.discriminatedUnion("kind", [
 - `bindingsByConversationId`
 - `pendingRequests`: request id → agent id, conversation id, deadline, status.
 - `deliveryReceipts`: idempotency/delivery keys → started/completed.
-- `auditRecords`: append-only outbound tool call summaries.
+- `auditRecords`: append-only outbound tool call summaries, including file metadata for uploads.
 
 **Backward compatibility**
 
@@ -230,6 +249,23 @@ cleaned text, append it under a compact `Links:` section before building the sen
 5. Persist `outbound-conversation { officeAgentId, externalThreadId, conversationId, subscribed }`.
 6. Return opaque `conversationId` to agent.
 
+**Flow: outbound file/image send**
+
+1. Daemon tool validates the caller is the office agent for the current/default binding or supplied
+   `conversationId`.
+2. Resolve target thread the same way as `chat.reply`.
+3. Resolve file input:
+   - local bridge mode: accept `path` if it is readable by the daemon/bridge host;
+   - remote bridge mode: daemon reads the path and sends bytes + filename + MIME metadata to the
+     bridge service.
+4. Enforce configured max file size and basic MIME/extension validation. `chat.sendImage` requires
+   `image/*`.
+5. Post through Chat SDK, not Slack Web API:
+   `thread.post({ markdown: message, files: [{ data, filename }] })`.
+6. Store delivery receipt and audit record. On retry after crash, do not duplicate an already
+   completed upload for the same idempotency key.
+7. Keep the binding unchanged; future replies still route to the same office agent.
+
 **Flow: inbound reply**
 
 1. Chat SDK emits `onSubscribedMessage`.
@@ -268,6 +304,8 @@ On bridge boot:
       the reply.
 - [ ] Office agent starts a new Paseo agent; the same chat thread continues routing replies to the
       office agent and no child handoff/chat target is created.
+- [ ] Office agent sends a generated image/file to the current thread and replies still route to
+      the office agent afterward.
 - [ ] Subscribed thread with no binding is ignored/logged, not routed arbitrarily.
 
 ## Slice 5 — URL-preserving inbound prompt normalization
@@ -308,7 +346,68 @@ label in the message text.
       URL.
 - [ ] The behavior is covered by targeted tests for `normalizeMessage()`.
 
-## Slice 6 — Blocking asks
+## Slice 6 — Outbound files and images
+
+**Goal**: `chat.sendFile` / `chat.sendImage` let the office agent return generated artifacts to
+Slack as real file uploads.
+
+**Files**
+
+- daemon chat tools (exact file TBD near `packages/server/src/server/agent/tools/`)
+- `packages/chat/src/service.ts`
+- `packages/chat/src/bridge.ts` or a new `packages/chat/src/outbound.ts`
+- `packages/chat/src/state/thread-session-store.ts` / `ChatBindingStore`
+
+**Tool schemas**
+
+```ts
+chat.sendFile({
+  conversationId?: string,
+  path: string,
+  filename?: string,
+  mimeType?: string,
+  message?: string,
+});
+
+chat.sendImage({
+  conversationId?: string,
+  path: string,
+  filename?: string,
+  message?: string,
+});
+```
+
+Optionally allow `files` on `chat.reply` for multi-file sends once the single-file path is solid.
+
+**Implementation notes**
+
+- Keep uploads explicit. Do not parse assistant text for paths.
+- In local mode, the bridge may read `path` directly because it runs beside the daemon today.
+- In remote mode, the daemon-side tool reads the file and sends bytes to the bridge service; path
+  strings alone are not portable across hosts.
+- Use Chat SDK upload support only: `thread.post({ markdown, files: [{ data, filename }] })`.
+- Infer MIME from supplied `mimeType`, then extension, then `application/octet-stream`.
+- Enforce configurable size limits before reading/uploading large files.
+- Return structured tool errors: `no_current_binding`, `file_not_found`, `file_not_readable`,
+  `file_too_large`, `unsupported_file`, `upload_failed`, `bridge_unavailable`.
+- Audit successful and failed sends with filename, MIME, byte size, destination, office agent id,
+  and idempotency key.
+
+**Tests**
+
+- [ ] Service posts a file through a mocked Chat SDK thread with `files` populated.
+- [ ] `chat.sendImage` rejects a non-image MIME type.
+- [ ] Missing/unreadable file returns a structured tool error.
+- [ ] Idempotency suppresses duplicate uploads on retry after a simulated crash.
+- [ ] Remote-mode code path sends bytes rather than requiring the bridge to read a daemon-local path.
+
+**Done when**
+
+- [ ] Office agent can generate a PNG/CSV/PDF and send it to the current Slack thread.
+- [ ] Uploaded files appear as Slack files, not pasted base64 or path text.
+- [ ] Sends are audited and retry-safe.
+
+## Slice 7 — Blocking asks
 
 **Goal**: `chat.askPerson` / `chat.askChannel` let an agent wait for human input safely.
 
@@ -339,7 +438,7 @@ Prefer true blocking if the tool runtime can support it cleanly.
 - [ ] Ask times out after deadline.
 - [ ] Ask survives bridge restart.
 
-## Slice 7 — Policy, auditing, and UX errors
+## Slice 8 — Policy, auditing, and UX errors
 
 **Goal**: production safety without hard-locking channels to a static allowlist.
 
@@ -363,7 +462,8 @@ type ChatAuditRecord = {
   resolvedExternalThreadId?: string;
   conversationId?: string;
   messagePreview: string;
-  result: "posted" | "blocked" | "failed" | "timeout" | "canceled";
+  files?: Array<{ filename: string; mimeType: string; size: number }>;
+  result: "posted" | "uploaded" | "blocked" | "failed" | "timeout" | "canceled";
   errorCode?: string;
 };
 ```
@@ -376,6 +476,10 @@ type ChatAuditRecord = {
 - `bot_not_in_channel`: invite the bot or choose another destination.
 - `policy_blocked`: destination blocked by configured policy.
 - `bridge_unavailable`: chat bridge not connected.
+- `file_not_found` / `file_not_readable`: the requested upload path cannot be read.
+- `file_too_large`: file exceeds configured upload limit.
+- `unsupported_file`: `chat.sendImage` got a non-image or blocked MIME type.
+- `upload_failed`: Chat SDK/adapter rejected the upload.
 
 **Done when**
 
@@ -397,6 +501,10 @@ Use targeted checks only:
 
 - Agent discovers `#growth` via executor MCP, passes channel id to `chat.startConversation`, bridge
   posts a new thread, and replies route back to the office agent.
+- Agent generates `/home/olumbe/code/office/artifacts/chart.png`, calls `chat.sendImage`, and Slack
+  receives an uploaded image file in the current thread.
+- Agent generates a CSV/PDF, calls `chat.sendFile`, and Slack receives an uploaded file in the
+  selected conversation.
 - Office agent asks Vivek a question; Vivek replies; tool resumes or the office agent receives the
   answer with sender identity.
 - Bridge restarts between ask and reply; answer still routes correctly.

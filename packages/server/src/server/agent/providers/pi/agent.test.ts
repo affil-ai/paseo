@@ -195,6 +195,27 @@ class SessionEvents {
 }
 
 describe("PiRpcAgentSession", () => {
+  test("interrupt clears the active turn immediately so a replacement prompt can start", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn("first prompt");
+    const cancellation = events.nextTurnCancellation();
+    await session.interrupt();
+
+    await expect(cancellation).resolves.toMatchObject({
+      type: "turn_canceled",
+      reason: "interrupted",
+    });
+    await expect(session.startTurn("replacement prompt")).resolves.toEqual({
+      turnId: expect.any(String),
+    });
+    expect(fakeSession.prompts.map((prompt) => prompt.message)).toEqual([
+      "first prompt",
+      "replacement prompt",
+    ]);
+  });
+
   test("bridges Pi RPC select extension UI requests through question permissions", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();
