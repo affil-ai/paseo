@@ -58,6 +58,9 @@ export class FakePiSession implements PiRuntimeSession {
   readonly treeNavigationRequests: string[] = [];
   capturedUserEntries: Array<{ id: string; parentId: string | null; text: string }> = [];
   abortRequested = false;
+  /** When set, abort() waits on this promise before resolving. */
+  private abortGate: Promise<void> | null = null;
+  private releaseAbortGate: (() => void) | null = null;
   readonly canceledExtensionUiRequests: string[] = [];
   readonly extensionUiResponses: Array<{
     id: string;
@@ -128,6 +131,25 @@ export class FakePiSession implements PiRuntimeSession {
 
   async abort(): Promise<void> {
     this.abortRequested = true;
+    if (this.abortGate) {
+      await this.abortGate;
+    }
+  }
+
+  /**
+   * Make abort() block until releaseAbort() is called, so tests can assert that
+   * callers wait for the abort to finish before sending the next prompt.
+   */
+  blockAbort(): void {
+    this.abortGate = new Promise<void>((resolve) => {
+      this.releaseAbortGate = resolve;
+    });
+  }
+
+  releaseAbort(): void {
+    this.releaseAbortGate?.();
+    this.releaseAbortGate = null;
+    this.abortGate = null;
   }
 
   async getState(): Promise<PiSessionState> {
