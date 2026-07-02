@@ -373,11 +373,12 @@ workspace row under it:
 Two shipping phases. v1 is a self-contained, useful product on its own; v2 is additive and
 does not require reworking v1.
 
-### v1 — "Slack drives one office agent per thread" (Socket Mode only, no inbound HTTP)
+### v1 — "Slack drives one office agent per thread"
 
-The complete single-agent Slack experience. Everything here works behind Socket Mode, so it
-needs **no public URL** and no hosting beyond the box the daemon runs on. v1 is intentionally
-**thin** — the intelligence lives in the agent and its prompt, not the bridge.
+The complete single-agent Slack experience. v1 can run behind Socket Mode or the current Slack
+Events HTTP mode, but the product scope is still Slack-only intake into one office agent per
+thread. v1 is intentionally **thin** — the intelligence lives in the agent and its prompt, not the
+bridge.
 
 - Slack intake: mentions, DMs, subscribed-thread follow-ups (Feature 1).
 - One inbound thread = one workspace = one office agent, on a single configured `directory`
@@ -407,10 +408,11 @@ continue it, and mute it. From an agent, an explicit same-agent outbound chat to
 configured person and bind replies back to the office agent. Both inbound and outbound bindings
 survive a daemon or bridge restart.
 
-### v2 — "Webhooks + richer I/O + remote" (introduces a public inbound HTTP server)
+### v2 — "Agent-initiated chat + richer I/O + more channels + remote"
 
-The defining new capability is a **public inbound HTTP listener** (the daemon/bridge is
-otherwise outbound-only), which unlocks webhook-driven features. v2 delivers:
+The defining new capability is a durable **bidirectional chat surface**: the office agent can
+explicitly start/reply/ask/upload through chat tools, and the bridge can ingest more event sources
+than Slack messages. v2 delivers:
 
 - **PR-merged notifications** — GitHub webhook → `:white_check_mark:` + "merged" message
   posted into the originating thread (Feature 3).
@@ -427,8 +429,9 @@ otherwise outbound-only), which unlocks webhook-driven features. v2 delivers:
   [Optional routing](#optional-routing-not-core). This is _not_ core to the model; it is only
   worth adding if a single office agent on the office repo proves insufficient.
 
-**v2 exit criteria:** an agent opens a PR and the thread is notified when it merges; email
-threads feed the same office agent; the bridge runs on a server separate from the daemon.
+**v2 exit criteria:** the office agent can start and continue subscribed Slack conversations,
+ask blocking human questions, upload generated files/images, receive PR-merge notifications, ingest
+email threads into the same office-agent model, and run from a host separate from the daemon.
 
 ## Feature set (external intake)
 
