@@ -25,7 +25,7 @@ function mockThread(): Thread {
   } as Thread;
 }
 
-function mockMessage(attachments: Attachment[]): Message {
+function mockMessage(attachments: Attachment[], overrides: Partial<Message> = {}): Message {
   return {
     id: "123.456",
     text: "please inspect this",
@@ -38,8 +38,68 @@ function mockMessage(attachments: Attachment[]): Message {
       isMe: false,
     },
     attachments,
+    ...overrides,
   } as Message;
 }
+
+describe("normalizeMessage URLs", () => {
+  it("preserves full URLs from parsed Chat SDK links", async () => {
+    const attachmentDir = await createTempDir();
+
+    const normalized = await normalizeMessage(
+      mockThread(),
+      mockMessage([], {
+        text: "facebook.com/p/Aunt-Kara-Mo…",
+        raw: { text: "facebook.com/p/Aunt-Kara-Mo…" },
+        links: [{ url: "https://www.facebook.com/p/Aunt-Kara-Mo-61512345678901/" }],
+      }),
+      { attachmentDir },
+    );
+
+    expect(normalized.cleanedText).toBe(
+      "facebook.com/p/Aunt-Kara-Mo…\n\nLinks:\n- https://www.facebook.com/p/Aunt-Kara-Mo-61512345678901/",
+    );
+  });
+
+  it("does not duplicate exact URLs already present in message text", async () => {
+    const attachmentDir = await createTempDir();
+    const url = "https://example.com/full/path?x=1";
+
+    const normalized = await normalizeMessage(
+      mockThread(),
+      mockMessage([], {
+        text: `see ${url}`,
+        raw: { text: `see ${url}` },
+        links: [{ url }],
+      }),
+      { attachmentDir },
+    );
+
+    expect(normalized.cleanedText).toBe(`see ${url}`);
+  });
+
+  it("preserves multiple parsed links in order and dedupes repeats", async () => {
+    const attachmentDir = await createTempDir();
+
+    const normalized = await normalizeMessage(
+      mockThread(),
+      mockMessage([], {
+        text: "first and second",
+        raw: { text: "first and second" },
+        links: [
+          { url: "https://example.com/one" },
+          { url: "https://example.com/two" },
+          { url: "https://example.com/one" },
+        ],
+      }),
+      { attachmentDir },
+    );
+
+    expect(normalized.cleanedText).toBe(
+      "first and second\n\nLinks:\n- https://example.com/one\n- https://example.com/two",
+    );
+  });
+});
 
 describe("normalizeMessage attachments", () => {
   it("converts image attachment data into daemon image payloads", async () => {

@@ -1,7 +1,7 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { AgentPermissionRequestMessage } from "@getpaseo/protocol/messages";
 import { Actions, Button, Card, CardText, type Chat, type Thread } from "chat";
-import type { ThreadSessionStore } from "./state/thread-session-store.js";
+import { getBindingOwnerAgentId, type ThreadSessionStore } from "./state/thread-session-store.js";
 
 const ACTION_PREFIX = "paseo-permit:";
 
@@ -29,9 +29,11 @@ export class PermissionBridge {
       if (!requestId || !selectedActionId) return;
       const behavior = event.value === "deny" ? "deny" : "allow";
       const session = await this.store.getSession(event.threadId);
-      const agentId = session?.focusedAgentId;
-      if (!agentId) return;
-      await this.client.respondToPermission(agentId, requestId, { behavior, selectedActionId });
+      if (!session) return;
+      await this.client.respondToPermission(getBindingOwnerAgentId(session), requestId, {
+        behavior,
+        selectedActionId,
+      });
       await event.thread?.post(`${behavior === "allow" ? "Approved" : "Denied"}.`);
     });
   }

@@ -14,6 +14,14 @@ function resolvePaseoHome(env: NodeJS.ProcessEnv): string {
   return path.resolve(resolveHome(env.PASEO_HOME?.trim() || "~/.paseo"));
 }
 
+function parseJsonMap(value: string | undefined): Record<string, string> {
+  if (!value) return {};
+  const parsed = z.record(z.string(), z.string()).parse(JSON.parse(value));
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, entry]) => [key.toLowerCase(), entry]),
+  );
+}
+
 const envSchema = z.object({
   PASEO_CHAT_OFFICE_REPO: z.string().min(1),
   PASEO_CHAT_PROVIDER: z.string().default("pi"),
@@ -31,6 +39,15 @@ const envSchema = z.object({
   PASEO_CHAT_SLACK_MODE: z.enum(["socket", "http"]).default("socket"),
   PASEO_CHAT_HTTP_HOST: z.string().default("127.0.0.1"),
   PASEO_CHAT_HTTP_PORT: z.coerce.number().int().positive().default(8787),
+  PASEO_CHAT_SERVICE_HOST: z.string().default("127.0.0.1"),
+  PASEO_CHAT_SERVICE_PORT: z.coerce.number().int().positive().default(8788),
+  PASEO_CHAT_PEOPLE_JSON: z.string().optional(),
+  PASEO_CHAT_CHANNELS_JSON: z.string().optional(),
+  PASEO_CHAT_MAX_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(25 * 1024 * 1024),
   PASEO_PASSWORD: z.string().optional(),
   PASEO_HOME: z.string().optional(),
 });
@@ -60,5 +77,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     slackMode: parsed.PASEO_CHAT_SLACK_MODE,
     httpHost: parsed.PASEO_CHAT_HTTP_HOST,
     httpPort: parsed.PASEO_CHAT_HTTP_PORT,
+    serviceHost: parsed.PASEO_CHAT_SERVICE_HOST,
+    servicePort: parsed.PASEO_CHAT_SERVICE_PORT,
+    serviceTokenPath: path.join(
+      path.resolve(resolveHome(parsed.PASEO_CHAT_STATE_DIR ?? path.join(paseoHome, "chat-bridge"))),
+      "service-token",
+    ),
+    people: parseJsonMap(parsed.PASEO_CHAT_PEOPLE_JSON),
+    channels: parseJsonMap(parsed.PASEO_CHAT_CHANNELS_JSON),
+    maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };
 }
