@@ -73,6 +73,7 @@ import {
   type CreatePaseoWorktreeCommandInput,
   listPaseoWorktreesCommand,
 } from "../../worktree/commands.js";
+import { registerChatTools } from "./chat-tools.js";
 import type {
   PaseoToolCatalog,
   PaseoToolConfig,
@@ -509,6 +510,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     }
     return parentAgent;
   };
+
+  registerChatTools(registerTool, {
+    callerAgentId,
+    resolveCallerCwd: () => (callerAgentId ? resolveCallerAgent()?.cwd : undefined),
+    paseoHome: options.paseoHome,
+  });
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
     const callerAgent = resolveCallerAgent();

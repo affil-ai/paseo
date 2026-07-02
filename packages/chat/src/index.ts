@@ -8,6 +8,7 @@ import { PermissionBridge } from "./permissions.js";
 import { FileChatStateAdapter } from "./state/chat-state-adapter.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
 import { startInboundHttpServer } from "./inbound-http.js";
+import { ChatBridgeService, startChatServiceServer } from "./service.js";
 
 export async function main(): Promise<void> {
   const config = loadConfig();
@@ -57,6 +58,21 @@ export async function main(): Promise<void> {
   void bridge.recoverRelaysAfterRestart().catch((error) => {
     console.warn("Slack relay recovery failed", error);
   });
+  void bridge.expirePendingRequests().catch((error) => {
+    console.warn("Chat ask recovery failed", error);
+  });
+  const askExpiryInterval = setInterval(() => {
+    void bridge.expirePendingRequests().catch((error) => {
+      console.warn("Chat ask expiry failed", error);
+    });
+  }, 60_000);
+  const service = new ChatBridgeService(chat, client, state, config);
+  const serviceServer = await startChatServiceServer({
+    service,
+    host: config.serviceHost,
+    port: config.servicePort,
+    tokenPath: config.serviceTokenPath,
+  });
   const httpServer =
     config.slackMode === "http"
       ? startInboundHttpServer({ chat, host: config.httpHost, port: config.httpPort })
@@ -68,11 +84,14 @@ export async function main(): Promise<void> {
   console.log(`  provider/model/mode: ${config.provider} / ${config.model} / ${config.modeId}`);
   console.log(`  state: ${config.stateDir}`);
   console.log(`  slack mode: ${config.slackMode}`);
+  console.log(`  chat service: http://${config.serviceHost}:${config.servicePort}/chat-bridge/rpc`);
   if (httpServer) {
     console.log(`  http: http://${config.httpHost}:${config.httpPort}/slack/events`);
   }
 
   const shutdown = async () => {
+    clearInterval(askExpiryInterval);
+    serviceServer.close();
     httpServer?.close();
     await chat.shutdown().catch(() => {});
     await client.close().catch(() => {});

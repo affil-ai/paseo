@@ -4,35 +4,153 @@ import { JsonFileStore } from "./json-state.js";
 
 export const CHAT_THREAD_LABEL = "paseo.chat-thread-id";
 
-const ThreadSessionSchema = z.object({
+export const ChatDestinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("current") }),
+  z.object({ kind: z.literal("person"), key: z.string().min(1) }),
+  z.object({
+    kind: z.literal("channel"),
+    id: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    url: z.string().min(1).optional(),
+  }),
+  z.object({ kind: z.literal("conversation"), conversationId: z.string().min(1) }),
+]);
+
+const InboundSessionBindingSchema = z.object({
+  kind: z.literal("inbound-session"),
   externalThreadId: z.string(),
   rootAgentId: z.string(),
-  focusedAgentId: z.string(),
   muted: z.boolean().default(false),
-  activeChildAgentId: z.string().nullable().default(null),
   activeRelayId: z.string().nullable().default(null),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
-const StoreSchema = z.object({
-  sessions: z.record(z.string(), ThreadSessionSchema).default({}),
-  eventReceipts: z.record(z.string(), z.string()).default({}),
-  deliveryReceipts: z.record(z.string(), z.string()).default({}),
-  pendingQuestions: z
-    .record(
-      z.string(),
-      z.object({ agentId: z.string(), requestId: z.string(), createdAt: z.string() }),
-    )
-    .default({}),
+const OutboundConversationBindingSchema = z.object({
+  kind: z.literal("outbound-conversation"),
+  conversationId: z.string(),
+  externalThreadId: z.string(),
+  officeAgentId: z.string(),
+  destination: ChatDestinationSchema,
+  subscribed: z.boolean().default(true),
+  pendingRequestId: z.string().optional(),
+  activeRelayId: z.string().nullable().default(null),
+  title: z.string().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
-export type ThreadSession = z.infer<typeof ThreadSessionSchema>;
+const LegacyThreadSessionSchema = z
+  .object({
+    kind: z.undefined().optional(),
+    externalThreadId: z.string(),
+    rootAgentId: z.string(),
+    focusedAgentId: z.string().optional(),
+    muted: z.boolean().default(false),
+    activeChildAgentId: z.string().nullable().optional(),
+    activeRelayId: z.string().nullable().default(null),
+    title: z.string().nullable().default(null),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .transform((session) => ({
+    kind: "inbound-session" as const,
+    externalThreadId: session.externalThreadId,
+    rootAgentId: session.rootAgentId,
+    muted: session.muted,
+    activeRelayId: session.activeRelayId,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  }));
+
+const ChatBindingSchema = z.union([
+  InboundSessionBindingSchema,
+  OutboundConversationBindingSchema,
+  LegacyThreadSessionSchema,
+]);
+
+const PendingQuestionSchema = z.object({
+  agentId: z.string(),
+  requestId: z.string(),
+  createdAt: z.string(),
+});
+
+const PendingRequestSchema = z.object({
+  requestId: z.string(),
+  officeAgentId: z.string(),
+  conversationId: z.string(),
+  externalThreadId: z.string(),
+  question: z.string(),
+  deadlineAt: z.string(),
+  status: z.enum(["pending", "answered", "timeout", "canceled"]),
+  answer: z.string().nullable().default(null),
+  answeredBy: z.string().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const LegacyDeliveryReceiptSchema = z
+  .string()
+  .transform((status) => ({ status: status === "completed" ? "completed" : "started" }));
+
+const DeliveryReceiptSchema = z.union([
+  z.object({
+    status: z.enum(["started", "completed"]),
+    completedAt: z.string().optional(),
+    result: z.unknown().optional(),
+  }),
+  LegacyDeliveryReceiptSchema,
+]);
+
+const ChatAuditRecordSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  officeAgentId: z.string(),
+  toolName: z.string(),
+  destination: ChatDestinationSchema.optional(),
+  resolvedExternalThreadId: z.string().optional(),
+  conversationId: z.string().optional(),
+  messagePreview: z.string(),
+  files: z
+    .array(z.object({ filename: z.string(), mimeType: z.string(), size: z.number() }))
+    .optional(),
+  result: z.enum(["posted", "uploaded", "blocked", "failed", "timeout", "canceled"]),
+  errorCode: z.string().optional(),
+});
+
+const StoreSchema = z.object({
+  sessions: z.record(z.string(), ChatBindingSchema).default({}),
+  eventReceipts: z.record(z.string(), z.string()).default({}),
+  deliveryReceipts: z.record(z.string(), DeliveryReceiptSchema).default({}),
+  pendingQuestions: z.record(z.string(), PendingQuestionSchema).default({}),
+  pendingRequests: z.record(z.string(), PendingRequestSchema).default({}),
+  auditRecords: z.array(ChatAuditRecordSchema).default([]),
+});
+
+export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
+export type InboundSessionBinding = z.infer<typeof InboundSessionBindingSchema>;
+export type OutboundConversationBinding = z.infer<typeof OutboundConversationBindingSchema>;
+export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;
+export type ThreadSession = ChatBinding;
+export type PendingRequest = z.infer<typeof PendingRequestSchema>;
+export type ChatAuditRecord = z.infer<typeof ChatAuditRecordSchema>;
 type StoreData = z.infer<typeof StoreSchema>;
 
 function emptyStore(): StoreData {
-  return { sessions: {}, eventReceipts: {}, deliveryReceipts: {}, pendingQuestions: {} };
+  return {
+    sessions: {},
+    eventReceipts: {},
+    deliveryReceipts: {},
+    pendingQuestions: {},
+    pendingRequests: {},
+    auditRecords: [],
+  };
+}
+
+function bindingOwnerAgentId(binding: ChatBinding): string {
+  return binding.kind === "inbound-session" ? binding.rootAgentId : binding.officeAgentId;
 }
 
 export class ThreadSessionStore {
@@ -48,21 +166,39 @@ export class ThreadSessionStore {
     return this.store.load();
   }
 
-  async getSession(externalThreadId: string): Promise<ThreadSession | null> {
+  async getSession(externalThreadId: string): Promise<ChatBinding | null> {
+    return this.getBinding(externalThreadId);
+  }
+
+  async getBinding(externalThreadId: string): Promise<ChatBinding | null> {
     return (await this.load()).sessions[externalThreadId] ?? null;
   }
 
-  async upsertSession(session: ThreadSession): Promise<void> {
+  async upsertSession(session: ChatBinding): Promise<void> {
+    await this.upsertBinding(session);
+  }
+
+  async upsertBinding(binding: ChatBinding): Promise<void> {
     await this.store.update((data) => {
-      data.sessions[session.externalThreadId] = { ...session, updatedAt: new Date().toISOString() };
+      data.sessions[binding.externalThreadId] = {
+        ...binding,
+        updatedAt: new Date().toISOString(),
+      };
     });
   }
 
   async updateSession(
     externalThreadId: string,
-    mutator: (session: ThreadSession) => ThreadSession | void,
-  ): Promise<ThreadSession | null> {
-    let updated: ThreadSession | null = null;
+    mutator: (session: ChatBinding) => ChatBinding | void,
+  ): Promise<ChatBinding | null> {
+    return this.updateBinding(externalThreadId, mutator);
+  }
+
+  async updateBinding(
+    externalThreadId: string,
+    mutator: (binding: ChatBinding) => ChatBinding | void,
+  ): Promise<ChatBinding | null> {
+    let updated: ChatBinding | null = null;
     await this.store.update((data) => {
       const current = data.sessions[externalThreadId];
       if (!current) return;
@@ -73,14 +209,24 @@ export class ThreadSessionStore {
     return updated;
   }
 
-  async findSessionByAgent(agentId: string): Promise<ThreadSession | null> {
-    const sessions = Object.values((await this.load()).sessions);
+  async findSessionByAgent(agentId: string): Promise<ChatBinding | null> {
+    const bindings = Object.values((await this.load()).sessions);
+    return bindings.find((binding) => bindingOwnerAgentId(binding) === agentId) ?? null;
+  }
+
+  async findBindingsByAgent(agentId: string): Promise<ChatBinding[]> {
+    const bindings = Object.values((await this.load()).sessions);
+    return bindings
+      .filter((binding) => bindingOwnerAgentId(binding) === agentId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async getConversation(conversationId: string): Promise<OutboundConversationBinding | null> {
+    const bindings = Object.values((await this.load()).sessions);
     return (
-      sessions.find(
-        (session) =>
-          session.rootAgentId === agentId ||
-          session.focusedAgentId === agentId ||
-          session.activeChildAgentId === agentId,
+      bindings.find(
+        (binding): binding is OutboundConversationBinding =>
+          binding.kind === "outbound-conversation" && binding.conversationId === conversationId,
       ) ?? null
     );
   }
@@ -89,6 +235,15 @@ export class ThreadSessionStore {
     await this.store.update((data) => {
       delete data.sessions[externalThreadId];
       delete data.pendingQuestions[externalThreadId];
+      for (const [requestId, request] of Object.entries(data.pendingRequests)) {
+        if (request.externalThreadId === externalThreadId && request.status === "pending") {
+          data.pendingRequests[requestId] = {
+            ...request,
+            status: "canceled",
+            updatedAt: new Date().toISOString(),
+          };
+        }
+      }
     });
   }
 
@@ -105,17 +260,27 @@ export class ThreadSessionStore {
   async markDeliveryStarted(key: string): Promise<boolean> {
     let fresh = false;
     await this.store.update((data) => {
-      if (data.deliveryReceipts[key] === "completed") return;
-      data.deliveryReceipts[key] = "started";
+      if (data.deliveryReceipts[key]?.status === "completed") return;
+      data.deliveryReceipts[key] = { status: "started" };
       fresh = true;
     });
     return fresh;
   }
 
-  async markDeliveryCompleted(key: string): Promise<void> {
+  async markDeliveryCompleted(key: string, result?: unknown): Promise<void> {
     await this.store.update((data) => {
-      data.deliveryReceipts[key] = "completed";
+      data.deliveryReceipts[key] = {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        ...(result === undefined ? {} : { result }),
+      };
     });
+  }
+
+  async getCompletedDeliveryResult<T>(key: string): Promise<T | null> {
+    const receipt = (await this.load()).deliveryReceipts[key];
+    if (receipt?.status !== "completed" || !("result" in receipt)) return null;
+    return (receipt.result as T | undefined) ?? null;
   }
 
   async setPendingQuestion(
@@ -144,4 +309,112 @@ export class ThreadSessionStore {
     });
     return question;
   }
+
+  async createPendingRequest(request: PendingRequest): Promise<void> {
+    await this.store.update((data) => {
+      data.pendingRequests[request.requestId] = request;
+      const binding = data.sessions[request.externalThreadId];
+      if (binding?.kind === "outbound-conversation") {
+        data.sessions[request.externalThreadId] = {
+          ...binding,
+          pendingRequestId: request.requestId,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    });
+  }
+
+  async takePendingRequestForThread(externalThreadId: string): Promise<PendingRequest | null> {
+    let request: PendingRequest | null = null;
+    await this.store.update((data) => {
+      request =
+        Object.values(data.pendingRequests).find(
+          (candidate) =>
+            candidate.externalThreadId === externalThreadId && candidate.status === "pending",
+        ) ?? null;
+      if (!request) return;
+      const now = new Date().toISOString();
+      data.pendingRequests[request.requestId] = {
+        ...request,
+        status: "answered",
+        updatedAt: now,
+      };
+      const binding = data.sessions[externalThreadId];
+      if (
+        binding?.kind === "outbound-conversation" &&
+        binding.pendingRequestId === request.requestId
+      ) {
+        const { pendingRequestId: _pendingRequestId, ...withoutPending } = binding;
+        data.sessions[externalThreadId] = { ...withoutPending, updatedAt: now };
+      }
+    });
+    return request;
+  }
+
+  async finishPendingRequest(
+    requestId: string,
+    status: "answered" | "timeout" | "canceled",
+    answer: string | null,
+    answeredBy: string | null,
+  ): Promise<PendingRequest | null> {
+    let updated: PendingRequest | null = null;
+    await this.store.update((data) => {
+      const current = data.pendingRequests[requestId];
+      if (!current) return;
+      updated = {
+        ...current,
+        status,
+        answer,
+        answeredBy,
+        updatedAt: new Date().toISOString(),
+      };
+      data.pendingRequests[requestId] = updated;
+      const binding = data.sessions[current.externalThreadId];
+      if (binding?.kind === "outbound-conversation" && binding.pendingRequestId === requestId) {
+        const { pendingRequestId: _pendingRequestId, ...withoutPending } = binding;
+        data.sessions[current.externalThreadId] = {
+          ...withoutPending,
+          updatedAt: updated.updatedAt,
+        };
+      }
+    });
+    return updated;
+  }
+
+  async expirePendingRequests(now: Date): Promise<PendingRequest[]> {
+    const expired: PendingRequest[] = [];
+    await this.store.update((data) => {
+      const timestamp = now.toISOString();
+      for (const request of Object.values(data.pendingRequests)) {
+        if (request.status !== "pending" || Date.parse(request.deadlineAt) > now.getTime()) {
+          continue;
+        }
+        const updated = { ...request, status: "timeout" as const, updatedAt: timestamp };
+        data.pendingRequests[request.requestId] = updated;
+        expired.push(updated);
+        const binding = data.sessions[request.externalThreadId];
+        if (
+          binding?.kind === "outbound-conversation" &&
+          binding.pendingRequestId === request.requestId
+        ) {
+          const { pendingRequestId: _pendingRequestId, ...withoutPending } = binding;
+          data.sessions[request.externalThreadId] = { ...withoutPending, updatedAt: timestamp };
+        }
+      }
+    });
+    return expired;
+  }
+
+  async appendAuditRecord(record: ChatAuditRecord): Promise<void> {
+    await this.store.update((data) => {
+      data.auditRecords.push(record);
+      if (data.auditRecords.length > 1_000) {
+        data.auditRecords = data.auditRecords.slice(-1_000);
+      }
+    });
+  }
+}
+
+export function getBindingOwnerAgentId(binding: ChatBinding): string {
+  return bindingOwnerAgentId(binding);
 }

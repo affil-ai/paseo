@@ -135,6 +135,19 @@ function attachmentLabel(attachment: Attachment): string {
   return `${attachment.name ?? attachment.url ?? "attachment"}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}${attachment.url ? `: ${attachment.url}` : ""}`;
 }
 
+function appendPreservedLinks(text: string, links: Message["links"]): string {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const link of links ?? []) {
+    const url = link.url.trim();
+    if (!url || seen.has(url) || text.includes(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  if (urls.length === 0) return text;
+  return [text, `Links:\n${urls.map((url) => `- ${url}`).join("\n")}`].filter(Boolean).join("\n\n");
+}
+
 async function attachmentToImage(
   attachment: Attachment,
 ): Promise<{ data: string; mimeType: string } | null> {
@@ -197,9 +210,10 @@ export async function normalizeMessage(
   }
   const attachmentText =
     attachmentLines.length > 0 ? `Attachments:\n${attachmentLines.join("\n")}` : "";
-  const cleanedText = [await normalizeMentionsForPrompt(thread, message), attachmentText]
+  const visibleText = [await normalizeMentionsForPrompt(thread, message), attachmentText]
     .filter(Boolean)
     .join("\n\n");
+  const cleanedText = appendPreservedLinks(visibleText, message.links);
   const externalThreadId = encodeThreadId(thread, message);
   return {
     externalThreadId,
