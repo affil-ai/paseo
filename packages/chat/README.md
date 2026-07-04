@@ -20,7 +20,7 @@ Optional:
 - `PASEO_CHAT_PROVIDER=pi`
 - `PASEO_CHAT_MODEL=openai-codex/gpt-5.5`
 - `PASEO_CHAT_MODE_ID=medium`
-- `PASEO_CHAT_OFFICE_PROMPT_PATH=/path/to/prompt.md`
+- `PASEO_CHAT_OFFICE_PROMPT_PATH=/path/to/prompt.md` — custom instructions injected after the built-in chat bridge prompt. In the office deployment this points to `/home/olumbe/code/office/prompts/chat/slack-office-agent.md`.
 - `PASEO_CHAT_ACK_EMOJI=cto`
 - `PASEO_CHAT_STATE_DIR=$PASEO_HOME/chat-bridge`
 - `PASEO_CHAT_SLACK_MODE=socket` (`socket` or `http`)

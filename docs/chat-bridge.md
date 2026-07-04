@@ -620,6 +620,8 @@ User request:
 <the actual message text (+ captured thread context, attachments)>
 ```
 
+Set the custom prompt with `PASEO_CHAT_OFFICE_PROMPT_PATH`; the office deployment uses the structured office-repo path `/home/olumbe/code/office/prompts/chat/slack-office-agent.md`.
+
 The custom office prompt is where you encode the operator's identity and guardrails, e.g.:
 
 - "You are my office-of-CTO agent with full org context."
