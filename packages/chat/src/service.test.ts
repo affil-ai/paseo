@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AdapterPostableMessage, SentMessage, Thread } from "chat";
+import { CHAT_THREAD_ID_LABEL, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatBridgeService } from "./service.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
@@ -67,6 +68,15 @@ class FakeChat {
   }
 }
 
+function fakeDaemonClient(
+  labels: Record<string, unknown> = { [CHAT_THREAD_ID_LABEL]: "slack:C1:111.222" },
+) {
+  return {
+    sendAgentMessage: async () => {},
+    fetchAgent: async () => ({ agent: { labels } }),
+  };
+}
+
 function filePayload(mimeType = "text/csv") {
   return {
     bytesBase64: Buffer.from("hello").toString("base64"),
@@ -80,7 +90,7 @@ describe("ChatBridgeService", () => {
   it("starts and subscribes an outbound channel conversation without channel allowlist", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();
-    const service = new ChatBridgeService(chat, { sendAgentMessage: async () => {} }, store, {
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
       people: {},
       channels: {},
     });
@@ -104,17 +114,35 @@ describe("ChatBridgeService", () => {
     });
   });
 
+  it("blocks delegated agents before posting a new conversation", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(
+      chat,
+      fakeDaemonClient({
+        [CHAT_THREAD_ID_LABEL]: "slack:C1:111.222",
+        [PARENT_AGENT_ID_LABEL]: "agent-office",
+      }),
+      store,
+      { people: {}, channels: {} },
+    );
+
+    await expect(
+      service.startConversation({
+        officeAgentId: "agent-child",
+        destination: { kind: "channel", id: "C123" },
+        message: "hello channel",
+      }),
+    ).rejects.toMatchObject({ code: "not_office_agent" });
+    expect(chat.posted).toHaveLength(0);
+  });
+
   it("returns no_current_binding for reply without a binding", async () => {
     const store = new ThreadSessionStore(await createTempDir());
-    const service = new ChatBridgeService(
-      new FakeChat(),
-      { sendAgentMessage: async () => {} },
-      store,
-      {
-        people: {},
-        channels: {},
-      },
-    );
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
 
     await expect(
       service.reply({ officeAgentId: "agent-office", message: "hello" }),
@@ -147,25 +175,46 @@ describe("ChatBridgeService", () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    const service = new ChatBridgeService(
-      new FakeChat(),
-      { sendAgentMessage: async () => {} },
-      store,
-      {
-        people: {},
-        channels: {},
-      },
-    );
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
 
     await expect(
       service.reply({ officeAgentId: "agent-office", message: "hello" }),
     ).rejects.toMatchObject({ code: "ambiguous_current_binding" });
   });
 
+  it("explicit replies suppress active auto relay for that binding", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: "relay-1",
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await service.reply({ officeAgentId: "agent-office", message: "manual reply" });
+
+    await expect(store.getSession("slack:C1:111.222")).resolves.toMatchObject({
+      activeRelayId: null,
+    });
+  });
+
   it("uploads files through Chat SDK file payloads and suppresses idempotent retries", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();
-    const service = new ChatBridgeService(chat, { sendAgentMessage: async () => {} }, store, {
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
       people: {},
       channels: {},
     });
@@ -203,15 +252,10 @@ describe("ChatBridgeService", () => {
 
   it("stores pending asks for follow-up answer routing", async () => {
     const store = new ThreadSessionStore(await createTempDir());
-    const service = new ChatBridgeService(
-      new FakeChat(),
-      { sendAgentMessage: async () => {} },
-      store,
-      {
-        people: { vivek: "U123" },
-        channels: {},
-      },
-    );
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: { vivek: "U123" },
+      channels: {},
+    });
 
     const result = await service.ask({
       officeAgentId: "agent-office",

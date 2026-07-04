@@ -186,9 +186,10 @@ owns the agent tool catalog and audit trail; `packages/chat` owns transport. A l
 `ChatBridgeService` can register with the daemon over the existing WebSocket/client path (or a
 small local RPC) so the daemon tool calls `packages/chat`, and `packages/chat` uses Chat SDK to
 post + persist the binding. This keeps the office agent on stable `chat.*` primitives, keeps Slack
-tokens inside the bridge, and avoids coupling the agent runtime to one adapter. Child/coding agents
-should not call chat tools directly; they report to the office agent, and the office agent decides
-what to say externally.
+tokens inside the bridge, and avoids coupling the agent runtime to one adapter. The daemon only
+registers `chat.*` tools for agents stamped with `paseo.chat-thread-id` and rejects delegated
+agents carrying `paseo.parent-agent-id`; child/coding agents report to the office agent, and the
+office agent decides what to say externally.
 
 ### Outbound modes
 
@@ -671,9 +672,14 @@ classification — those remain agent decisions.
 
 Slack v1 intentionally does **not** display intermediate assistant/tool output: native Slack
 streaming can show confusing error chrome, and partial messages are too noisy for the desired
-thread UX. The bridge does not subscribe to `agent_stream` for Slack relay. It polls the
-daemon's **projected timeline** for complete `assistant_message` rows and posts only two kinds
-of normal thread replies:
+thread UX. Relay behavior is selected by `PASEO_CHAT_RELAY_MODE`:
+
+- `auto` (default): the bridge polls the daemon timeline and automatically posts first/final
+  assistant text to the bound Slack thread.
+- `manual`: the bridge never auto-posts assistant text; the office agent must call `chat.reply`,
+  `chat.sendFile`, or `chat.sendImage` to send Slack output.
+
+In `auto` mode, the bridge posts only two kinds of normal thread replies:
 
 1. The first complete assistant text block for the turn.
 2. The final assistant text block after the agent reaches a terminal state.
@@ -684,11 +690,13 @@ updates, and partial assistant chunks are never posted to Slack.
 **How it works.** For Slack-originated turns, `bridge.ts` records the timeline sequence number
 before sending the prompt. For UI-originated turns on an agent that is linked to a Slack thread,
 the bridge observes `turn_started` and starts the same relay. A background relay polls
-`fetchAgentTimeline(..., { projection: "projected" })` for assistant messages at or after that
+`fetchAgentTimeline(..., { projection: "canonical" })` for assistant messages at or after that
 sequence. It posts the first complete assistant block once it is no longer the newest row (or
 the agent has stopped), then keeps polling until the office agent is no longer
-`initializing`/`running` and posts the last assistant block as the final reply. Replies are sent
-with `thread.post(...)` or `adapter.postMessage(...)` against the normalized Slack thread id.
+`initializing`/`running` and posts the last assistant block as the final reply. Auto-relay posts
+are audited in the chat bridge state. If the office agent explicitly posts to the same binding
+with a `chat.*` tool while an auto relay is active, that tool post suppresses the active auto
+relay for the turn so Slack has one source of truth.
 
 If native Slack streaming is ever reintroduced, it must be behind an explicit product decision
 and preserve the reply contract above: no top-level messages, no duplicate final text, and no
@@ -789,7 +797,9 @@ replies route via `onSubscribedMessage`. The subscription set is persisted (our
 ### Workspace, worktree & title details — **v1**
 
 - **Office workspace:** `createWorkspace({ source: { kind: "directory", path: <office repo> } })`
-  (the office repo). No branch, no base-ref refresh, no setup script at intake.
+  where `<office repo>` is configured with `PASEO_CHAT_OFFICE_REPO=/absolute/path/to/office` in
+  the bridge environment. This is deployment configuration, not an app UI setting. No branch,
+  no base-ref refresh, no setup script runs at intake.
 - **Worktrees are agent-initiated only.** When the office agent decides to delegate code work,
   _it_ calls `create_worktree` (Paseo's worktree workflow handles branch creation, base-ref
   refresh, and any repo setup). The bridge does not pass `worktreeSlug` or `baseBranch` at

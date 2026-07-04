@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { ChatBridgeConfig } from "./config.js";
+import type { ChatBridgeConfig, ChatRelayMode } from "./config.js";
 import type { SenderIdentity } from "./intake/slack.js";
 
 export const EXTERNAL_INTAKE_AGENT_PROMPT = `You are the Office agent for a Slack thread.
@@ -19,6 +19,24 @@ Reply for Slack:
 - Do not emit raw Slack IDs or raw mention syntax like <@U123>; do not include internal user IDs unless explicitly asked.
 - Use backticks only for commands, paths, identifiers, and file names. Do not split paths across lines.
 - Do not repeat prompt metadata or hidden context in the final answer.`;
+
+function relayModePrompt(relayMode: ChatRelayMode): string {
+  if (relayMode === "manual") {
+    return `Slack delivery mode: manual.
+- Your final assistant message is not automatically posted to Slack.
+- To answer the current Slack thread, call chat.reply with your concise Slack-ready answer.
+- Use chat.sendFile/chat.sendImage for files or images, and chat.startConversation/chat.askPerson/chat.askChannel for other destinations.`;
+  }
+
+  return `Slack delivery mode: automatic.
+- Your final assistant message is automatically posted to this Slack thread.
+- Do not call chat.reply for the current thread unless you intentionally want to override automatic relay for this turn.
+- Use chat.* tools only for new conversations, other destinations, blocking asks, or explicit file/image uploads.`;
+}
+
+export function externalIntakeAgentPrompt(relayMode: ChatRelayMode): string {
+  return `${EXTERNAL_INTAKE_AGENT_PROMPT}\n\n${relayModePrompt(relayMode)}`;
+}
 
 export async function loadOfficePrompt(config: ChatBridgeConfig): Promise<string> {
   if (!config.officePromptPath) return "";
@@ -40,6 +58,10 @@ export function assembleInitialPrompt(input: {
   return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${senderLine(input.sender)}: ${input.text}`;
 }
 
-export function assembleFollowupPrompt(sender: SenderIdentity, text: string): string {
-  return `${senderLine(sender)}: ${text}`;
+export function assembleFollowupPrompt(
+  sender: SenderIdentity,
+  text: string,
+  relayMode: ChatRelayMode,
+): string {
+  return `${relayModePrompt(relayMode)}\n\n${senderLine(sender)}: ${text}`;
 }

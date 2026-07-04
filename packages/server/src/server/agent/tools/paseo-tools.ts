@@ -1,3 +1,4 @@
+import { isChatOfficeAgent } from "@getpaseo/protocol/agent-labels";
 import { z } from "zod";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
@@ -511,11 +512,14 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     return parentAgent;
   };
 
-  registerChatTools(registerTool, {
-    callerAgentId,
-    resolveCallerCwd: () => (callerAgentId ? resolveCallerAgent()?.cwd : undefined),
-    paseoHome: options.paseoHome,
-  });
+  const callerAgentForChatTools = callerAgentId ? agentManager.getAgent(callerAgentId) : null;
+  if (callerAgentForChatTools && isChatOfficeAgent(callerAgentForChatTools)) {
+    registerChatTools(registerTool, {
+      callerAgentId,
+      resolveCallerCwd: () => resolveCallerAgent()?.cwd,
+      paseoHome: options.paseoHome,
+    });
+  }
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
     const callerAgent = resolveCallerAgent();

@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AdapterPostableMessage, FileUpload, SentMessage, Thread } from "chat";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { isChatOfficeAgent } from "@getpaseo/protocol/agent-labels";
 import type { ChatBridgeConfig } from "./config.js";
 import { slackMarkdownFixups } from "./render.js";
 import {
@@ -75,6 +75,13 @@ interface ChatLike {
   openDM(userId: string): Promise<Thread>;
   channel(channelId: string): PostableTarget;
   thread(threadId: string): Thread;
+}
+
+interface ChatServiceDaemonClient {
+  sendAgentMessage(agentId: string, message: string): Promise<unknown>;
+  fetchAgent(
+    agentId: string,
+  ): Promise<{ agent?: { labels?: Record<string, unknown> } | null } | null>;
 }
 
 export class ChatToolError extends Error {
@@ -201,7 +208,7 @@ function auditRecord(input: {
 export class ChatBridgeService {
   constructor(
     private readonly chat: ChatLike,
-    private readonly client: Pick<DaemonClient, "sendAgentMessage">,
+    private readonly client: ChatServiceDaemonClient,
     private readonly store: ThreadSessionStore,
     private readonly config: Pick<ChatBridgeConfig, "people" | "channels">,
   ) {}
@@ -210,18 +217,21 @@ export class ChatBridgeService {
     return this.withAudit("chat.startConversation", input, async () => {
       const cached = await this.getIdempotentResult(input.idempotencyKey);
       if (cached) return cached;
+      await this.assertOfficeAgent(input.officeAgentId);
       const resolved = await this.resolveDestination(input.officeAgentId, input.destination, false);
+      const existingResolvedBinding = resolved.externalThreadId
+        ? await this.store.getBinding(resolved.externalThreadId)
+        : null;
+      this.assertBindingOwner(input.officeAgentId, existingResolvedBinding);
+
       const sent = await resolved.target.post({ markdown: slackMarkdownFixups(input.message) });
       const externalThreadId = threadIdFromPostedMessage(resolved.target.id, sent);
-      const existingBinding = await this.store.getBinding(externalThreadId);
+      const existingBinding =
+        existingResolvedBinding ?? (await this.store.getBinding(externalThreadId));
       if (existingBinding) {
-        if (getBindingOwnerAgentId(existingBinding) !== input.officeAgentId) {
-          throw new ChatToolError(
-            "not_conversation_owner",
-            "Only the office agent that owns a chat binding can use it.",
-          );
-        }
+        this.assertBindingOwner(input.officeAgentId, existingBinding);
         if (input.subscribe ?? true) await this.chat.thread(externalThreadId).subscribe();
+        await this.suppressActiveAutoRelay(existingBinding.externalThreadId);
         const result = this.resultFromBinding(existingBinding);
         await this.completeIdempotentResult(input.idempotencyKey, result);
         return result;
@@ -246,12 +256,14 @@ export class ChatBridgeService {
     return this.withAudit("chat.reply", input, async () => {
       const cached = await this.getIdempotentResult(input.idempotencyKey);
       if (cached) return cached;
+      await this.assertOfficeAgent(input.officeAgentId);
       const binding = await this.resolveCurrentBinding(input.officeAgentId, input.conversationId);
       const files = input.files?.map(toFileUpload);
       await this.chat.thread(binding.externalThreadId).post({
         markdown: slackMarkdownFixups(input.message),
         ...(files?.length ? { files } : {}),
       });
+      await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = this.resultFromBinding(binding);
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
@@ -262,6 +274,7 @@ export class ChatBridgeService {
     return this.withAudit("chat.sendFile", input, async () => {
       const cached = await this.getIdempotentResult(input.idempotencyKey);
       if (cached) return cached;
+      await this.assertOfficeAgent(input.officeAgentId);
       const binding = input.destination
         ? await this.ensureDestinationBinding(input)
         : await this.resolveCurrentBinding(input.officeAgentId, input.conversationId);
@@ -269,6 +282,7 @@ export class ChatBridgeService {
         markdown: slackMarkdownFixups(input.message ?? ""),
         files: [toFileUpload(input.file)],
       });
+      await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = { ...this.resultFromBinding(binding), fileId: input.file.filename };
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
@@ -325,6 +339,34 @@ export class ChatBridgeService {
       input.officeAgentId,
       `Answer to chat ask ${input.requestId} from ${input.sender}:\n\n${input.answer}`,
     );
+  }
+
+  private assertBindingOwner(agentId: string, binding: ChatBinding | null): void {
+    if (!binding || getBindingOwnerAgentId(binding) === agentId) {
+      return;
+    }
+    throw new ChatToolError(
+      "not_conversation_owner",
+      "Only the office agent that owns a chat binding can use it.",
+    );
+  }
+
+  private async assertOfficeAgent(agentId: string): Promise<void> {
+    const result = await this.client.fetchAgent(agentId).catch(() => null);
+    if (result?.agent && isChatOfficeAgent(result.agent)) {
+      return;
+    }
+    throw new ChatToolError(
+      "not_office_agent",
+      "Only the office agent bound to a chat thread can start conversations.",
+      { agentId },
+    );
+  }
+
+  private async suppressActiveAutoRelay(externalThreadId: string): Promise<void> {
+    await this.store.updateBinding(externalThreadId, (binding) => {
+      binding.activeRelayId = null;
+    });
   }
 
   private async ensureDestinationBinding(input: SendFileInput): Promise<ChatBinding> {

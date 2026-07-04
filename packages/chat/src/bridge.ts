@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
   DaemonClient,
@@ -22,7 +23,12 @@ import {
   shouldIgnoreAmbient,
   titleFromText,
 } from "./intake/slack.js";
-import { assembleFollowupPrompt, assembleInitialPrompt, loadOfficePrompt } from "./prompt.js";
+import {
+  assembleFollowupPrompt,
+  assembleInitialPrompt,
+  externalIntakeAgentPrompt,
+  loadOfficePrompt,
+} from "./prompt.js";
 import { slackMarkdownFixups } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
 import {
@@ -132,6 +138,17 @@ export class ChatBridge {
 
   async recoverRelaysAfterRestart(): Promise<void> {
     const sessions = Object.values((await this.store.load()).sessions);
+    if (this.config.relayMode === "manual") {
+      await Promise.all(
+        sessions.map((session) =>
+          this.store.updateSession(session.externalThreadId, (current) => {
+            current.activeRelayId = null;
+          }),
+        ),
+      );
+      return;
+    }
+
     for (const session of sessions) {
       const agentId = getBindingOwnerAgentId(session);
       const timeline = await this.client
@@ -193,6 +210,7 @@ export class ChatBridge {
   }
 
   async handleAgentTurnStarted(agentId: string, eventSeq?: number): Promise<void> {
+    if (this.config.relayMode === "manual") return;
     const session = await this.findLinkedSessionForAgent(agentId);
     if (!session) return;
     const thread = this.getThread(session.externalThreadId);
@@ -317,29 +335,33 @@ export class ChatBridge {
       const relayId = message.id;
       const ownerAgentId = getBindingOwnerAgentId(session);
       const sinceSeq = existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
-      await this.store.updateSession(normalized.externalThreadId, (current) => {
-        current.activeRelayId = relayId;
-      });
+      if (this.config.relayMode === "auto") {
+        await this.store.updateSession(normalized.externalThreadId, (current) => {
+          current.activeRelayId = relayId;
+        });
+      }
       if (existing) {
         await this.client.sendAgentMessage(
           ownerAgentId,
-          assembleFollowupPrompt(normalized.sender, normalized.cleanedText),
+          assembleFollowupPrompt(normalized.sender, normalized.cleanedText, this.config.relayMode),
           {
             images: normalized.images,
             attachments: normalized.attachments,
           },
         );
       }
-      this.startBackgroundRelay({
-        thread,
-        externalThreadId: normalized.externalThreadId,
-        agentId: ownerAgentId,
-        messageId: message.id,
-        source,
-        sinceSeq,
-        relayId,
-        postFirstReply: true,
-      });
+      if (this.config.relayMode === "auto") {
+        this.startBackgroundRelay({
+          thread,
+          externalThreadId: normalized.externalThreadId,
+          agentId: ownerAgentId,
+          messageId: message.id,
+          source,
+          sinceSeq,
+          relayId,
+          postFirstReply: true,
+        });
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await this.postMessage(
@@ -371,6 +393,7 @@ export class ChatBridge {
       modeId: this.config.modeId,
       model: this.config.model,
       initialPrompt: assembleInitialPrompt({
+        basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,
         sender: normalized.sender,
         text: normalized.cleanedText,
@@ -469,6 +492,7 @@ export class ChatBridge {
     relayId: string;
     postFirstReply: boolean;
   }): void {
+    if (this.config.relayMode === "manual") return;
     void this.relayTurn(input).catch(async (error) => {
       console.warn("Slack relay failed", error);
       const wasCurrent = await this.isRelayCurrent(input.externalThreadId, input.relayId);
@@ -505,8 +529,12 @@ export class ChatBridge {
       onFirstText: async (text) => {
         if (input.postFirstReply) {
           firstReply.text = text;
-          await this.postMessage(input.thread, input.externalThreadId, {
-            markdown: slackMarkdownFixups(text),
+          await this.postAutoRelayMessage({
+            thread: input.thread,
+            externalThreadId: input.externalThreadId,
+            agentId: input.agentId,
+            phase: "first",
+            text,
           });
         }
       },
@@ -518,8 +546,12 @@ export class ChatBridge {
 
     const replyText = finalText || "Done.";
     if (replyText.trim() !== firstReply.text?.trim()) {
-      await this.postMessage(input.thread, input.externalThreadId, {
-        markdown: slackMarkdownFixups(replyText),
+      await this.postAutoRelayMessage({
+        thread: input.thread,
+        externalThreadId: input.externalThreadId,
+        agentId: input.agentId,
+        phase: "final",
+        text: replyText,
       });
     }
 
@@ -602,6 +634,33 @@ export class ChatBridge {
       await sleep(500);
     }
     return latestText;
+  }
+
+  private async postAutoRelayMessage(input: {
+    thread: Thread | null;
+    externalThreadId: string;
+    agentId: string;
+    phase: "first" | "final";
+    text: string;
+  }): Promise<void> {
+    const binding = await this.store.getSession(input.externalThreadId);
+    if (!binding || getBindingOwnerAgentId(binding) !== input.agentId) {
+      throw new Error("Auto relay binding owner changed before post");
+    }
+    await this.postMessage(input.thread, input.externalThreadId, {
+      markdown: slackMarkdownFixups(input.text),
+    });
+    await this.store.appendAuditRecord({
+      id: `aud_${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      officeAgentId: input.agentId,
+      toolName: `chat.autoRelay.${input.phase}`,
+      resolvedExternalThreadId: input.externalThreadId,
+      conversationId:
+        binding.kind === "outbound-conversation" ? binding.conversationId : input.externalThreadId,
+      messagePreview: input.text.replace(/\s+/g, " ").trim().slice(0, 240),
+      result: "posted",
+    });
   }
 
   private async postMessage(

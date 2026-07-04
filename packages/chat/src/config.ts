@@ -4,6 +4,8 @@ import { z } from "zod";
 
 const DEFAULT_DAEMON_HOST = "localhost:6767";
 
+export type ChatRelayMode = "auto" | "manual";
+
 function resolveHome(input: string): string {
   if (input === "~") return os.homedir();
   if (input.startsWith("~/")) return path.join(os.homedir(), input.slice(2));
@@ -36,6 +38,7 @@ const envSchema = z.object({
     .enum(["true", "false", "1", "0"])
     .optional()
     .transform((value) => value === "true" || value === "1"),
+  PASEO_CHAT_RELAY_MODE: z.enum(["auto", "manual"]).default("auto"),
   PASEO_CHAT_SLACK_MODE: z.enum(["socket", "http"]).default("socket"),
   PASEO_CHAT_HTTP_HOST: z.string().default("127.0.0.1"),
   PASEO_CHAT_HTTP_PORT: z.coerce.number().int().positive().default(8787),
@@ -74,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       resolveHome(parsed.PASEO_CHAT_STATE_DIR ?? path.join(paseoHome, "chat-bridge")),
     ),
     showReasoning: parsed.PASEO_CHAT_SHOW_REASONING ?? false,
+    relayMode: parsed.PASEO_CHAT_RELAY_MODE,
     slackMode: parsed.PASEO_CHAT_SLACK_MODE,
     httpHost: parsed.PASEO_CHAT_HTTP_HOST,
     httpPort: parsed.PASEO_CHAT_HTTP_PORT,

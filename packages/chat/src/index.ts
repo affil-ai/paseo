@@ -84,6 +84,7 @@ export async function main(): Promise<void> {
   console.log(`  provider/model/mode: ${config.provider} / ${config.model} / ${config.modeId}`);
   console.log(`  state: ${config.stateDir}`);
   console.log(`  slack mode: ${config.slackMode}`);
+  console.log(`  relay mode: ${config.relayMode}`);
   console.log(`  chat service: http://${config.serviceHost}:${config.servicePort}/chat-bridge/rpc`);
   if (httpServer) {
     console.log(`  http: http://${config.httpHost}:${config.httpPort}/slack/events`);
