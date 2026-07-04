@@ -23,15 +23,23 @@ Reply for Slack:
 function relayModePrompt(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
     return `Slack delivery mode: manual.
-- Your final assistant message is not automatically posted to Slack.
-- To answer the current Slack thread, call chat.reply with your concise Slack-ready answer.
+- Assistant text is not automatically posted to Slack.
+- To answer a Slack message, call chat.reply with your concise Slack-ready answer.
 - Use chat.sendFile/chat.sendImage for files or images, and chat.startConversation/chat.askPerson/chat.askChannel for other destinations.`;
   }
 
   return `Slack delivery mode: automatic.
-- Your final assistant message is automatically posted to this Slack thread.
-- Do not call chat.reply for the current thread unless you intentionally want to override automatic relay for this turn.
+- Final assistant text is automatically posted to Slack.
+- Do not call chat.reply for the current thread unless you intentionally want to override automatic relay for the turn.
 - Use chat.* tools only for new conversations, other destinations, blocking asks, or explicit file/image uploads.`;
+}
+
+function incomingSlackInstruction(relayMode: ChatRelayMode): string {
+  if (relayMode === "manual") {
+    return "This message came from Slack. To answer in Slack, call `chat.reply` with your Slack-visible response; your final assistant message is not sent automatically.";
+  }
+
+  return "This message came from Slack. Your final assistant message will be sent to Slack automatically; do not call `chat.reply` for this thread unless you intentionally want to override the automatic reply.";
 }
 
 export function externalIntakeAgentPrompt(relayMode: ChatRelayMode): string {
@@ -54,8 +62,9 @@ export function assembleInitialPrompt(input: {
   sender: SenderIdentity;
   text: string;
   threadContext?: string;
+  relayMode: ChatRelayMode;
 }): string {
-  return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${senderLine(input.sender)}: ${input.text}`;
+  return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${incomingSlackInstruction(input.relayMode)}\n\n${senderLine(input.sender)}: ${input.text}`;
 }
 
 export function assembleFollowupPrompt(
@@ -63,5 +72,5 @@ export function assembleFollowupPrompt(
   text: string,
   relayMode: ChatRelayMode,
 ): string {
-  return `${relayModePrompt(relayMode)}\n\n${senderLine(sender)}: ${text}`;
+  return `${incomingSlackInstruction(relayMode)}\n\n${senderLine(sender)}: ${text}`;
 }

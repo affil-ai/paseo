@@ -398,6 +398,7 @@ export class ChatBridge {
         sender: normalized.sender,
         text: normalized.cleanedText,
         threadContext: thread.isDM ? "" : await captureThreadContext(thread, message.id),
+        relayMode: this.config.relayMode,
       }),
       images: normalized.images,
       attachments: normalized.attachments,
