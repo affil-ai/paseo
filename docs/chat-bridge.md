@@ -517,10 +517,10 @@ Immediately after creating the agent, post a card to the thread (Chat SDK `Card`
 - **Title:** "Talk to <bot> in this thread"
 - **Body:** "I'll keep replies here and link the session once it's available."
 - **Button:** "Open" (primary) → deep link to the agent's session in the Paseo app/web UI,
-  built from a configured base URL + `serverId` + `agentId`.
+  built from a configured base URL + `serverId` + `workspaceId` + `agentId`.
 - **Fallback text** (non-card clients): the same, with the URL inline.
 
-Paseo deep links follow `/h/[serverId]/agent/[agentId]` per [architecture.md](architecture.md).
+Paseo chat deep links point at the concrete workspace route with an agent-open intent: `/h/[serverId]/workspace/[workspaceId]?open=agent:[agentId]`.
 
 ### 2. Mute / unmute + per-message controls — **v1 (cheap, high-value)**
 
@@ -799,9 +799,9 @@ replies route via `onSubscribedMessage`. The subscription set is persisted (our
 
 ### Deep links — **v1**
 
-Build a link back to the office agent in the Paseo app/web UI (`/h/[serverId]/agent/[agentId]`)
+Build a link back to the office agent in the Paseo app/web UI (`/h/[serverId]/workspace/[workspaceId]?open=agent:[agentId]`)
 for the compact "Working on it" card and its `View chat` affordance. Needs a configured app base
-URL. The bridge does not link directly to child agents from chat.
+URL. The bridge links to the owning office workspace and does not link directly to child agents from chat.
 
 ## Proposed package layout (design sketch — not built)
 
@@ -1054,7 +1054,7 @@ design borrows vs. where it diverges:
 - **Routines vocabulary** — scheduled job / watch channels / follow-PR (the office agent does
   these itself; see [Standing work](#standing-work-routines)).
 - **Read-only session record** — their "Open session in Claude" link is our
-  `/h/[serverId]/agent/[agentId]` deep link, free from the daemon.
+  `/h/[serverId]/workspace/[workspaceId]?open=agent:[agentId]` deep link, free from the daemon.
 - **Agent-Proxy principles** — deny-by-default external access, credentials never exposed to
   the model, service-account-style attribution (folded into the access-posture decision above).
 

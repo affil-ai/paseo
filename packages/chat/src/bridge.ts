@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { join } from "node:path";
 import type {
   DaemonClient,
@@ -33,6 +34,43 @@ import {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function trimNonEmpty(value: string): string {
+  return value.trim();
+}
+
+function toBase64UrlNoPad(input: string): string {
+  return Buffer.from(input, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function isUrlSafeWorkspaceId(value: string): boolean {
+  return /^[A-Za-z0-9._~-]+$/.test(value);
+}
+
+function encodeWorkspaceIdForPathSegment(workspaceId: string): string {
+  const id = trimNonEmpty(workspaceId);
+  if (isUrlSafeWorkspaceId(id)) {
+    return id;
+  }
+  return `b64_${toBase64UrlNoPad(id)}`;
+}
+
+export function buildStartedCardUrl(input: {
+  baseUrl: string;
+  serverId: string;
+  workspaceId: string;
+  agentId: string;
+}): string {
+  const baseUrl = trimNonEmpty(input.baseUrl).replace(/\/+$/g, "");
+  const serverId = encodeURIComponent(trimNonEmpty(input.serverId));
+  const workspaceId = encodeURIComponent(encodeWorkspaceIdForPathSegment(input.workspaceId));
+  const openIntent = encodeURIComponent(`agent:${trimNonEmpty(input.agentId)}`);
+  return `${baseUrl}/h/${serverId}/workspace/${workspaceId}?open=${openIntent}`;
 }
 
 type AgentTimelineEntry = FetchAgentTimelinePayload["entries"][number];
@@ -364,7 +402,12 @@ export class ChatBridge {
         .createSentMessageFromMessage(message)
         .addReaction(this.config.ackEmoji)
         .catch(() => {});
-    await this.postStartedCard(thread, normalized.externalThreadId, agent.id);
+    await this.postStartedCard(
+      thread,
+      normalized.externalThreadId,
+      workspaceResult.workspace.id,
+      agent.id,
+    );
     return session;
   }
 
@@ -387,10 +430,16 @@ export class ChatBridge {
   private async postStartedCard(
     thread: Thread,
     externalThreadId: string,
+    workspaceId: string,
     agentId: string,
   ): Promise<void> {
     const serverId = this.client.getLastServerInfoMessage()?.serverId ?? "local";
-    const url = `${this.config.deepLinkBaseUrl}/h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(agentId)}`;
+    const url = buildStartedCardUrl({
+      baseUrl: this.config.deepLinkBaseUrl,
+      serverId,
+      workspaceId,
+      agentId,
+    });
     await this.postMessage(
       thread,
       externalThreadId,
