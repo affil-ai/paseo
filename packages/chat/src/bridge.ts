@@ -317,21 +317,15 @@ export class ChatBridge {
     this.threads.set(normalized.externalThreadId, thread);
     const existing = await this.store.getSession(normalized.externalThreadId);
     if (shouldIgnoreAmbient(thread, message, Boolean(existing))) return;
-    if (!(await this.store.markEventProcessed(normalized.eventId))) return;
+    if (await this.store.hasEventReceipt(normalized.eventId)) return;
     await thread.subscribe();
     if (await this.handleCommand(thread, message, normalized, existing)) return;
     if (existing?.kind === "inbound-session" && existing.muted && !message.isMention) return;
 
     try {
       const session = existing ?? (await this.startNewSession(thread, message, normalized));
-      if (await this.answerPendingAsk(normalized)) return;
-      if (
-        await this.permissions.answerPendingQuestion(
-          normalized.externalThreadId,
-          normalized.cleanedText,
-        )
-      )
-        return;
+      if (!existing && !(await this.store.markEventProcessed(normalized.eventId))) return;
+      if (await this.handleChatAnswer(normalized, Boolean(existing))) return;
       const relayId = message.id;
       const ownerAgentId = getBindingOwnerAgentId(session);
       const sinceSeq = existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
@@ -349,6 +343,7 @@ export class ChatBridge {
             attachments: normalized.attachments,
           },
         );
+        await this.store.markEventProcessed(normalized.eventId);
       }
       if (this.config.relayMode === "auto") {
         this.startBackgroundRelay({
@@ -370,6 +365,22 @@ export class ChatBridge {
         `I couldn't start a task from this message. Reason: ${reason}`,
       );
     }
+  }
+
+  private async handleChatAnswer(
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>,
+    shouldMarkEventProcessed: boolean,
+  ): Promise<boolean> {
+    const handled =
+      (await this.answerPendingAsk(normalized)) ||
+      (await this.permissions.answerPendingQuestion(
+        normalized.externalThreadId,
+        normalized.cleanedText,
+      ));
+    if (handled && shouldMarkEventProcessed) {
+      await this.store.markEventProcessed(normalized.eventId);
+    }
+    return handled;
   }
 
   private async startNewSession(

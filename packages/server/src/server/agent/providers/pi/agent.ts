@@ -1295,7 +1295,9 @@ export class PiRpcAgentSession implements AgentSession {
     this.locallyCanceledTurnIds.add(turnId);
     this.activeTurnId = null;
     emitPiTurnCanceled((event) => this.emit(event), turnId, "interrupted");
-    void this.runtimeSession.abort().catch((error) => {
+    try {
+      await this.runtimeSession.abort();
+    } catch (error) {
       this.locallyCanceledTurnIds.delete(turnId);
       this.emit({
         type: "turn_failed",
@@ -1303,7 +1305,7 @@ export class PiRpcAgentSession implements AgentSession {
         turnId,
         error: toDiagnosticErrorMessage(error),
       });
-    });
+    }
   }
 
   async revertConversation(input: { messageId: string }): Promise<void> {

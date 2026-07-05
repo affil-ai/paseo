@@ -248,6 +248,10 @@ export class ThreadSessionStore {
     });
   }
 
+  async hasEventReceipt(eventId: string): Promise<boolean> {
+    return Boolean((await this.load()).eventReceipts[eventId]);
+  }
+
   async markEventProcessed(eventId: string): Promise<boolean> {
     let fresh = false;
     await this.store.update((data) => {
