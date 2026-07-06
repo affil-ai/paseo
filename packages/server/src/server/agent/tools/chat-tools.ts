@@ -6,7 +6,7 @@ import {
   chatIdempotencyKey,
   ChatServiceClient,
   ChatToolError,
-  ChatToolResultSchema,
+  ChatToolOutputSchema,
   prepareChatOutboundFile,
 } from "./chat-service-client.js";
 
@@ -115,7 +115,7 @@ export function registerChatTools(
       description:
         "Explicitly start a Slack/Chat SDK conversation as the current office agent. This posts through Paseo's chat bridge, subscribes to replies, and never creates a new agent.",
       inputSchema: StartConversationInputSchema,
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof StartConversationInputSchema>) => {
       const { destination, message, subscribe } = input;
@@ -142,7 +142,7 @@ export function registerChatTools(
       description:
         "Reply to the current/default chat binding or a supplied conversationId through the chat bridge. Returns no_current_binding or ambiguous_current_binding when the target is unclear.",
       inputSchema: ReplyInputSchema,
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof ReplyInputSchema>) => {
       const { conversationId, message } = input;
@@ -168,7 +168,7 @@ export function registerChatTools(
       description:
         "Explicitly upload a local file to the current/default chat binding or supplied conversationId through Chat SDK. Use this for generated CSVs, PDFs, reports, and other artifacts.",
       inputSchema: SendFileInputSchema,
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof SendFileInputSchema>) => {
       const { conversationId, path, filename, mimeType, message } = input;
@@ -203,7 +203,7 @@ export function registerChatTools(
       inputSchema: SendFileInputSchema.omit({ mimeType: true }).extend({
         mimeType: z.never().optional(),
       }),
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof SendFileInputSchema>) => {
       const { conversationId, path, filename, message } = input;
@@ -237,7 +237,7 @@ export function registerChatTools(
       inputSchema: AskInputSchema.extend({
         destination: PersonDestinationSchema,
       }),
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof AskInputSchema>) => {
       const { destination, question, timeoutMinutes } = input;
@@ -267,7 +267,7 @@ export function registerChatTools(
       inputSchema: AskInputSchema.extend({
         destination: ChannelDestinationSchema,
       }),
-      outputSchema: ChatToolResultSchema.shape,
+      outputSchema: ChatToolOutputSchema.shape,
     },
     async (input: z.infer<typeof AskInputSchema>) => {
       const { destination, question, timeoutMinutes } = input;

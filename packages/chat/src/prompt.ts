@@ -24,7 +24,9 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
     return `Slack delivery mode: manual.
 - Assistant text is not automatically posted to Slack.
-- To answer a Slack message, call chat.reply with your concise Slack-ready answer.
+- When a Slack turn starts, immediately acknowledge the request with chat.reply before doing tool work.
+- Use chat.reply again mid-turn whenever you have a meaningful progress update, blocker, decision point, or partial result the user should see.
+- Always send a final chat.reply with the completed answer, result, or handoff summary before ending the turn; your final assistant message is not posted automatically.
 - Use chat.sendFile/chat.sendImage for files or images, and chat.startConversation/chat.askPerson/chat.askChannel for other destinations.`;
   }
 
@@ -36,7 +38,7 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 
 function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
-    return "This message came from Slack. To answer in Slack, call `chat.reply` with your Slack-visible response; your final assistant message is not sent automatically.";
+    return "This message came from Slack. Manual Slack delivery is enabled: immediately acknowledge this message with `chat.reply` before doing tool work; use `chat.reply` again mid-turn for meaningful progress updates, blockers, decision points, or partial results; and always send a final `chat.reply` with the completed answer before ending the turn. Your final assistant message is not sent automatically.";
   }
 
   return "This message came from Slack. Your final assistant message will be sent to Slack automatically; do not call `chat.reply` for this thread unless you intentionally want to override the automatic reply.";

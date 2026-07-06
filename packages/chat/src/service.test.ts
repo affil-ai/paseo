@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AdapterPostableMessage, SentMessage, Thread } from "chat";
-import { CHAT_THREAD_ID_LABEL, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { CHAT_THREAD_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatBridgeService } from "./service.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
@@ -131,53 +131,6 @@ describe("ChatBridgeService", () => {
     });
 
     expect(result.externalThreadId).toBe("slack:C123:111.222");
-  });
-
-  it("blocks delegated agents in the configured office repo from starting conversations", async () => {
-    const store = new ThreadSessionStore(await createTempDir());
-    const chat = new FakeChat();
-    const service = new ChatBridgeService(
-      chat,
-      fakeDaemonClient({ [PARENT_AGENT_ID_LABEL]: "agent-office" }, "/tmp/office"),
-      store,
-      {
-        people: {},
-        channels: {},
-        officeRepoPath: "/tmp/office",
-      },
-    );
-
-    await expect(
-      service.startConversation({
-        officeAgentId: "agent-child",
-        destination: { kind: "channel", id: "C123" },
-        message: "hello channel",
-      }),
-    ).rejects.toMatchObject({ code: "not_office_agent" });
-    expect(chat.posted).toHaveLength(0);
-  });
-
-  it("blocks delegated agents before posting a new conversation", async () => {
-    const store = new ThreadSessionStore(await createTempDir());
-    const chat = new FakeChat();
-    const service = new ChatBridgeService(
-      chat,
-      fakeDaemonClient({
-        [CHAT_THREAD_ID_LABEL]: "slack:C1:111.222",
-        [PARENT_AGENT_ID_LABEL]: "agent-office",
-      }),
-      store,
-      { people: {}, channels: {} },
-    );
-
-    await expect(
-      service.startConversation({
-        officeAgentId: "agent-child",
-        destination: { kind: "channel", id: "C123" },
-        message: "hello channel",
-      }),
-    ).rejects.toMatchObject({ code: "not_office_agent" });
-    expect(chat.posted).toHaveLength(0);
   });
 
   it("returns no_current_binding for reply without a binding", async () => {

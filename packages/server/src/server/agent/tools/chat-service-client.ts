@@ -24,6 +24,21 @@ export const ChatToolResultSchema = z.object({
   fileId: z.string().optional(),
 });
 
+export const ChatToolOutputSchema = z.object({
+  conversationId: z.string().optional(),
+  externalThreadId: z.string().optional(),
+  requestId: z.string().optional(),
+  status: z.literal("pending").optional(),
+  fileId: z.string().optional(),
+  error: z
+    .object({
+      code: z.string(),
+      message: z.string(),
+      details: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
+});
+
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
 export type ChatToolResult = z.infer<typeof ChatToolResultSchema>;
 
