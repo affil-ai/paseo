@@ -24,12 +24,13 @@ The branch must be a valid git ref: lowercase letters, numbers, hyphens, and sla
 The branch is generated directly from the prompt — it is NEVER derived from or slugified from the title.
 
 Title style:
-A terse, task-shaped label naming what the task is about (sentence case, max 80 characters).
-Aim for about 4 words. Go longer only when the task genuinely needs it; most titles must stay short.
+A specific, task-shaped label naming the product area and concrete object being changed (sentence case, max 80 characters).
+Aim for 4–7 words. Prefer a precise noun phrase over a vague umbrella label; e.g. 'Sidebar recency ordering' beats 'Sidebar redesign'.
+Include the distinguishing constraint or target when it matters (Slack tables, workspace sidebar, OAuth callback, branch picker), but omit filler words.
 Do not start with a generic 'do' verb (Fix, Add, Implement, Diagnose, Update, Change, Create, Set, Make) — every task is implicitly one of these, so the verb is noise. Name the thing instead.
 Keep a verb only when it states the specific operation (Swap, Split, Extract, Rename, Merge, Inline).
-Good titles: "Swap sidebar history icon", "Composer keyboard shift", "Agent auto-titling", "Worktree selection memory", "Split browser pane".
-Bad titles: "Fix composer pushed up by keyboard in workspace", "Diagnose auto-titling still happening for agents", "Change sidebar history icon from clock to history icon".
+Good titles: "Workspace sidebar recency", "Slack native table blocks", "Composer keyboard shift", "Agent auto-titling prompt", "Worktree selection memory".
+Bad titles: "Sidebar redesign", "Fix composer pushed up by keyboard in workspace", "Diagnose auto-titling still happening for agents", "Change sidebar history icon from clock to history icon".
 
 Branch style:
 A short, descriptive slug — a few lowercase words joined by hyphens.
@@ -276,7 +277,7 @@ describe("generateBranchNameFromFirstAgentContext", () => {
 
     expect(prompt).toContain("Branch style:\nUse the prefix mb/.");
     expect(prompt).not.toContain("A short, descriptive slug");
-    expect(prompt).toContain("Aim for about 4 words");
+    expect(prompt).toContain("Aim for 4–7 words");
   });
 
   test("the contract is never overridable by user instructions", async () => {
