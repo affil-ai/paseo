@@ -1050,6 +1050,10 @@ export const zhCN: TranslationResources = {
         title: "添加 project",
         description: "打开此机器上的文件夹",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "导入会话",
         description: "导入最近的外部 CLI 会话",
@@ -1061,6 +1065,17 @@ export const zhCN: TranslationResources = {
       pairDevice: {
         title: "配对设备",
         description: "将手机连接到此 daemon",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

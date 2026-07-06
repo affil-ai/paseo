@@ -1091,6 +1091,10 @@ export const ru: TranslationResources = {
         title: "Добавить проект",
         description: "Откройте папку на своем компьютере",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "Импортировать сеанс",
         description: "Добавьте последние внешние сеансы CLI.",
@@ -1102,6 +1106,17 @@ export const ru: TranslationResources = {
       pairDevice: {
         title: "Сопряжение устройства",
         description: "Подключите свой телефон к этому демону",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

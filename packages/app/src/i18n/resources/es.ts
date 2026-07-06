@@ -1101,6 +1101,10 @@ export const es: TranslationResources = {
         title: "Agregar un proyecto",
         description: "Abra una carpeta en su máquina",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "Importar sesión",
         description: "Incorporar sesionesCLIexternas recientes",
@@ -1112,6 +1116,17 @@ export const es: TranslationResources = {
       pairDevice: {
         title: "Emparejar dispositivo",
         description: "Conecta tu teléfono a este demonio",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

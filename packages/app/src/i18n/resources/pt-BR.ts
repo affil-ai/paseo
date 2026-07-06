@@ -1087,6 +1087,10 @@ export const ptBR: TranslationResources = {
         title: "Adicionar um projeto",
         description: "Abra uma pasta na sua máquina",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "Importar sessão",
         description: "Importe sessões externas recentes da CLI",
@@ -1098,6 +1102,17 @@ export const ptBR: TranslationResources = {
       pairDevice: {
         title: "Parear dispositivo",
         description: "Conecte seu celular a este daemon",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

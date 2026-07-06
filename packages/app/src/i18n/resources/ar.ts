@@ -1065,6 +1065,10 @@ export const ar: TranslationResources = {
         title: "أضف مشروعًا",
         description: "افتح مجلدًا على جهازك",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "جلسة الاستيراد",
         description: "أحضر جلسات CLI الخارجية الأخيرة",
@@ -1076,6 +1080,17 @@ export const ar: TranslationResources = {
       pairDevice: {
         title: "إقران الجهاز",
         description: "قم بتوصيل هاتفك بهذا البرنامج الخفي",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

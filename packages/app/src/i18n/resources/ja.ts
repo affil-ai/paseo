@@ -1079,6 +1079,10 @@ export const ja: TranslationResources = {
         title: "プロジェクトを追加",
         description: "マシン上のフォルダを開く",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "セッションをインポート",
         description: "最近の外部CLIセッションを取り込む",
@@ -1090,6 +1094,17 @@ export const ja: TranslationResources = {
       pairDevice: {
         title: "デバイスをペアリング",
         description: "このデーモンにスマートフォンを接続",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

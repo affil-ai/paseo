@@ -479,7 +479,7 @@ const styles = StyleSheet.create((theme) => ({
     maxWidth: "100%",
     borderWidth: 1,
     borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[5],
+    padding: theme.spacing[6],
     gap: theme.spacing[3],
     ...theme.shadow.lg,
   },

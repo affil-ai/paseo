@@ -104,8 +104,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleDashboard: () => void;
-  handleViewSchedules: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -300,7 +298,6 @@ export const LeftSidebar = memo(function LeftSidebar({
         handleViewMoreNavigate={handleViewMoreNavigate}
         handleDashboard={handleDashboardNavigate}
         handleViewSchedulesNavigate={handleViewSchedulesNavigate}
-        handleDashboard={handleDashboardNavigate}
       />
     );
   }
@@ -318,7 +315,6 @@ export const LeftSidebar = memo(function LeftSidebar({
       handleViewMore={handleViewMoreNavigate}
       handleDashboard={handleDashboardNavigate}
       handleViewSchedules={handleViewSchedulesNavigate}
-      handleDashboard={handleDashboardNavigate}
     />
   );
 });
@@ -906,7 +902,6 @@ function DesktopSidebar({
   handleViewMore,
   handleDashboard,
   handleViewSchedules,
-  handleDashboard,
 }: DesktopSidebarProps) {
   const pathname = usePathname();
   const isSessionsActive = pathname.includes("/sessions");

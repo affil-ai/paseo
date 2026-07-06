@@ -1103,6 +1103,10 @@ export const fr: TranslationResources = {
         title: "Ajouter un projet",
         description: "Ouvrez un dossier sur votre machine",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "Session d'importation",
         description: "Apportez des sessionsCLIexternes récentes",
@@ -1114,6 +1118,17 @@ export const fr: TranslationResources = {
       pairDevice: {
         title: "Associer un appareil",
         description: "Connectez votre téléphone à ce démon",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },
