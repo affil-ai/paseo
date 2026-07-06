@@ -47,6 +47,14 @@ function trimNonEmpty(value: string): string {
   return value.trim();
 }
 
+function isSystemErrorAssistantText(text: string): boolean {
+  return text.trimStart().startsWith("[System Error]");
+}
+
+function isRelayableAssistantText(text: string): boolean {
+  return text.trim().length > 0 && !isSystemErrorAssistantText(text);
+}
+
 function toBase64UrlNoPad(input: string): string {
   return Buffer.from(input, "utf8")
     .toString("base64")
@@ -579,7 +587,7 @@ export class ChatBridge {
     if (!(await this.store.markDeliveryStarted(receipt))) return;
 
     const firstReply = { text: null as string | null };
-    const finalText = await this.waitForAssistantTextBlocks({
+    const relayResult = await this.waitForAssistantTextBlocks({
       agentId: input.agentId,
       sinceSeq: input.sinceSeq,
       externalThreadId: input.externalThreadId,
@@ -602,8 +610,8 @@ export class ChatBridge {
       return;
     }
 
-    const replyText = finalText || "Done.";
-    if (replyText.trim() !== firstReply.text?.trim()) {
+    const replyText = relayResult.finalText || (relayResult.sawAssistantTextBlock ? "" : "Done.");
+    if (replyText && replyText.trim() !== firstReply.text?.trim()) {
       await this.postAutoRelayMessage({
         thread: input.thread,
         externalThreadId: input.externalThreadId,
@@ -630,9 +638,10 @@ export class ChatBridge {
     externalThreadId: string;
     relayId: string;
     onFirstText: (text: string) => Promise<void>;
-  }): Promise<string> {
+  }): Promise<{ finalText: string; sawAssistantTextBlock: boolean }> {
     let firstTextPosted = false;
     let finalText = "";
+    let sawAssistantTextBlock = false;
 
     while (await this.isRelayCurrent(input.externalThreadId, input.relayId)) {
       const timeline = await this.client.fetchAgentTimeline(input.agentId, {
@@ -641,8 +650,14 @@ export class ChatBridge {
         limit: 200,
       });
       const assistantBlocks = collectAssistantTextBlocksSince(timeline.entries, input.sinceSeq);
+      if (assistantBlocks.some((block) => block.text.length > 0)) {
+        sawAssistantTextBlock = true;
+      }
+      const relayableBlocks = assistantBlocks.filter((block) =>
+        isRelayableAssistantText(block.text),
+      );
 
-      const firstBlock = assistantBlocks[0];
+      const firstBlock = relayableBlocks[0];
       if (!firstTextPosted && firstBlock) {
         const status = timeline.agent?.status;
         const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
@@ -653,14 +668,16 @@ export class ChatBridge {
         }
       }
 
-      finalText = assistantBlocks.at(-1)?.text ?? finalText;
+      finalText = relayableBlocks.at(-1)?.text ?? finalText;
 
       const status = timeline.agent?.status;
-      if (status && status !== "initializing" && status !== "running") return finalText;
+      if (status && status !== "initializing" && status !== "running") {
+        return { finalText, sawAssistantTextBlock };
+      }
       await sleep(1_000);
     }
 
-    return finalText;
+    return { finalText, sawAssistantTextBlock };
   }
 
   private async getTimelineNextSeq(agentId: string): Promise<number> {
