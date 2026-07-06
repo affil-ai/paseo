@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
-import type { AdapterPostableMessage, SentMessage } from "chat";
+import type { AdapterPostableMessage, FileUpload, SentMessage } from "chat";
 import type { ChatEmailConfig, ChatRelayMode } from "../config.js";
 import {
   assembleFollowupPrompt,
@@ -29,6 +30,7 @@ import {
   truncateText,
   verifyResendWebhookSignature,
   type EmailIntakeContext,
+  type ProcessedEmailAttachment,
   type ResendReceivedEmailWebhook,
 } from "./email-resend.js";
 
@@ -76,6 +78,7 @@ export interface EmailSessionBridge {
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;
     attachments?: AgentAttachment[];
+    initialRelayId?: string;
   }): Promise<{ rootAgentId: string }>;
   startRelay(input: {
     externalThreadId: string;
@@ -83,6 +86,7 @@ export interface EmailSessionBridge {
     relayId: string;
     sinceSeq: number;
     source?: string;
+    postFirstReply?: boolean;
   }): Promise<void>;
 }
 
@@ -108,6 +112,34 @@ function normalizeHeaders(
   return Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
   );
+}
+
+function markdownCodeBlock(text: string): string {
+  const fence = text.includes("```") ? "````" : "```";
+  return `${fence}\n${text}\n${fence}`;
+}
+
+async function emailSlackFiles(
+  attachments: readonly ProcessedEmailAttachment[],
+): Promise<FileUpload[]> {
+  const files: FileUpload[] = [];
+  for (const attachment of attachments) {
+    if (attachment.kind !== "stored") continue;
+    try {
+      const file: FileUpload = {
+        data: await readFile(attachment.localPath),
+        filename: basename(attachment.name),
+      };
+      if (attachment.mimeType !== undefined) file.mimeType = attachment.mimeType;
+      files.push(file);
+    } catch (error) {
+      console.warn("Failed to load email attachment for Slack preview", {
+        path: attachment.localPath,
+        error,
+      });
+    }
+  }
+  return files;
 }
 
 export class EmailIntakeBridge {
@@ -208,14 +240,17 @@ export class EmailIntakeBridge {
     if (!binding) throw new Error("Email session disappeared while processing reply");
     const ownerAgentId = getBindingOwnerAgentId(binding);
     const sender = emailSenderIdentity(input.email);
+    const slackFiles = await emailSlackFiles(input.processed.attachments);
+    const previewText = truncateText(
+      stripQuotedEmailChain(emailBody(input.email)),
+      REPLY_PREVIEW_MAX_CHARS,
+    );
 
     await this.deps.chat
       .thread(input.existingThreadId)
       .post({
-        markdown: `📧 *Email reply from ${sender.name}*\n\n${truncateText(
-          stripQuotedEmailChain(emailBody(input.email)),
-          REPLY_PREVIEW_MAX_CHARS,
-        )}`,
+        markdown: `📧 *Email reply from ${sender.name}*\n\n${markdownCodeBlock(previewText)}`,
+        ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
       })
       .catch((error) => {
         console.warn("Failed to post email reply preview to Slack", error);
@@ -226,6 +261,11 @@ export class EmailIntakeBridge {
       projection: "canonical",
       limit: 1,
     });
+    if (this.deps.relayMode === "auto") {
+      await this.deps.store.updateSession(input.existingThreadId, (current) => {
+        current.activeRelayId = input.eventId;
+      });
+    }
     await this.deps.client.sendAgentMessage(
       ownerAgentId,
       assembleFollowupPrompt(
@@ -242,6 +282,7 @@ export class EmailIntakeBridge {
       relayId: input.eventId,
       sinceSeq: timeline.window.nextSeq,
       source: "email",
+      postFirstReply: false,
     });
     await this.deps.store.putEmailLinks(input.storedIds, input.existingThreadId);
     await this.deps.store.markEventProcessed(input.eventId);
@@ -255,12 +296,15 @@ export class EmailIntakeBridge {
     processed: Awaited<ReturnType<typeof processEmailAttachments>>;
   }): Promise<EmailWebhookResult> {
     const channel = this.deps.chat.channel(normalizeSlackChannelId(this.deps.email.channelId));
+    const preview = supportEmailSlackPreview({
+      email: input.email,
+      attachments: input.processed.attachments,
+      context: this.context,
+    });
+    const slackFiles = await emailSlackFiles(input.processed.attachments);
     const sent = await channel.post({
-      markdown: `*${supportEmailSlackTitle(input.email)}*\n\n${supportEmailSlackPreview({
-        email: input.email,
-        attachments: input.processed.attachments,
-        context: this.context,
-      })}`,
+      markdown: `*${supportEmailSlackTitle(input.email)}*\n\n${markdownCodeBlock(preview)}`,
+      ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
     });
     const externalThreadId = threadIdFromPostedMessage(channel.id, sent);
     await this.deps.chat.thread(externalThreadId).subscribe();
@@ -281,6 +325,7 @@ export class EmailIntakeBridge {
         }),
         images: input.processed.images,
         attachments: input.processed.agentAttachments,
+        ...(this.deps.relayMode === "auto" ? { initialRelayId: input.eventId } : {}),
       });
       await this.deps.store.putEmailLinks(input.storedIds, externalThreadId);
       await this.deps.bridge.startRelay({
@@ -289,6 +334,7 @@ export class EmailIntakeBridge {
         relayId: input.eventId,
         sinceSeq: 0,
         source: "email",
+        postFirstReply: false,
       });
       await this.deps.store.markEventProcessed(input.eventId);
       return { status: 200, body: { accepted: true, created: true } };

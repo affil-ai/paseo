@@ -391,6 +391,7 @@ export class ChatBridge {
     images?: Array<{ data: string; mimeType: string }>;
     attachments?: AgentAttachment[];
     thread?: Thread | null;
+    initialRelayId?: string;
   }) {
     const workspaceResult = await this.client.createWorkspace({
       source: { kind: "directory", path: this.config.officeRepoPath },
@@ -418,7 +419,7 @@ export class ChatBridge {
       kind: "inbound-session" as const,
       externalThreadId: input.externalThreadId,
       rootAgentId: agent.id,
-      activeRelayId: null,
+      activeRelayId: input.initialRelayId ?? null,
       muted: false,
       title: input.title,
       createdAt: now,
@@ -440,6 +441,7 @@ export class ChatBridge {
     relayId: string;
     sinceSeq: number;
     source?: string;
+    postFirstReply?: boolean;
   }): Promise<void> {
     if (this.config.relayMode !== "auto") return;
     await this.store.updateSession(input.externalThreadId, (current) => {
@@ -453,7 +455,7 @@ export class ChatBridge {
       source: input.source ?? "email",
       sinceSeq: input.sinceSeq,
       relayId: input.relayId,
-      postFirstReply: true,
+      postFirstReply: input.postFirstReply ?? true,
     });
   }
 
