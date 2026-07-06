@@ -134,6 +134,9 @@ export interface WorkspaceDescriptor {
   title?: string | null;
   status: WorkspaceDescriptorPayload["status"];
   statusEnteredAt: Date | null;
+  // Best-effort last-activity timestamp (ISO string) used for recency sorting in
+  // the sidebar. Null/missing when the daemon does not report it.
+  activityAt?: string | null;
   archivingAt: string | null;
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
@@ -167,6 +170,7 @@ export function normalizeWorkspaceDescriptor(
     title: payload.title ?? null,
     status: payload.status,
     statusEnteredAt,
+    activityAt: payload.activityAt ?? null,
     archivingAt: payload.archivingAt ?? null,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => Object.assign({}, s)),

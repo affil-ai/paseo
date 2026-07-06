@@ -32,6 +32,9 @@ export interface SidebarWorkspacePlacement {
 export interface SidebarStatusWorkspacePlacement extends SidebarWorkspacePlacement {
   statusBucket: SidebarStateBucket;
   statusEnteredAt: Date | null;
+  // Best-effort last-activity timestamp (ISO string) for recency sorting. Null/missing
+  // when the daemon does not report it.
+  activityAt?: string | null;
 }
 
 export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
@@ -118,6 +121,7 @@ export function createSidebarWorkspaceEntry(input: {
     currentBranch: normalizeCurrentBranch(input.workspace.gitRuntime?.currentBranch),
     statusBucket: effectiveStatus.status,
     statusEnteredAt: effectiveStatus.enteredAt,
+    activityAt: input.workspace.activityAt ?? null,
     archivingAt: input.workspace.archivingAt,
     diffStat: input.workspace.diffStat,
     prHint: selectPrHintFromStatus(input.workspace.githubRuntime?.pullRequest),
@@ -311,6 +315,7 @@ export function buildSidebarStatusWorkspacePlacements(input: {
       workspaceKind: workspace.workspaceKind,
       statusBucket: effectiveStatus.status,
       statusEnteredAt: effectiveStatus.enteredAt,
+      activityAt: workspace.activityAt ?? null,
     });
   }
 

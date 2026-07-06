@@ -1,5 +1,6 @@
 import type { EmptyProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import { projectDisplayNameFromProjectId } from "@/utils/project-display-name";
+import { getFirstSortableTimestamp } from "@/utils/sidebar-recency";
 
 export interface WorkspaceStructureHostPlacement {
   serverId: string;
@@ -20,10 +21,26 @@ export interface WorkspaceStructure {
   projects: WorkspaceStructureProject[];
 }
 
+interface WorkspaceStructureItem {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceKey: string;
+  // Recency timestamp (ms) used to sort by activity descending. Number.NEGATIVE_INFINITY
+  // when the daemon reports no activity, so those workspaces sink to the bottom.
+  recencyMs: number;
+}
+
+// Sidebar workspaces sort by recency descending (most recent activity first),
+// matching the Conductor-style sidebar. Manual workspace drag ordering is
+// intentionally NOT applied to this view — see composeWorkspaceStructure.
 function compareWorkspaceStructureItems(
-  left: { workspaceId: string; workspaceName: string },
-  right: { workspaceId: string; workspaceName: string },
+  left: WorkspaceStructureItem,
+  right: WorkspaceStructureItem,
 ): number {
+  if (left.recencyMs !== right.recencyMs) {
+    return right.recencyMs > left.recencyMs ? 1 : -1;
+  }
+
   const nameDelta = left.workspaceName.localeCompare(right.workspaceName, undefined, {
     numeric: true,
     sensitivity: "base",
@@ -37,14 +54,28 @@ function compareWorkspaceStructureItems(
   });
 }
 
+// Projects sort by the recency of their most-recently-active child workspace,
+// descending, so the project with fresh activity floats to the top. Projects
+// with no active children fall back to a stable name comparison.
 function compareWorkspaceStructureProjects(
-  left: WorkspaceStructureProject,
-  right: WorkspaceStructureProject,
+  left: WorkspaceStructureProject & { recencyMs: number },
+  right: WorkspaceStructureProject & { recencyMs: number },
 ): number {
+  if (left.recencyMs !== right.recencyMs) {
+    return right.recencyMs > left.recencyMs ? 1 : -1;
+  }
   return left.projectName.localeCompare(right.projectName, undefined, {
     numeric: true,
     sensitivity: "base",
   });
+}
+
+function workspaceRecencyMs(workspace: WorkspaceDescriptor): number {
+  const statusEnteredAtIso =
+    workspace.statusEnteredAt instanceof Date ? workspace.statusEnteredAt.toISOString() : null;
+  return (
+    getFirstSortableTimestamp(workspace.activityAt, statusEnteredAtIso) ?? Number.NEGATIVE_INFINITY
+  );
 }
 
 function canCreateWorktreeForProjectKind(projectKind: WorkspaceDescriptor["projectKind"]): boolean {
@@ -68,7 +99,7 @@ export function buildWorkspaceStructureProjects(input: {
       projectKind: WorkspaceDescriptor["projectKind"];
       iconWorkingDir: string;
       hosts: Map<string, WorkspaceStructureHostPlacement>;
-      workspaces: Array<{ workspaceId: string; workspaceName: string; workspaceKey: string }>;
+      workspaces: WorkspaceStructureItem[];
     }
   >();
 
@@ -128,6 +159,7 @@ export function buildWorkspaceStructureProjects(input: {
               workspaceId: workspace.id,
               workspaceName: workspace.name,
               workspaceKey: `${session.serverId}:${workspace.id}`,
+              recencyMs: workspaceRecencyMs(workspace),
             },
           ],
         });
@@ -143,13 +175,18 @@ export function buildWorkspaceStructureProjects(input: {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
         workspaceKey: `${session.serverId}:${workspace.id}`,
+        recencyMs: workspaceRecencyMs(workspace),
       });
     }
   }
 
-  const projects: WorkspaceStructureProject[] = [];
+  const projects: Array<WorkspaceStructureProject & { recencyMs: number }> = [];
   for (const raw of byProject.values()) {
     const sortedWorkspaces = [...raw.workspaces].sort(compareWorkspaceStructureItems);
+    const projectRecencyMs = raw.workspaces.reduce(
+      (max, workspace) => (workspace.recencyMs > max ? workspace.recencyMs : max),
+      Number.NEGATIVE_INFINITY,
+    );
     projects.push({
       projectKey: raw.projectKey,
       projectName: raw.projectName,
@@ -157,9 +194,10 @@ export function buildWorkspaceStructureProjects(input: {
       iconWorkingDir: raw.iconWorkingDir,
       hosts: Array.from(raw.hosts.values()),
       workspaceKeys: sortedWorkspaces.map((w) => w.workspaceKey),
+      recencyMs: projectRecencyMs,
     });
   }
 
   projects.sort(compareWorkspaceStructureProjects);
-  return projects;
+  return projects.map(({ recencyMs: _recencyMs, ...project }) => project);
 }

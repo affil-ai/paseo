@@ -179,25 +179,20 @@ export function selectWorkspaceOrderByScope(state: SidebarOrderSnapshot): Record
 export function composeWorkspaceStructure(input: {
   projects: WorkspaceStructureProject[];
   projectOrder: readonly string[];
-  workspaceOrderByScope: Record<string, readonly string[]>;
+  // Retained for call-site compatibility; workspace display order is now driven
+  // by recency, so manual per-project workspace ordering is intentionally unused.
+  workspaceOrderByScope?: Record<string, readonly string[]>;
 }): WorkspaceStructure {
   if (input.projects.length === 0) {
     return EMPTY_WORKSPACE_STRUCTURE;
   }
 
+  // Workspaces display by recency (see buildWorkspaceStructureProjects), NOT by
+  // manual drag order. workspaceOrderByScope is intentionally ignored here so a
+  // freshly-active workspace floats to the top instead of being pinned by a
+  // stale drag. Manual PROJECT ordering is still honored below.
   const orderedProjects = applyStoredOrdering({
-    items: input.projects.map((project) => {
-      const workspaceOrder =
-        input.workspaceOrderByScope[project.projectKey] ?? EMPTY_WORKSPACE_KEYS;
-      return {
-        ...project,
-        workspaceKeys: applyStoredOrdering({
-          items: project.workspaceKeys,
-          storedOrder: workspaceOrder,
-          getKey: (workspaceKey) => workspaceKey,
-        }),
-      };
-    }),
+    items: input.projects,
     storedOrder: input.projectOrder,
     getKey: (project) => project.projectKey,
   });
