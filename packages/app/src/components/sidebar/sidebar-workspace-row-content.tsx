@@ -16,7 +16,6 @@ import {
   GitPullRequest,
   Globe,
   Monitor,
-  Star,
   SquareTerminal,
 } from "lucide-react-native";
 import { GitHubIcon } from "@/components/icons/github-icon";
@@ -62,7 +61,6 @@ const ThemedFolder = withUnistyles(Folder);
 const ThemedFolderGit2 = withUnistyles(FolderGit2);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
-const ThemedStar = withUnistyles(Star);
 
 type SidebarWorkspaceScriptIconKind = "service" | "command";
 
@@ -142,11 +140,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
               <Text style={workspaceBranchTextStyle} numberOfLines={1}>
                 {workspaceLabel}
               </Text>
-              {workspace.chatRepository ? (
-                <View style={styles.workspaceTitleAccessory} accessibilityLabel="Chat repo">
-                  <ThemedStar size={12} uniProps={amberColorMapping} />
-                </View>
-              ) : null}
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
             </View>
             <View style={styles.workspaceRowRight}>{children}</View>
