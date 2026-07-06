@@ -216,6 +216,33 @@ describe("PiRpcAgentSession", () => {
     ]);
   });
 
+  test("interrupt waits for the runtime abort to finish before resolving", async () => {
+    // Regression: replaceAgentRun sends the replacement prompt as soon as
+    // interrupt() resolves. If interrupt() returns before Pi finishes aborting,
+    // the runtime is still streaming and Pi rejects the next prompt with
+    // "Agent is already processing. Specify streamingBehavior ...". Awaiting the
+    // abort guarantees the runtime is idle first.
+    const { pi, session } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn("first prompt");
+    fakeSession.blockAbort();
+
+    let interruptResolved = false;
+    const interruptPromise = (async () => {
+      await session.interrupt();
+      interruptResolved = true;
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeSession.abortRequested).toBe(true);
+    expect(interruptResolved).toBe(false);
+
+    fakeSession.releaseAbort();
+    await interruptPromise;
+    expect(interruptResolved).toBe(true);
+  });
+
   test("bridges Pi RPC select extension UI requests through question permissions", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();

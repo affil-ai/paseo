@@ -1295,7 +1295,16 @@ export class PiRpcAgentSession implements AgentSession {
     this.locallyCanceledTurnIds.add(turnId);
     this.activeTurnId = null;
     emitPiTurnCanceled((event) => this.emit(event), turnId, "interrupted");
-    void this.runtimeSession.abort().catch((error) => {
+    // Await the abort so the runtime is fully idle before the caller (e.g.
+    // replaceAgentRun) sends the replacement prompt. Pi's abort RPC only
+    // resolves after waitForIdle(); returning early lets the next prompt race
+    // an in-flight turn, and Pi rejects it with "Agent is already processing.
+    // Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+    // The turn_canceled event above is emitted synchronously, so the UI and
+    // foreground-turn waiters still settle immediately.
+    try {
+      await this.runtimeSession.abort();
+    } catch (error) {
       this.locallyCanceledTurnIds.delete(turnId);
       this.emit({
         type: "turn_failed",
@@ -1303,7 +1312,7 @@ export class PiRpcAgentSession implements AgentSession {
         turnId,
         error: toDiagnosticErrorMessage(error),
       });
-    });
+    }
   }
 
   async revertConversation(input: { messageId: string }): Promise<void> {
