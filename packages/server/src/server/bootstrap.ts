@@ -451,8 +451,14 @@ function resolveExpressTrustProxySetting(config: PaseoDaemonConfig): true | stri
   return config.trustedProxies ?? ["loopback"];
 }
 
+interface InitialMcpConnection {
+  [key: string]: unknown;
+  enabled: boolean;
+  server: McpServerConfig;
+}
+
 interface InitialMcpConnections {
-  servers: Record<string, { enabled: boolean; server: McpServerConfig }>;
+  servers: Record<string, InitialMcpConnection>;
 }
 
 function createInitialMcpConnections(

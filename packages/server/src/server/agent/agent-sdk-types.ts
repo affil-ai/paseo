@@ -15,6 +15,7 @@ export interface AgentMetadata {
  * Stdio-based MCP server (spawns a subprocess).
  */
 export interface McpStdioServerConfig {
+  [key: string]: unknown;
   type: "stdio";
   command: string;
   args?: string[];
@@ -30,6 +31,7 @@ export interface McpStdioServerConfig {
  * HTTP-based MCP server.
  */
 export interface McpHttpServerConfig {
+  [key: string]: unknown;
   type: "http";
   url: string;
   headers?: Record<string, string>;
@@ -44,6 +46,7 @@ export interface McpHttpServerConfig {
  * SSE-based MCP server (Server-Sent Events over HTTP).
  */
 export interface McpSseServerConfig {
+  [key: string]: unknown;
   type: "sse";
   url: string;
   headers?: Record<string, string>;
