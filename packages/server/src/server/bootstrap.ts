@@ -458,6 +458,7 @@ interface InitialMcpConnection {
 }
 
 interface InitialMcpConnections {
+  [key: string]: unknown;
   servers: Record<string, InitialMcpConnection>;
 }
 
