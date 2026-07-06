@@ -58,6 +58,8 @@ Slack output must stay in the user's message thread:
 - Do **not** post intermediate assistant/tool output in Slack v1; it is too noisy and Slack's native streaming error UI is confusing.
 - Post the first complete assistant text block for a turn, then post the final assistant text block when the agent stops. If first and final are the same text, post it only once.
 - Fetch assistant text from the daemon's canonical timeline and post complete assistant text blocks as normal thread replies. Do not use native Slack streaming.
+- Slack-bound markdown converts valid GitHub/Markdown table blocks into native Slack table blocks; the Paseo UI keeps rendering the original markdown.
+- If a Slack-bound chat tool message expands to multiple posts because it contains multiple tables, file uploads stay attached to the first emitted post.
 
 Slack input should match the app's default send behavior:
 

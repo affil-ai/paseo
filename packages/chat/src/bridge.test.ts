@@ -172,6 +172,33 @@ describe("ChatBridge auto relay", () => {
     }
   });
 
+  it("posts Markdown tables as native table cards during auto relay", async () => {
+    const result = await runAutoRelayWithTimeline([
+      {
+        type: "assistant_message",
+        text: ["| Name | Value |", "| --- | --- |", "| Alpha | 1 |"].join("\n"),
+      },
+    ]);
+    try {
+      expect(result.postedMessages).toMatchObject([
+        {
+          card: {
+            children: [
+              {
+                headers: ["Name", "Value"],
+                rows: [["Alpha", "1"]],
+                type: "table",
+              },
+            ],
+            type: "card",
+          },
+        },
+      ]);
+    } finally {
+      await rm(result.stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("posts only the normal answer when it follows a system-error artifact", async () => {
     const result = await runAutoRelayWithTimeline([
       {

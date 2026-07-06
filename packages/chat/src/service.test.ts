@@ -254,6 +254,42 @@ describe("ChatBridgeService", () => {
     });
   });
 
+  it("posts manual replies with Markdown tables as native table cards", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+    const started = await service.startConversation({
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C123" },
+      message: "start",
+    });
+
+    await service.reply({
+      officeAgentId: "agent-office",
+      conversationId: started.conversationId,
+      message: ["| Name | Value |", "| --- | --- |", "| Alpha | 1 |"].join("\n"),
+      files: [filePayload()],
+    });
+
+    expect(chat.posted[1]?.targetId).toBe(started.externalThreadId);
+    expect(chat.posted[1]?.message).toMatchObject({
+      card: {
+        children: [
+          {
+            headers: ["Name", "Value"],
+            rows: [["Alpha", "1"]],
+            type: "table",
+          },
+        ],
+        type: "card",
+      },
+      files: [{ filename: "report.csv", mimeType: "text/csv" }],
+    });
+  });
+
   it("uploads files through Chat SDK file payloads and suppresses idempotent retries", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();
