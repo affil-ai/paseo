@@ -1452,6 +1452,7 @@ export const en = {
     hostSections: {
       connections: "Connections",
       agents: "Agents",
+      chat: "Chat",
       workspaces: "Workspaces",
       providers: "Providers",
       usage: "Usage",

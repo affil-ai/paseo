@@ -377,6 +377,12 @@ export interface PaseoDaemonConfig {
       thinkingOptionId?: string;
     }>;
   };
+  chatDefaults?: {
+    provider?: string;
+    model?: string;
+    modeId?: string;
+    thinkingOptionId?: string;
+  };
   providerOverrides?: Record<string, ProviderOverride>;
   log?: PersistedConfig["log"];
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
@@ -455,6 +461,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? false },
+    chat: { defaults: config.chatDefaults ?? {} },
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],

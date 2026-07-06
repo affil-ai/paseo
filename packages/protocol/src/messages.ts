@@ -139,6 +139,22 @@ const MutableBrowserToolsConfigSchema = z
     enabled: z.boolean().default(false),
   })
   .passthrough();
+
+const MutableChatDefaultsConfigSchema = z
+  .object({
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    modeId: z.string().optional(),
+    thinkingOptionId: z.string().optional(),
+  })
+  .passthrough();
+
+const MutableChatConfigSchema = z
+  .object({
+    defaults: MutableChatDefaultsConfigSchema.default({}),
+  })
+  .passthrough();
+
 export const MutableDaemonConfigSchema = z
   .object({
     mcp: z
@@ -147,6 +163,7 @@ export const MutableDaemonConfigSchema = z
       })
       .passthrough(),
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: false }),
+    chat: MutableChatConfigSchema.default({ defaults: {} }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -160,6 +177,13 @@ export const MutableDaemonConfigPatchSchema = z
   .object({
     mcp: MutableDaemonConfigSchema.shape.mcp.partial().optional(),
     browserTools: MutableBrowserToolsConfigSchema.partial().optional(),
+    chat: z
+      .object({
+        defaults: MutableChatDefaultsConfigSchema.partial().optional(),
+      })
+      .partial()
+      .passthrough()
+      .optional(),
     providers: z
       .record(z.string(), MutableDaemonProviderConfigSchema.partial().passthrough())
       .optional(),

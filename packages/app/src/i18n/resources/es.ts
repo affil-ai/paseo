@@ -1483,6 +1483,7 @@ export const es: TranslationResources = {
     hostSections: {
       connections: "Conexiones",
       agents: "Agents",
+      chat: "Chat",
       workspaces: "Workspaces",
       providers: "Proveedores",
       usage: "Uso",

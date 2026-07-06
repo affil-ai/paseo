@@ -168,6 +168,44 @@ describe("DaemonConfigStore", () => {
     expect(persisted.daemon?.browserTools).toEqual({ enabled: true });
   });
 
+  test("patch persists chat defaults into config.json", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+
+    const store = new DaemonConfigStore(
+      paseoHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      chat: {
+        defaults: {
+          provider: "codex",
+          model: "openai-codex/gpt-5.5",
+          modeId: "medium",
+          thinkingOptionId: "high",
+        },
+      },
+    });
+
+    const persisted = loadPersistedConfig(paseoHome);
+    expect(persisted.chat?.defaults).toEqual({
+      provider: "codex",
+      model: "openai-codex/gpt-5.5",
+      modeId: "medium",
+      thinkingOptionId: "high",
+    });
+  });
+
   test("patch persists provider additional models into config.json", () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);

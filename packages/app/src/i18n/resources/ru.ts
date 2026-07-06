@@ -1475,6 +1475,7 @@ export const ru: TranslationResources = {
     hostSections: {
       connections: "Соединения",
       agents: "Agents",
+      chat: "Chat",
       workspaces: "Workspaces",
       providers: "Провайдеры",
       usage: "Использование",

@@ -1427,6 +1427,7 @@ export const zhCN: TranslationResources = {
     hostSections: {
       connections: "连接",
       agents: "Agents",
+      chat: "Chat",
       workspaces: "Workspaces",
       providers: "Providers",
       usage: "使用情况",

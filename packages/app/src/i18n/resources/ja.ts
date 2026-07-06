@@ -1461,6 +1461,7 @@ export const ja: TranslationResources = {
     hostSections: {
       connections: "接続",
       agents: "エージェント",
+      chat: "Chat",
       workspaces: "ワークスペース",
       providers: "プロバイダー",
       usage: "使用状況",

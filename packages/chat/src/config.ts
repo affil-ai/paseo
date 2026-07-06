@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 const DEFAULT_DAEMON_HOST = "localhost:6767";
@@ -54,16 +55,36 @@ const envSchema = z.object({
   PASEO_HOME: z.string().optional(),
 });
 
+const chatDefaultsSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    modeId: z.string().min(1).optional(),
+    thinkingOptionId: z.string().min(1).optional(),
+  })
+  .partial();
+
+function loadPersistedChatDefaults(paseoHome: string) {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(paseoHome, "config.json"), "utf8"));
+    return chatDefaultsSchema.parse(parsed?.chat?.defaults ?? {});
+  } catch {
+    return {};
+  }
+}
+
 export type ChatBridgeConfig = ReturnType<typeof loadConfig>;
 export type ResolvedChatBridgeConfig = ChatBridgeConfig & { officeRepoPath: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const parsed = envSchema.parse(env);
   const paseoHome = resolvePaseoHome(env);
+  const persistedDefaults = loadPersistedChatDefaults(paseoHome);
   return {
-    provider: parsed.PASEO_CHAT_PROVIDER,
-    model: parsed.PASEO_CHAT_MODEL,
-    modeId: parsed.PASEO_CHAT_MODE_ID,
+    provider: persistedDefaults.provider ?? parsed.PASEO_CHAT_PROVIDER,
+    model: persistedDefaults.model ?? parsed.PASEO_CHAT_MODEL,
+    modeId: persistedDefaults.modeId ?? parsed.PASEO_CHAT_MODE_ID,
+    thinkingOptionId: persistedDefaults.thinkingOptionId,
     ackEmoji: parsed.PASEO_CHAT_ACK_EMOJI,
     officePromptPath: parsed.PASEO_CHAT_OFFICE_PROMPT_PATH
       ? path.resolve(resolveHome(parsed.PASEO_CHAT_OFFICE_PROMPT_PATH))

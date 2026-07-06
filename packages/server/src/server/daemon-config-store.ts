@@ -173,6 +173,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
 }): PersistedConfig {
   const { persisted, mutable } = params;
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
+  const chatDefaults = readChatDefaults(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const providerOverrides = applyMutableProviderConfigToOverrides(
     persisted.agents?.providers as Record<string, ProviderOverride> | undefined,
@@ -203,6 +204,10 @@ function mergeMutableConfigIntoPersistedConfig(params: {
 
   return {
     ...persisted,
+    chat: {
+      ...persisted.chat,
+      defaults: chatDefaults,
+    },
     daemon: {
       ...persisted.daemon,
       mcp: {
@@ -222,6 +227,36 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     },
     agents: nextAgents,
   } as PersistedConfig;
+}
+
+function readChatDefaults(mutable: MutableDaemonConfig): {
+  provider?: string;
+  model?: string;
+  modeId?: string;
+  thinkingOptionId?: string;
+} {
+  const chat = mutable.chat;
+  if (!isRecord(chat)) {
+    return {};
+  }
+  const defaults = chat["defaults"];
+  if (!isRecord(defaults)) {
+    return {};
+  }
+  return {
+    ...(typeof defaults["provider"] === "string" && defaults["provider"].trim()
+      ? { provider: defaults["provider"].trim() }
+      : {}),
+    ...(typeof defaults["model"] === "string" && defaults["model"].trim()
+      ? { model: defaults["model"].trim() }
+      : {}),
+    ...(typeof defaults["modeId"] === "string" && defaults["modeId"].trim()
+      ? { modeId: defaults["modeId"].trim() }
+      : {}),
+    ...(typeof defaults["thinkingOptionId"] === "string" && defaults["thinkingOptionId"].trim()
+      ? { thinkingOptionId: defaults["thinkingOptionId"].trim() }
+      : {}),
+  };
 }
 
 function readBrowserToolsEnabled(mutable: MutableDaemonConfig): boolean {

@@ -254,9 +254,11 @@ describe("host settings section slugs", () => {
   it("keeps current host settings sections", () => {
     expect(normalizeHostSectionSlug("connections")).toBe("connections");
     expect(normalizeHostSectionSlug("agents")).toBe("agents");
+    expect(normalizeHostSectionSlug("chat")).toBe("chat");
     expect(normalizeHostSectionSlug("workspaces")).toBe("workspaces");
     expect(normalizeHostSectionSlug("providers")).toBe("providers");
     expect(normalizeHostSectionSlug("usage")).toBe("usage");
+    expect(normalizeHostSectionSlug("terminals")).toBe("terminals");
     expect(normalizeHostSectionSlug("host")).toBe("host");
   });
 

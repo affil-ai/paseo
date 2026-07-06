@@ -403,6 +403,7 @@ export class ChatBridge {
       title,
       modeId: this.config.modeId,
       model: this.config.model,
+      thinkingOptionId: this.config.thinkingOptionId,
       initialPrompt: assembleInitialPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,

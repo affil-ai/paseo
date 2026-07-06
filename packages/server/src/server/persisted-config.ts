@@ -155,6 +155,21 @@ const FeatureWebUiSchema = z
   })
   .strict();
 
+const ChatDefaultsSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    modeId: z.string().min(1).optional(),
+    thinkingOptionId: z.string().min(1).optional(),
+  })
+  .strict();
+
+const ChatConfigSchema = z
+  .object({
+    defaults: ChatDefaultsSchema.optional(),
+  })
+  .strict();
+
 const StructuredGenerationProviderConfigSchema = z
   .object({
     provider: z.string().min(1),
@@ -294,6 +309,7 @@ export const PersistedConfigSchema = z
       .optional(),
 
     providers: ProvidersSchema.optional(),
+    chat: ChatConfigSchema.optional(),
     worktrees: WorktreesConfigSchema.optional(),
     agents: z
       .object({
