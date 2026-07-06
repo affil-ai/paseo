@@ -2040,11 +2040,13 @@ describe("readInitialDaemonConnectionHint", () => {
   it("preserves Cloudflare Access user email when present", () => {
     (globalThis as Record<string, unknown>).__PASEO_INITIAL_DAEMON_CONNECTION__ = {
       listen: "paseo.example.com:443",
+      label: " hosted paseo ",
       authenticatedUserEmail: " user@affil.ai ",
     };
     expect(readInitialDaemonConnectionHint({ isWebRuntime: true })).toEqual({
       listen: "paseo.example.com:443",
       useTls: false,
+      label: "hosted paseo",
       authenticatedUserEmail: "user@affil.ai",
     });
   });
@@ -2095,6 +2097,53 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
     expect(host?.connections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ endpoint: "daemon-origin:6767", useTls: true }),
+      ]),
+    );
+
+    store.syncHosts([]);
+  });
+
+  it("defaults a TLS initial connection hint without a port to 443", async () => {
+    const seenProbes: { endpoint: string; label?: string; useTls?: boolean }[] = [];
+    const store = new HostRuntimeStore({
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ connection, host }) => {
+          if (connection.type === "directTcp") {
+            seenProbes.push({
+              endpoint: connection.endpoint,
+              label: host.label,
+              useTls: connection.useTls,
+            });
+          }
+          return {
+            client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+            serverId: "srv_hosted",
+            hostname: "hosted paseo",
+          };
+        },
+        getClientId: async () => "cid_test_runtime",
+        readInitialConnectionHint: () => ({
+          listen: "paseo.example.com",
+          useTls: true,
+          label: "Hosted Paseo",
+        }),
+      },
+      storage: createMemoryHostRuntimeStorage(),
+    });
+
+    const hostAdded = onceHostListMatches(store, () => store.getHosts().length > 0);
+    store.boot();
+    await hostAdded;
+
+    expect(seenProbes).toContainEqual({
+      endpoint: "paseo.example.com:443",
+      label: "Hosted Paseo",
+      useTls: true,
+    });
+    expect(store.getHosts()[0]?.connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ endpoint: "paseo.example.com:443", useTls: true }),
       ]),
     );
 

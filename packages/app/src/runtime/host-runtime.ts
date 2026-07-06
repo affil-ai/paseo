@@ -1325,6 +1325,7 @@ const INITIAL_DAEMON_CONNECTION_HINT_GLOBAL_KEY = "__PASEO_INITIAL_DAEMON_CONNEC
 export interface InitialDaemonConnectionHint {
   listen: string;
   useTls?: boolean;
+  label?: string;
   authenticatedUserEmail?: string;
 }
 
@@ -1349,11 +1350,51 @@ export function readInitialDaemonConnectionHint(input?: {
   }
   const authenticatedUserEmail =
     typeof value.authenticatedUserEmail === "string" ? value.authenticatedUserEmail.trim() : "";
+  const label = typeof value.label === "string" ? value.label.trim() : "";
   return {
     listen,
     useTls: value.useTls === true,
+    ...(label ? { label } : {}),
     ...(authenticatedUserEmail ? { authenticatedUserEmail } : {}),
   };
+}
+
+function listenWithDefaultPort(listen: string, useTls: boolean | undefined): string | null {
+  const trimmed = listen.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (
+    trimmed.startsWith("pipe://") ||
+    trimmed.startsWith("unix://") ||
+    trimmed.startsWith("\\\\.\\pipe\\") ||
+    trimmed.startsWith("/")
+  ) {
+    return trimmed;
+  }
+  if (connectionFromListen(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.includes(":")) {
+    return null;
+  }
+  return `${trimmed}:${useTls ? 443 : 80}`;
+}
+
+function connectionFromInitialConnectionHint(
+  hint: InitialDaemonConnectionHint,
+): HostConnection | null {
+  const listen = listenWithDefaultPort(hint.listen, hint.useTls);
+  if (!listen) {
+    return null;
+  }
+  const connection = connectionFromListen(listen);
+  if (!connection) {
+    return null;
+  }
+  return connection.type === "directTcp"
+    ? { ...connection, useTls: hint.useTls ?? connection.useTls ?? false }
+    : connection;
 }
 
 function readConfiguredLocalDaemonOverride(): string | null {
@@ -1581,14 +1622,10 @@ export class HostRuntimeStore {
   private async bootstrapInitialConnectionHint(
     hint: InitialDaemonConnectionHint,
   ): Promise<boolean> {
-    const connection = connectionFromListen(hint.listen);
-    if (!connection) {
+    const connectionWithHint = connectionFromInitialConnectionHint(hint);
+    if (!connectionWithHint) {
       return false;
     }
-    const connectionWithHint: HostConnection =
-      connection.type === "directTcp"
-        ? { ...connection, useTls: hint.useTls ?? connection.useTls ?? false }
-        : connection;
     if (registryHasConnection(this.hosts, connectionWithHint)) {
       return true;
     }
@@ -1618,6 +1655,7 @@ export class HostRuntimeStore {
       try {
         await this.probeAndUpsertConnection({
           connection,
+          label: hint.label,
           timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
         });
         return;

@@ -260,6 +260,21 @@ function readCloudflareAuthenticatedUserEmail(req: Parameters<RequestHandler>[0]
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function hostHasExplicitPort(host: string): boolean {
+  if (host.startsWith("[")) {
+    return /\]:\d+$/.test(host);
+  }
+  return /:\d+$/.test(host);
+}
+
+function buildInitialConnectionListen(host: string, useTls: boolean): string {
+  const trimmed = host.trim();
+  if (!trimmed || hostHasExplicitPort(trimmed)) {
+    return trimmed;
+  }
+  return `${trimmed}:${useTls ? 443 : 80}`;
+}
+
 function injectConnectionHint(
   html: string,
   req: Parameters<RequestHandler>[0],
@@ -269,7 +284,7 @@ function injectConnectionHint(
   const useTls = req.protocol === "https";
   const authenticatedUserEmail = readCloudflareAuthenticatedUserEmail(req);
   const hint = {
-    listen: host,
+    listen: buildInitialConnectionListen(host, useTls),
     useTls,
     label,
     ...(authenticatedUserEmail ? { authenticatedUserEmail } : {}),
