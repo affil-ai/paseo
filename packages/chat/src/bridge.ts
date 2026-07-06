@@ -15,7 +15,7 @@ import {
   type Message,
   type Thread,
 } from "chat";
-import type { ChatBridgeConfig } from "./config.js";
+import type { ResolvedChatBridgeConfig } from "./config.js";
 import type { FocusRelay } from "./focus.js";
 import {
   captureThreadContext,
@@ -120,7 +120,7 @@ export class ChatBridge {
   private customOfficePrompt: Promise<string>;
 
   constructor(
-    private readonly config: ChatBridgeConfig,
+    private readonly config: ResolvedChatBridgeConfig,
     private readonly client: DaemonClient,
     private readonly store: ThreadSessionStore,
     private readonly permissions: PermissionBridge,

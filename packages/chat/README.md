@@ -6,7 +6,7 @@ Slack bridge for Office. It runs next to the local daemon, listens for Slack men
 
 Required:
 
-- `PASEO_CHAT_OFFICE_REPO=/absolute/path/to/office` — the office repo used for every Slack-created office-agent workspace. This is deployment config, not an app UI setting.
+- A Paseo workspace marked as the chat repo from the workspace sidebar menu. Every Slack-created office-agent workspace uses that repo.
 - Slack adapter env from `@chat-adapter/slack`:
   - `SLACK_BOT_TOKEN=xoxb-...`
   - Socket mode: `SLACK_APP_TOKEN=xapp-...`
@@ -14,6 +14,7 @@ Required:
 
 Optional:
 
+- `PASEO_CHAT_ENABLED=true` in the Docker image starts the chat bridge sidecar alongside the daemon
 - `PASEO_CHAT_DAEMON_HOST=localhost:6767`
 - `PASEO_PASSWORD=...` if your daemon requires it
 - `PASEO_CHAT_DEEP_LINK_BASE_URL=http://localhost:6767`
@@ -35,7 +36,6 @@ Optional:
 
 ```bash
 npm run build:chat
-PASEO_CHAT_OFFICE_REPO=/path/to/office \
 SLACK_BOT_TOKEN=xoxb-... \
 SLACK_APP_TOKEN=xapp-... \
 node packages/chat/dist/index.js
@@ -50,7 +50,6 @@ Agent-initiated `chat.*` tools call the loopback service, authenticated by the g
 ```bash
 PASEO_CHAT_SLACK_MODE=http \
 PASEO_CHAT_HTTP_PORT=8787 \
-PASEO_CHAT_OFFICE_REPO=/path/to/office \
 SLACK_BOT_TOKEN=xoxb-... \
 SLACK_SIGNING_SECRET=... \
 node packages/chat/dist/index.js

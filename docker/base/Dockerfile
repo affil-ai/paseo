@@ -23,6 +23,7 @@ RUN set -eux; \
     npm pack --workspace=@getpaseo/relay --pack-destination /tmp/paseo-packs; \
     npm pack --workspace=@getpaseo/protocol --pack-destination /tmp/paseo-packs; \
     npm pack --workspace=@getpaseo/client --pack-destination /tmp/paseo-packs; \
+    npm pack --workspace=@getpaseo/chat --pack-destination /tmp/paseo-packs; \
     npm pack --workspace=@getpaseo/server --pack-destination /tmp/paseo-packs; \
     npm pack --workspace=@getpaseo/cli --pack-destination /tmp/paseo-packs
 
@@ -91,11 +92,11 @@ RUN set -eux; \
     chown -R paseo:paseo /home/paseo /workspace
 
 COPY docker/base/rootfs/ /
-RUN chmod +x /usr/local/bin/paseo-docker-entrypoint
+RUN chmod +x /usr/local/bin/paseo-docker-entrypoint /usr/local/bin/paseo-chat-bridge-entrypoint
 
 WORKDIR /workspace
 
-EXPOSE 6767
+EXPOSE 6767 8787
 VOLUME ["/home/paseo"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

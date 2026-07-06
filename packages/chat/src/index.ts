@@ -1,7 +1,7 @@
 import { Chat } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { loadConfig } from "./config.js";
-import { connectToPaseoDaemon } from "./paseo-client.js";
+import { connectToPaseoDaemon, resolveChatRepositoryPath } from "./paseo-client.js";
 import { ChatBridge } from "./bridge.js";
 import { FocusRelay } from "./focus.js";
 import { PermissionBridge } from "./permissions.js";
@@ -11,8 +11,12 @@ import { startInboundHttpServer } from "./inbound-http.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
 
 export async function main(): Promise<void> {
-  const config = loadConfig();
-  const client = await connectToPaseoDaemon(config);
+  const baseConfig = loadConfig();
+  const client = await connectToPaseoDaemon(baseConfig);
+  const config = {
+    ...baseConfig,
+    officeRepoPath: await resolveChatRepositoryPath(client),
+  };
   const state = new ThreadSessionStore(config.stateDir);
   const chatState = new FileChatStateAdapter(config.stateDir);
   const permissions = new PermissionBridge(client, state);

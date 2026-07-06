@@ -25,7 +25,6 @@ function parseJsonMap(value: string | undefined): Record<string, string> {
 }
 
 const envSchema = z.object({
-  PASEO_CHAT_OFFICE_REPO: z.string().min(1),
   PASEO_CHAT_PROVIDER: z.string().default("pi"),
   PASEO_CHAT_MODEL: z.string().default("openai-codex/gpt-5.5"),
   PASEO_CHAT_MODE_ID: z.string().default("medium"),
@@ -56,12 +55,12 @@ const envSchema = z.object({
 });
 
 export type ChatBridgeConfig = ReturnType<typeof loadConfig>;
+export type ResolvedChatBridgeConfig = ChatBridgeConfig & { officeRepoPath: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const parsed = envSchema.parse(env);
   const paseoHome = resolvePaseoHome(env);
   return {
-    officeRepoPath: path.resolve(resolveHome(parsed.PASEO_CHAT_OFFICE_REPO)),
     provider: parsed.PASEO_CHAT_PROVIDER,
     model: parsed.PASEO_CHAT_MODEL,
     modeId: parsed.PASEO_CHAT_MODE_ID,

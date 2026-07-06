@@ -70,6 +70,15 @@ if [[ ! -f /etc/paseo-server-entry ]]; then
   exit 1
 fi
 
+if [[ "${PASEO_CHAT_ENABLED:-false}" == "true" ]]; then
+  echo "[paseo] starting chat bridge sidecar"
+  if [[ "$(id -u)" == "0" ]]; then
+    gosu paseo /usr/local/bin/paseo-chat-bridge-entrypoint &
+  else
+    /usr/local/bin/paseo-chat-bridge-entrypoint &
+  fi
+fi
+
 entry="$(cat /etc/paseo-server-entry)"
 echo "[paseo] starting daemon on ${PASEO_LISTEN} with web UI ${PASEO_WEB_UI_ENABLED}"
 if [[ "$(id -u)" == "0" ]]; then

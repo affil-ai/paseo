@@ -798,10 +798,9 @@ replies route via `onSubscribedMessage`. The subscription set is persisted (our
 
 ### Workspace, worktree & title details — **v1**
 
-- **Office workspace:** `createWorkspace({ source: { kind: "directory", path: <office repo> } })`
-  where `<office repo>` is configured with `PASEO_CHAT_OFFICE_REPO=/absolute/path/to/office` in
-  the bridge environment. This is deployment configuration, not an app UI setting. No branch,
-  no base-ref refresh, no setup script runs at intake.
+- **Office workspace:** `createWorkspace({ source: { kind: "directory", path: <chat repo> } })`
+  where `<chat repo>` is the workspace marked as the chat repo from the Paseo workspace sidebar
+  menu. No branch, no base-ref refresh, no setup script runs at intake.
 - **Worktrees are agent-initiated only.** When the office agent decides to delegate code work,
   _it_ calls `create_worktree` (Paseo's worktree workflow handles branch creation, base-ref
   refresh, and any repo setup). The bridge does not pass `worktreeSlug` or `baseBranch` at

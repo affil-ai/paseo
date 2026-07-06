@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${PASEO_LISTEN:=0.0.0.0:6767}"
+: "${PASEO_CHAT_SLACK_MODE:=socket}"
+
+daemon_port="${PASEO_LISTEN##*:}"
+: "${PASEO_CHAT_DAEMON_HOST:=127.0.0.1:${daemon_port}}"
+
+if [[ "${PASEO_CHAT_SLACK_MODE}" == "http" ]]; then
+  : "${PASEO_CHAT_HTTP_HOST:=0.0.0.0}"
+fi
+
+export PASEO_CHAT_DAEMON_HOST
+export PASEO_CHAT_HTTP_HOST
+
+entry="$(npm root -g)/@getpaseo/chat/dist/index.js"
+if [[ ! -f "$entry" ]]; then
+  echo "[paseo] FATAL: chat bridge entrypoint is missing: $entry" >&2
+  exit 1
+fi
+
+for _ in $(seq 1 60); do
+  if curl -fsS "http://127.0.0.1:${daemon_port}/api/health" >/dev/null 2>&1; then
+    exec node "$entry"
+  fi
+  sleep 1
+done
+
+echo "[paseo] FATAL: daemon did not become healthy; chat bridge not started" >&2
+exit 1

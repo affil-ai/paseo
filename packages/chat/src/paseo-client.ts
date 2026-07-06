@@ -31,3 +31,23 @@ export async function connectToPaseoDaemon(config: ChatBridgeConfig): Promise<Da
   await client.connect();
   return client;
 }
+
+export async function resolveChatRepositoryPath(client: DaemonClient): Promise<string> {
+  let cursor: string | undefined;
+  do {
+    const page = await client.fetchWorkspaces({
+      page: { limit: 200, ...(cursor ? { cursor } : {}) },
+    });
+    const workspace = page.entries.find(
+      (entry) => entry.chatRepository && entry.workspaceDirectory?.trim(),
+    );
+    if (workspace?.workspaceDirectory) {
+      return workspace.workspaceDirectory;
+    }
+    cursor = page.pageInfo.nextCursor ?? undefined;
+  } while (cursor);
+
+  throw new Error(
+    "No chat repo configured. Use the Paseo workspace menu to mark a workspace as the chat repo.",
+  );
+}
