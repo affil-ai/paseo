@@ -109,7 +109,7 @@ function messagePreview(message: string | undefined): string {
   return (message ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
-function normalizeSlackChannelId(value: string): string {
+export function normalizeSlackChannelId(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("slack:")) return trimmed;
   return `slack:${trimmed.replace(/^#/, "")}`;
@@ -119,7 +119,7 @@ function normalizeSlackUserId(value: string): string {
   return value.trim().replace(/^slack:/, "");
 }
 
-function threadIdFromPostedMessage(
+export function threadIdFromPostedMessage(
   targetId: string,
   sent: Pick<SentMessage, "id" | "threadId">,
 ): string {

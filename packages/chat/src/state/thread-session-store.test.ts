@@ -171,4 +171,61 @@ describe("ThreadSessionStore chat bindings", () => {
     expect(expired).toHaveLength(1);
     await expect(store.getConversation("conv_1")).resolves.not.toHaveProperty("pendingRequestId");
   });
+
+  it("stores and resolves email links", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+
+    await store.putEmailLinks(
+      ["message:abc@mail.example", "resend:em_1", "conversation:user@example.com:help"],
+      "slack:C1:100.200",
+    );
+
+    await expect(store.getEmailLink("message:abc@mail.example")).resolves.toBe("slack:C1:100.200");
+    await expect(store.getEmailLink("resend:em_1")).resolves.toBe("slack:C1:100.200");
+    await expect(store.getEmailLink("message:unknown@mail.example")).resolves.toBeNull();
+  });
+
+  it("parses legacy state files without emailLinks", async () => {
+    const dir = await createTempDir();
+    await writeFile(
+      join(dir, "state.json"),
+      JSON.stringify({
+        sessions: {},
+        eventReceipts: {},
+        deliveryReceipts: {},
+        pendingQuestions: {},
+        pendingRequests: {},
+        auditRecords: [],
+      }),
+    );
+    const store = new ThreadSessionStore(dir);
+    await expect(store.getEmailLink("message:abc@mail.example")).resolves.toBeNull();
+  });
+
+  it("prunes email links when the linked session is deleted", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:100.200",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await store.putEmailLinks(["message:abc@mail.example"], "slack:C1:100.200");
+    await store.putEmailLinks(["message:other@mail.example"], "slack:C2:300.400");
+
+    await store.deleteSession("slack:C1:100.200");
+
+    await expect(store.getEmailLink("message:abc@mail.example")).resolves.toBeNull();
+    await expect(store.getEmailLink("message:other@mail.example")).resolves.toBe(
+      "slack:C2:300.400",
+    );
+  });
 });

@@ -8,6 +8,8 @@ import { PermissionBridge } from "./permissions.js";
 import { FileChatStateAdapter } from "./state/chat-state-adapter.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
 import { startInboundHttpServer } from "./inbound-http.js";
+import { EmailIntakeBridge } from "./intake/email-bridge.js";
+import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
 
 export async function main(): Promise<void> {
@@ -53,8 +55,10 @@ export async function main(): Promise<void> {
   client.on("agent_permission_request", async (message) => {
     const session = await state.findSessionByAgent(message.payload.agentId);
     if (!session) return;
-    const thread = bridge.getThread(session.externalThreadId);
-    if (!thread) return;
+    // Email-created sessions never had a live inbound Thread; rehydrate one
+    // from the id so permission prompts still reach the Slack thread.
+    const thread =
+      bridge.getThread(session.externalThreadId) ?? chat.thread(session.externalThreadId);
     await permissions.handlePermission(message, thread, session.externalThreadId);
   });
 
@@ -77,9 +81,35 @@ export async function main(): Promise<void> {
     port: config.servicePort,
     tokenPath: config.serviceTokenPath,
   });
+  const emailIntake = config.email
+    ? new EmailIntakeBridge({
+        email: config.email,
+        relayMode: config.relayMode,
+        stateDir: config.stateDir,
+        maxUploadBytes: config.maxUploadBytes,
+        officePrompt: loadOfficePrompt(config),
+        chat,
+        client,
+        store: state,
+        bridge,
+      })
+    : null;
   const httpServer =
-    config.slackMode === "http"
-      ? startInboundHttpServer({ chat, host: config.httpHost, port: config.httpPort })
+    config.slackMode === "http" || emailIntake
+      ? startInboundHttpServer({
+          chat,
+          host: config.httpHost,
+          port: config.httpPort,
+          slackWebhookEnabled: config.slackMode === "http",
+          ...(emailIntake
+            ? {
+                emailWebhook: (
+                  rawBody: string,
+                  headers: Record<string, string | string[] | undefined>,
+                ) => emailIntake.handleResendWebhook(rawBody, headers),
+              }
+            : {}),
+        })
       : null;
   const serverInfo = client.getLastServerInfoMessage();
   console.log("Office chat bridge v1 ready");
@@ -90,8 +120,13 @@ export async function main(): Promise<void> {
   console.log(`  slack mode: ${config.slackMode}`);
   console.log(`  relay mode: ${config.relayMode}`);
   console.log(`  chat service: http://${config.serviceHost}:${config.servicePort}/chat-bridge/rpc`);
-  if (httpServer) {
+  if (httpServer && config.slackMode === "http") {
     console.log(`  http: http://${config.httpHost}:${config.httpPort}/slack/events`);
+  }
+  if (httpServer && emailIntake) {
+    console.log(
+      `  email intake: http://${config.httpHost}:${config.httpPort}/support-email/resend → #${config.email?.channelId}`,
+    );
   }
 
   const shutdown = async () => {

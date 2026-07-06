@@ -11,6 +11,8 @@ function makeConfig(browserToolsEnabled = false): MutableDaemonConfig {
   return {
     mcp: { injectIntoAgents: false },
     browserTools: { enabled: browserToolsEnabled },
+    chat: { defaults: {}, email: {} },
+    mcpConnections: { servers: {} },
     providers: {},
     metadataGeneration: { providers: [] },
     autoArchiveAfterMerge: false,

@@ -128,6 +128,9 @@ const StoreSchema = z.object({
   pendingQuestions: z.record(z.string(), PendingQuestionSchema).default({}),
   pendingRequests: z.record(z.string(), PendingRequestSchema).default({}),
   auditRecords: z.array(ChatAuditRecordSchema).default([]),
+  // email external id (message id / conversation key) → externalThreadId of the
+  // owning Slack announce-thread session
+  emailLinks: z.record(z.string(), z.string()).default({}),
 });
 
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
@@ -147,6 +150,7 @@ function emptyStore(): StoreData {
     pendingQuestions: {},
     pendingRequests: {},
     auditRecords: [],
+    emailLinks: {},
   };
 }
 
@@ -236,6 +240,11 @@ export class ThreadSessionStore {
     await this.store.update((data) => {
       delete data.sessions[externalThreadId];
       delete data.pendingQuestions[externalThreadId];
+      for (const [externalId, threadId] of Object.entries(data.emailLinks)) {
+        if (threadId === externalThreadId) {
+          delete data.emailLinks[externalId];
+        }
+      }
       for (const [requestId, request] of Object.entries(data.pendingRequests)) {
         if (request.externalThreadId === externalThreadId && request.status === "pending") {
           data.pendingRequests[requestId] = {
@@ -244,6 +253,19 @@ export class ThreadSessionStore {
             updatedAt: new Date().toISOString(),
           };
         }
+      }
+    });
+  }
+
+  async getEmailLink(externalId: string): Promise<string | null> {
+    return (await this.load()).emailLinks[externalId] ?? null;
+  }
+
+  async putEmailLinks(externalIds: string[], externalThreadId: string): Promise<void> {
+    if (externalIds.length === 0) return;
+    await this.store.update((data) => {
+      for (const externalId of externalIds) {
+        data.emailLinks[externalId] = externalThreadId;
       }
     });
   }

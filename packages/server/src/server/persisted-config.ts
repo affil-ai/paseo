@@ -164,9 +164,19 @@ const ChatDefaultsSchema = z
   })
   .strict();
 
+const ChatEmailSchema = z
+  .object({
+    resendApiKey: z.string().min(1).optional(),
+    resendWebhookSecret: z.string().min(1).optional(),
+    channel: z.string().min(1).optional(),
+    supportAddress: z.string().min(1).optional(),
+  })
+  .strict();
+
 const ChatConfigSchema = z
   .object({
     defaults: ChatDefaultsSchema.optional(),
+    email: ChatEmailSchema.optional(),
   })
   .strict();
 

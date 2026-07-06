@@ -551,27 +551,38 @@ bridge posts a completion message back to the thread:
 This is **notification-only** — it does not start an agent. It's v2 because the GitHub webhook
 needs a **public inbound HTTP endpoint** — the shared `inbound-http` server v2 introduces.
 
-### 4. Inbound email intake (Resend) — **v2**
+### 4. Inbound email intake (Resend) — **shipped**
 
 A second intake channel: inbound emails become office-agent threads, feeding the same
-pipeline. t3code's `POST /support-email/resend` endpoint (Svix-signed via
-`RESEND_WEBHOOK_SECRET`) is the model. Concrete v2 scope:
+pipeline. Modeled on t3code's `POST /support-email/resend` endpoint. As implemented:
 
-- **Receiver:** a `POST /support-email/resend` route on the v2 `inbound-http` server,
-  verifying the Svix signature and deduping on the Resend `email_id`.
-- **Fetch + parse:** pull the full message from the Resend API, extract `From`/`To`/`Subject`/
-  body and download attachments.
-- **Thread linking by email semantics:** key threads off `Message-ID`, `In-Reply-To`,
-  `References`, and a `conversation:<sender>:<normalized-subject>` fallback, so an email reply
-  continues the same agent (the email analogue of a Slack thread).
-- **Prompt assembly:** format the email into the office-prompt structure (see
-  [Office system prompt](#office-system-prompt--v1)).
-- **Reply path:** v2 relays agent output to a **linked Slack channel** (Chat SDK), not back to
-  the sender by email; outbound email reply is explicitly out of scope (Chat SDK has no email
-  adapter). Document this asymmetry.
-
-Architecturally this is "a non-Chat-SDK inbound source feeding the same `bridge.handleMessage`
-pipeline" — the daemon-facing half is identical to Slack; only the receiver + parsing differ.
+- **Receiver:** `POST /support-email/resend` in `inbound-http.ts`, verifying the Svix
+  signature and deduping on the Resend `email_id`. The HTTP server now starts whenever email
+  intake is configured, independent of the Slack mode. Orchestration lives in
+  `src/intake/email-bridge.ts`; the pure ported logic (Svix verify, id derivation, parsing,
+  formatting) in `src/intake/email-resend.ts`.
+- **Config:** settings, not env vars — `chat.email` (`resendApiKey`, `resendWebhookSecret`,
+  `channel`, optional `supportAddress`) in `$PASEO_HOME/config.json`, edited from the app's
+  Settings → Office chat → Email intake section. Feature enabled only when the required trio
+  is present; partial config warns and disables.
+- **Binding model:** each new email conversation posts an announcement into the configured
+  Slack channel, and that Slack thread becomes the primary `inbound-session` binding — all
+  existing relay/mute/permission/steering machinery works unchanged, and replies in the Slack
+  thread steer the same agent via the normal subscribed-message path. A persisted `emailLinks`
+  map (`thread-session-store.ts`) resolves email external ids to that binding.
+- **Thread linking by email semantics:** threads key off `Message-ID`, `In-Reply-To`,
+  `References`, and a `conversation:<sender>:<normalized-subject>` fallback (lookup-gated to
+  internal-sender forward-like emails), so an email reply continues the same agent. If a
+  matched id is among the email's _own_ ids, it's a webhook redelivery → dedup, not a
+  follow-up turn.
+- **Fetch + parse:** the full message and attachments come from the Resend API; attachments
+  store under the bridge state dir, images ride the native `images` path.
+- **Prompt assembly:** the formatted email feeds the office-prompt structure with an
+  email-specific source instruction plus a built-in generic triage instruction; operator
+  customization stays in the office prompt.
+- **Reply path:** agent output relays to the linked Slack announce thread, never back to the
+  sender by email; outbound email reply is explicitly out of scope (Chat SDK has no email
+  adapter).
 
 ### 5. Health / config endpoint — **v1 (trivial)**
 

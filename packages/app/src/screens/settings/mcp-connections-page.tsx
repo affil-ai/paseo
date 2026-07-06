@@ -14,6 +14,7 @@ import { SettingsSection } from "@/screens/settings/settings-section";
 import { settingsStyles } from "@/styles/settings";
 
 type RemoteMcpType = "http" | "sse";
+type MutableMcpConnectionConfig = MutableDaemonConfig["mcpConnections"]["servers"][string];
 
 interface McpConnectionEntry {
   name: string;
@@ -21,7 +22,7 @@ interface McpConnectionEntry {
   type: string;
   url: string;
   authorization: string;
-  raw: Record<string, unknown>;
+  raw: MutableMcpConnectionConfig;
 }
 
 interface McpConnectionDraft {
@@ -49,8 +50,7 @@ function triggerStyle({ pressed }: PressableStateCallbackType) {
 }
 
 function readConnections(config: MutableDaemonConfig | null): McpConnectionEntry[] {
-  const mcpConnections = isRecord(config?.mcpConnections) ? config.mcpConnections : {};
-  const servers = isRecord(mcpConnections.servers) ? mcpConnections.servers : {};
+  const servers = config?.mcpConnections.servers ?? {};
   return Object.entries(servers)
     .flatMap(([name, value]) => {
       if (!isRecord(value) || !isRecord(value.server)) {
@@ -88,6 +88,10 @@ function draftToEntry(draft: McpConnectionDraft): McpConnectionEntry {
     type: draft.type,
     url: draft.url.trim(),
     ...(authorization ? { headers: { Authorization: authorization } } : {}),
+  } as const;
+  const raw: MutableMcpConnectionConfig = {
+    enabled: true,
+    server,
   };
   return {
     name,
@@ -95,10 +99,7 @@ function draftToEntry(draft: McpConnectionDraft): McpConnectionEntry {
     type: draft.type,
     url: draft.url.trim(),
     authorization,
-    raw: {
-      enabled: true,
-      server,
-    },
+    raw,
   };
 }
 

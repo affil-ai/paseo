@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assembleFollowupPrompt, assembleInitialPrompt } from "./prompt.js";
+import {
+  assembleFollowupPrompt,
+  assembleInitialPrompt,
+  incomingEmailInstruction,
+} from "./prompt.js";
 
 const sender = {
   userId: "U123",
@@ -29,5 +33,30 @@ describe("Slack chat prompt delivery instructions", () => {
     expect(prompt).toContain("will be sent to Slack automatically");
     expect(prompt).toContain("do not call `chat.reply`");
     expect(prompt).toContain("Jane Doe (@jane): Thanks");
+  });
+
+  it("uses the email source instruction when provided instead of the Slack one", () => {
+    const emailSender = { userId: "jane@customer.com", name: "Jane Doe" };
+    const prompt = assembleInitialPrompt({
+      basePrompt: "base",
+      sender: emailSender,
+      text: "Subject: Help",
+      relayMode: "auto",
+      sourceInstruction: incomingEmailInstruction("auto"),
+    });
+
+    expect(prompt).toContain("inbound support email");
+    expect(prompt).toContain("cannot email the sender back");
+    expect(prompt).not.toContain("This message came from Slack.");
+    expect(prompt).toContain("Jane Doe (jane@customer.com): Subject: Help");
+
+    const followup = assembleFollowupPrompt(
+      emailSender,
+      "More details",
+      "auto",
+      incomingEmailInstruction("auto"),
+    );
+    expect(followup).toContain("inbound support email");
+    expect(followup).not.toContain("This message came from Slack.");
   });
 });

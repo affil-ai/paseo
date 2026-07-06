@@ -5,6 +5,7 @@ import type {
   DaemonClient,
   FetchAgentTimelinePayload,
 } from "@getpaseo/client/internal/daemon-client";
+import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import {
   emoji,
   LinkButton,
@@ -383,15 +384,17 @@ export class ChatBridge {
     return handled;
   }
 
-  private async startNewSession(
-    thread: Thread,
-    message: Message,
-    normalized: Awaited<ReturnType<typeof normalizeMessage>>,
-  ) {
-    const title = titleFromText(normalized.cleanedText);
+  async createExternalSession(input: {
+    externalThreadId: string;
+    title: string;
+    initialPrompt: string;
+    images?: Array<{ data: string; mimeType: string }>;
+    attachments?: AgentAttachment[];
+    thread?: Thread | null;
+  }) {
     const workspaceResult = await this.client.createWorkspace({
       source: { kind: "directory", path: this.config.officeRepoPath },
-      title,
+      title: input.title,
     });
     if (!workspaceResult.workspace)
       throw new Error(workspaceResult.error ?? "Failed to create workspace");
@@ -400,10 +403,69 @@ export class ChatBridge {
       provider: this.config.provider as never,
       cwd: this.config.officeRepoPath,
       workspaceId: workspaceResult.workspace.id,
-      title,
+      title: input.title,
       modeId: this.config.modeId,
       model: this.config.model,
       thinkingOptionId: this.config.thinkingOptionId,
+      initialPrompt: input.initialPrompt,
+      images: input.images ?? [],
+      attachments: input.attachments ?? [],
+      labels: { [CHAT_THREAD_LABEL]: input.externalThreadId },
+    });
+
+    const now = new Date().toISOString();
+    const session = {
+      kind: "inbound-session" as const,
+      externalThreadId: input.externalThreadId,
+      rootAgentId: agent.id,
+      activeRelayId: null,
+      muted: false,
+      title: input.title,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.store.upsertSession(session);
+    await this.postStartedCard(
+      input.thread ?? null,
+      input.externalThreadId,
+      workspaceResult.workspace.id,
+      agent.id,
+    );
+    return session;
+  }
+
+  async startRelay(input: {
+    externalThreadId: string;
+    agentId: string;
+    relayId: string;
+    sinceSeq: number;
+    source?: string;
+  }): Promise<void> {
+    if (this.config.relayMode !== "auto") return;
+    await this.store.updateSession(input.externalThreadId, (current) => {
+      current.activeRelayId = input.relayId;
+    });
+    this.startBackgroundRelay({
+      thread: this.getThread(input.externalThreadId),
+      externalThreadId: input.externalThreadId,
+      agentId: input.agentId,
+      messageId: input.relayId,
+      source: input.source ?? "email",
+      sinceSeq: input.sinceSeq,
+      relayId: input.relayId,
+      postFirstReply: true,
+    });
+  }
+
+  private async startNewSession(
+    thread: Thread,
+    message: Message,
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>,
+  ) {
+    const title = titleFromText(normalized.cleanedText);
+    const session = await this.createExternalSession({
+      externalThreadId: normalized.externalThreadId,
+      title,
       initialPrompt: assembleInitialPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,
@@ -414,21 +476,8 @@ export class ChatBridge {
       }),
       images: normalized.images,
       attachments: normalized.attachments,
-      labels: { [CHAT_THREAD_LABEL]: normalized.externalThreadId },
+      thread,
     });
-
-    const now = new Date().toISOString();
-    const session = {
-      kind: "inbound-session" as const,
-      externalThreadId: normalized.externalThreadId,
-      rootAgentId: agent.id,
-      activeRelayId: null,
-      muted: false,
-      title,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.store.upsertSession(session);
     await thread
       .createSentMessageFromMessage(message)
       .addReaction(emoji.eyes)
@@ -438,12 +487,6 @@ export class ChatBridge {
         .createSentMessageFromMessage(message)
         .addReaction(this.config.ackEmoji)
         .catch(() => {});
-    await this.postStartedCard(
-      thread,
-      normalized.externalThreadId,
-      workspaceResult.workspace.id,
-      agent.id,
-    );
     return session;
   }
 
@@ -464,7 +507,7 @@ export class ChatBridge {
   }
 
   private async postStartedCard(
-    thread: Thread,
+    thread: Thread | null,
     externalThreadId: string,
     workspaceId: string,
     agentId: string,

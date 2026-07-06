@@ -42,6 +42,20 @@ function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   return "This message came from Slack. Your final assistant message will be sent to Slack automatically; do not call `chat.reply` for this thread unless you intentionally want to override the automatic reply.";
 }
 
+export function incomingEmailInstruction(relayMode: ChatRelayMode): string {
+  if (relayMode === "manual") {
+    return "This came from an inbound support email. You cannot email the sender back; your output reaches humans only through the linked Slack announcement thread. To post there, call `chat.reply` with your Slack-visible response.";
+  }
+
+  return "This came from an inbound support email. You cannot email the sender back; your output reaches humans only through the linked Slack announcement thread, where your final assistant message is posted automatically. Humans follow up from that Slack thread or by email.";
+}
+
+export const EMAIL_TRIAGE_INSTRUCTION = `Support email triage:
+- First classify the email: product bug, account/data issue, billing issue, user confusion, feature request, or spam/no-action. Not every email needs investigation.
+- If it is a real issue, investigate with your available tools and gather evidence before concluding.
+- Do not make code changes or open PRs for triage; describe recommended changes at a high level instead.
+- End with a concise triage summary: classification, affected user/account, observed evidence, and recommended next steps.`;
+
 export function externalIntakeAgentPrompt(relayMode: ChatRelayMode): string {
   return `${EXTERNAL_INTAKE_AGENT_PROMPT}\n\n${relayModePrompt(relayMode)}`;
 }
@@ -63,14 +77,16 @@ export function assembleInitialPrompt(input: {
   text: string;
   threadContext?: string;
   relayMode: ChatRelayMode;
+  sourceInstruction?: string;
 }): string {
-  return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${incomingSlackInstruction(input.relayMode)}\n\n${senderLine(input.sender)}: ${input.text}`;
+  return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${input.sourceInstruction ?? incomingSlackInstruction(input.relayMode)}\n\n${senderLine(input.sender)}: ${input.text}`;
 }
 
 export function assembleFollowupPrompt(
   sender: SenderIdentity,
   text: string,
   relayMode: ChatRelayMode,
+  sourceInstruction?: string,
 ): string {
-  return `${incomingSlackInstruction(relayMode)}\n\n${senderLine(sender)}: ${text}`;
+  return `${sourceInstruction ?? incomingSlackInstruction(relayMode)}\n\n${senderLine(sender)}: ${text}`;
 }

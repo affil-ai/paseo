@@ -193,6 +193,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const { persisted, mutable } = params;
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
   const chatDefaults = readChatDefaults(mutable);
+  const chatEmail = readChatEmail(mutable);
   const mcpConnections = readMcpConnections(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const providerOverrides = applyMutableProviderConfigToOverrides(
@@ -227,6 +228,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     chat: {
       ...persisted.chat,
       defaults: chatDefaults,
+      ...(Object.keys(chatEmail).length > 0 ? { email: chatEmail } : { email: undefined }),
     },
     mcpConnections: {
       ...persisted.mcpConnections,
@@ -300,6 +302,36 @@ function readChatDefaults(mutable: MutableDaemonConfig): {
       : {}),
     ...(typeof defaults["thinkingOptionId"] === "string" && defaults["thinkingOptionId"].trim()
       ? { thinkingOptionId: defaults["thinkingOptionId"].trim() }
+      : {}),
+  };
+}
+
+function readChatEmail(mutable: MutableDaemonConfig): {
+  resendApiKey?: string;
+  resendWebhookSecret?: string;
+  channel?: string;
+  supportAddress?: string;
+} {
+  const chat = mutable.chat;
+  if (!isRecord(chat)) {
+    return {};
+  }
+  const email = chat["email"];
+  if (!isRecord(email)) {
+    return {};
+  }
+  return {
+    ...(typeof email["resendApiKey"] === "string" && email["resendApiKey"].trim()
+      ? { resendApiKey: email["resendApiKey"].trim() }
+      : {}),
+    ...(typeof email["resendWebhookSecret"] === "string" && email["resendWebhookSecret"].trim()
+      ? { resendWebhookSecret: email["resendWebhookSecret"].trim() }
+      : {}),
+    ...(typeof email["channel"] === "string" && email["channel"].trim()
+      ? { channel: email["channel"].trim() }
+      : {}),
+    ...(typeof email["supportAddress"] === "string" && email["supportAddress"].trim()
+      ? { supportAddress: email["supportAddress"].trim() }
       : {}),
   };
 }

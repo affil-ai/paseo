@@ -7,9 +7,10 @@ set -euo pipefail
 daemon_port="${PASEO_LISTEN##*:}"
 : "${PASEO_CHAT_DAEMON_HOST:=127.0.0.1:${daemon_port}}"
 
-if [[ "${PASEO_CHAT_SLACK_MODE}" == "http" ]]; then
-  : "${PASEO_CHAT_HTTP_HOST:=0.0.0.0}"
-fi
+# The inbound HTTP server also hosts the Resend email-intake webhook, which can
+# be enabled via chat.email settings regardless of the Slack mode, so the
+# container always binds it where the reverse proxy can reach it.
+: "${PASEO_CHAT_HTTP_HOST:=0.0.0.0}"
 
 export PASEO_CHAT_DAEMON_HOST
 export PASEO_CHAT_HTTP_HOST

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Check, MessageSquare } from "lucide-react-native";
-import type { MutableDaemonConfig } from "@getpaseo/protocol/messages";
+import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import {
   DropdownMenu,
@@ -22,26 +22,28 @@ interface ChatOfficePageProps {
   serverId: string;
 }
 
-interface ChatDefaultsDraft {
+interface ChatDefaultsDraft extends Record<string, unknown> {
   provider: string;
   model: string;
   modeId: string;
   thinkingOptionId: string;
 }
 
-const ROW_WITH_BORDER_STYLE = [settingsStyles.row, settingsStyles.rowBorder];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+interface ChatEmailDraft extends Record<string, unknown> {
+  resendApiKey: string;
+  resendWebhookSecret: string;
+  channel: string;
+  supportAddress: string;
 }
+
+const ROW_WITH_BORDER_STYLE = [settingsStyles.row, settingsStyles.rowBorder];
 
 function triggerStyle({ pressed }: PressableStateCallbackType) {
   return [styles.trigger, pressed ? styles.triggerPressed : null];
 }
 
 function defaultsFromConfig(config: MutableDaemonConfig | null): ChatDefaultsDraft {
-  const chat = isRecord(config?.chat) ? config.chat : {};
-  const defaults = isRecord(chat.defaults) ? chat.defaults : {};
+  const defaults = config?.chat.defaults ?? {};
   return {
     provider: typeof defaults.provider === "string" ? defaults.provider : "",
     model: typeof defaults.model === "string" ? defaults.model : "",
@@ -57,6 +59,26 @@ function normalizeDraft(draft: ChatDefaultsDraft): ChatDefaultsDraft {
     model: draft.model.trim(),
     modeId: draft.modeId.trim(),
     thinkingOptionId: draft.thinkingOptionId.trim(),
+  };
+}
+
+function emailFromConfig(config: MutableDaemonConfig | null): ChatEmailDraft {
+  const email = config?.chat.email ?? {};
+  return {
+    resendApiKey: typeof email.resendApiKey === "string" ? email.resendApiKey : "",
+    resendWebhookSecret:
+      typeof email.resendWebhookSecret === "string" ? email.resendWebhookSecret : "",
+    channel: typeof email.channel === "string" ? email.channel : "",
+    supportAddress: typeof email.supportAddress === "string" ? email.supportAddress : "",
+  };
+}
+
+function normalizeEmailDraft(draft: ChatEmailDraft): ChatEmailDraft {
+  return {
+    resendApiKey: draft.resendApiKey.trim(),
+    resendWebhookSecret: draft.resendWebhookSecret.trim(),
+    channel: draft.channel.trim(),
+    supportAddress: draft.supportAddress.trim(),
   };
 }
 
@@ -212,6 +234,7 @@ function TextSettingRow({
   placeholder,
   onChangeText,
   border = true,
+  secureTextEntry = false,
 }: {
   label: string;
   hint: string;
@@ -219,6 +242,7 @@ function TextSettingRow({
   placeholder: string;
   onChangeText: (value: string) => void;
   border?: boolean;
+  secureTextEntry?: boolean;
 }) {
   const rowStyle = useMemo(() => (border ? ROW_WITH_BORDER_STYLE : settingsStyles.row), [border]);
   return (
@@ -233,9 +257,115 @@ function TextSettingRow({
         onChangeText={onChangeText}
         autoCapitalize="none"
         autoCorrect={false}
+        secureTextEntry={secureTextEntry}
         style={styles.input}
       />
     </View>
+  );
+}
+
+function EmailIntakeSection({
+  config,
+  patchConfig,
+}: {
+  config: MutableDaemonConfig | null;
+  patchConfig: (patch: MutableDaemonConfigPatch) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState<ChatEmailDraft>(() => emailFromConfig(config));
+  const [saving, setSaving] = useState(false);
+  const committedDraft = useMemo(() => emailFromConfig(config), [config]);
+  const normalizedDraft = useMemo(() => normalizeEmailDraft(draft), [draft]);
+  const hasChanges = JSON.stringify(normalizedDraft) !== JSON.stringify(committedDraft);
+
+  useEffect(() => {
+    setDraft(emailFromConfig(config));
+  }, [config]);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      await patchConfig({ chat: { email: normalizedDraft } });
+    } finally {
+      setSaving(false);
+    }
+  }, [normalizedDraft, patchConfig]);
+  const handleSavePress = useCallback(() => {
+    void handleSave();
+  }, [handleSave]);
+  const handleApiKeyChange = useCallback(
+    (resendApiKey: string) => setDraft((current) => ({ ...current, resendApiKey })),
+    [],
+  );
+  const handleWebhookSecretChange = useCallback(
+    (resendWebhookSecret: string) => setDraft((current) => ({ ...current, resendWebhookSecret })),
+    [],
+  );
+  const handleChannelChange = useCallback(
+    (channel: string) => setDraft((current) => ({ ...current, channel })),
+    [],
+  );
+  const handleSupportAddressChange = useCallback(
+    (supportAddress: string) => setDraft((current) => ({ ...current, supportAddress })),
+    [],
+  );
+  const saveButton = useMemo(
+    () => (
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={!hasChanges || saving}
+        onPress={handleSavePress}
+      >
+        {saving ? "Saving" : "Save"}
+      </Button>
+    ),
+    [handleSavePress, hasChanges, saving],
+  );
+
+  return (
+    <SettingsSection title="Email intake" trailing={saveButton}>
+      <View style={settingsStyles.card}>
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>Support email triage</Text>
+            <Text style={settingsStyles.rowHint}>
+              Inbound Resend emails start office agents and announce in a Slack channel. Point the
+              Resend webhook at /support-email/resend on the bridge host.
+            </Text>
+          </View>
+        </View>
+        <TextSettingRow
+          label="Resend API key"
+          hint="Used to fetch full messages and attachments."
+          value={draft.resendApiKey}
+          placeholder="re_..."
+          onChangeText={handleApiKeyChange}
+          secureTextEntry
+        />
+        <TextSettingRow
+          label="Resend webhook secret"
+          hint="Svix signing secret from the Resend webhook."
+          value={draft.resendWebhookSecret}
+          placeholder="whsec_..."
+          onChangeText={handleWebhookSecretChange}
+          secureTextEntry
+        />
+        <TextSettingRow
+          label="Slack channel"
+          hint="Channel name or ID where each email gets an announce thread."
+          value={draft.channel}
+          placeholder="support-emails"
+          onChangeText={handleChannelChange}
+        />
+        <TextSettingRow
+          label="Support address"
+          hint="Optional. Excluded from thread matching; its domain marks internal senders."
+          value={draft.supportAddress}
+          placeholder="support@example.com"
+          onChangeText={handleSupportAddressChange}
+        />
+      </View>
+    </SettingsSection>
   );
 }
 
@@ -325,6 +455,7 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
           />
         </View>
       </SettingsSection>
+      <EmailIntakeSection config={config} patchConfig={patchConfig} />
       <SettingsSection title="Runtime">
         <View style={settingsStyles.card}>
           <View style={settingsStyles.row}>

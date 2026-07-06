@@ -168,6 +168,58 @@ describe("DaemonConfigStore", () => {
     expect(persisted.daemon?.browserTools).toEqual({ enabled: true });
   });
 
+  test("patch persists chat email settings into config.json", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+
+    const store = new DaemonConfigStore(
+      paseoHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      chat: {
+        email: {
+          resendApiKey: "re_123",
+          resendWebhookSecret: "whsec_abc",
+          channel: "support-emails",
+          supportAddress: "support@example.com",
+        },
+      },
+    });
+
+    const persisted = loadPersistedConfig(paseoHome);
+    expect(persisted.chat?.email).toEqual({
+      resendApiKey: "re_123",
+      resendWebhookSecret: "whsec_abc",
+      channel: "support-emails",
+      supportAddress: "support@example.com",
+    });
+
+    store.patch({
+      chat: {
+        email: {
+          resendApiKey: "",
+          resendWebhookSecret: "",
+          channel: "",
+          supportAddress: "",
+        },
+      },
+    });
+
+    const cleared = loadPersistedConfig(paseoHome);
+    expect(cleared.chat?.email).toBeUndefined();
+  });
+
   test("patch persists chat defaults into config.json", () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);

@@ -64,6 +64,15 @@ const chatDefaultsSchema = z
   })
   .partial();
 
+const chatEmailSchema = z
+  .object({
+    resendApiKey: z.string().min(1).optional(),
+    resendWebhookSecret: z.string().min(1).optional(),
+    channel: z.string().min(1).optional(),
+    supportAddress: z.string().min(1).optional(),
+  })
+  .partial();
+
 function loadPersistedChatDefaults(paseoHome: string) {
   try {
     const parsed = JSON.parse(readFileSync(path.join(paseoHome, "config.json"), "utf8"));
@@ -73,6 +82,49 @@ function loadPersistedChatDefaults(paseoHome: string) {
   }
 }
 
+function loadPersistedChatEmail(paseoHome: string) {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(paseoHome, "config.json"), "utf8"));
+    return chatEmailSchema.parse(parsed?.chat?.email ?? {});
+  } catch {
+    return {};
+  }
+}
+
+export interface ChatEmailConfig {
+  apiKey: string;
+  webhookSecret: string;
+  channelId: string;
+  supportAddress?: string;
+}
+
+export function resolveEmailConfig(
+  email: z.infer<typeof chatEmailSchema>,
+  channels: Record<string, string>,
+  warn: (message: string) => void = (message) => console.warn(message),
+): ChatEmailConfig | null {
+  const { resendApiKey, resendWebhookSecret, channel } = email;
+  if (!resendApiKey && !resendWebhookSecret && !channel) return null;
+  if (!resendApiKey || !resendWebhookSecret || !channel) {
+    const missing = [
+      ...(resendApiKey ? [] : ["resendApiKey"]),
+      ...(resendWebhookSecret ? [] : ["resendWebhookSecret"]),
+      ...(channel ? [] : ["channel"]),
+    ];
+    warn(
+      `Email intake is disabled: chat.email settings are incomplete (missing: ${missing.join(", ")})`,
+    );
+    return null;
+  }
+  const channelName = channel.replace(/^#/, "");
+  return {
+    apiKey: resendApiKey,
+    webhookSecret: resendWebhookSecret,
+    channelId: channels[channelName.toLowerCase()] ?? channelName,
+    ...(email.supportAddress ? { supportAddress: email.supportAddress.toLowerCase() } : {}),
+  };
+}
+
 export type ChatBridgeConfig = ReturnType<typeof loadConfig>;
 export type ResolvedChatBridgeConfig = ChatBridgeConfig & { officeRepoPath: string };
 
@@ -80,6 +132,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const parsed = envSchema.parse(env);
   const paseoHome = resolvePaseoHome(env);
   const persistedDefaults = loadPersistedChatDefaults(paseoHome);
+  const persistedEmail = loadPersistedChatEmail(paseoHome);
+  const channels = parseJsonMap(parsed.PASEO_CHAT_CHANNELS_JSON);
   return {
     provider: persistedDefaults.provider ?? parsed.PASEO_CHAT_PROVIDER,
     model: persistedDefaults.model ?? parsed.PASEO_CHAT_MODEL,
@@ -108,7 +162,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       "service-token",
     ),
     people: parseJsonMap(parsed.PASEO_CHAT_PEOPLE_JSON),
-    channels: parseJsonMap(parsed.PASEO_CHAT_CHANNELS_JSON),
+    channels,
+    email: resolveEmailConfig(persistedEmail, channels),
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };
 }

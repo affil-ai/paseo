@@ -403,6 +403,10 @@ function resolveChatDefaults(persisted: ReturnType<typeof loadPersistedConfig>) 
   return persisted.chat?.defaults;
 }
 
+function resolveChatEmail(persisted: ReturnType<typeof loadPersistedConfig>) {
+  return persisted.chat?.email;
+}
+
 function resolveMcpConnections(persisted: ReturnType<typeof loadPersistedConfig>) {
   return persisted.mcpConnections?.servers;
 }
@@ -491,6 +495,7 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     chatDefaults: resolveChatDefaults(persisted),
+    chatEmail: resolveChatEmail(persisted),
     mcpConnections: resolveMcpConnections(persisted),
     terminalProfiles,
     mcpDebug: env.MCP_DEBUG === "1",

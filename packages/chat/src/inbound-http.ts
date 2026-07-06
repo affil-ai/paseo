@@ -36,7 +36,17 @@ async function writeFetchResponse(res: ServerResponse, response: Response): Prom
   res.end(body);
 }
 
-export function startInboundHttpServer(input: { chat: Chat; port: number; host?: string }) {
+export function startInboundHttpServer(input: {
+  chat: Chat;
+  port: number;
+  host?: string;
+  slackWebhookEnabled?: boolean;
+  emailWebhook?: (
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+  ) => Promise<{ status: number; body: unknown }>;
+}) {
+  const slackWebhookEnabled = input.slackWebhookEnabled ?? true;
   const server = createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/health") {
@@ -45,11 +55,25 @@ export function startInboundHttpServer(input: { chat: Chat; port: number; host?:
         return;
       }
 
-      if (req.method === "POST" && req.url?.startsWith("/slack/events")) {
+      if (slackWebhookEnabled && req.method === "POST" && req.url?.startsWith("/slack/events")) {
         const body = await readBody(req);
         const request = await nodeRequestToFetchRequest(req, body);
         const response = await input.chat.webhooks.slack(request);
         await writeFetchResponse(res, response);
+        return;
+      }
+
+      if (
+        input.emailWebhook &&
+        req.method === "POST" &&
+        req.url?.startsWith("/support-email/resend")
+      ) {
+        // The Svix signature covers the exact raw bytes, so pass them through untouched.
+        const body = (await readBody(req)).toString("utf8");
+        const result = await input.emailWebhook(body, req.headers);
+        res.statusCode = result.status;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(result.body));
         return;
       }
 

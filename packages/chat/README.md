@@ -60,3 +60,18 @@ Expose it with a tunnel and configure Slack Event Subscriptions + Interactivity 
 ```text
 https://<tunnel-host>/slack/events
 ```
+
+## Email intake (Resend)
+
+Inbound support emails can start office agents through a Resend webhook. Each new email conversation posts an announcement thread into a configured Slack channel; the agent's first/final output relays there, replies in that Slack thread steer the same agent, and email replies (matched via `Message-ID` / `In-Reply-To` / `References`, plus a sender+subject fallback for internal forwards) continue the same agent instead of starting a new one. Outbound email replies are out of scope — Slack is the human reply surface.
+
+Configure it from the app under **Settings → Office chat → Email intake** (stored as `chat.email` in `$PASEO_HOME/config.json`; no env vars):
+
+- **Resend API key** — fetches full messages and attachments.
+- **Resend webhook secret** — the Svix `whsec_…` signing secret; requests are rejected without a valid signature.
+- **Slack channel** — name or `C…` id of the announce channel (names resolve through `PASEO_CHAT_CHANNELS_JSON` when set). Invite the bot to the channel.
+- **Support address** (optional) — excluded from conversation matching; its domain marks internal senders for forward detection.
+
+All three required fields enable the feature; partial config logs a warning and disables it. The inbound HTTP server starts whenever email intake is configured (even in Slack Socket Mode) and serves `POST /support-email/resend`. Point the Resend `email.received` webhook at that route on the bridge's public host. Restart the bridge after changing settings.
+
+In Resend: verify the receiving domain (MX records), add an inbound route for the support address, and create the webhook subscription for `email.received`.

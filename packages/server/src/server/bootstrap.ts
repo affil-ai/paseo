@@ -383,6 +383,12 @@ export interface PaseoDaemonConfig {
     modeId?: string;
     thinkingOptionId?: string;
   };
+  chatEmail?: {
+    resendApiKey?: string;
+    resendWebhookSecret?: string;
+    channel?: string;
+    supportAddress?: string;
+  };
   mcpConnections?: Record<
     string,
     {
@@ -492,7 +498,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? false },
-    chat: { defaults: config.chatDefaults ?? {} },
+    chat: { defaults: config.chatDefaults ?? {}, email: config.chatEmail ?? {} },
     mcpConnections: createInitialMcpConnections(config.mcpConnections),
     providers,
     metadataGeneration: {

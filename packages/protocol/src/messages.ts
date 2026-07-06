@@ -149,9 +149,19 @@ const MutableChatDefaultsConfigSchema = z
   })
   .passthrough();
 
+const MutableChatEmailConfigSchema = z
+  .object({
+    resendApiKey: z.string().optional(),
+    resendWebhookSecret: z.string().optional(),
+    channel: z.string().optional(),
+    supportAddress: z.string().optional(),
+  })
+  .passthrough();
+
 const MutableChatConfigSchema = z
   .object({
     defaults: MutableChatDefaultsConfigSchema.default({}),
+    email: MutableChatEmailConfigSchema.default({}),
   })
   .passthrough();
 
@@ -210,7 +220,7 @@ export const MutableDaemonConfigSchema = z
       })
       .passthrough(),
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: false }),
-    chat: MutableChatConfigSchema.default({ defaults: {} }),
+    chat: MutableChatConfigSchema.default({ defaults: {}, email: {} }),
     mcpConnections: MutableMcpConnectionsConfigSchema.default({ servers: {} }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
@@ -228,6 +238,7 @@ export const MutableDaemonConfigPatchSchema = z
     chat: z
       .object({
         defaults: MutableChatDefaultsConfigSchema.partial().optional(),
+        email: MutableChatEmailConfigSchema.partial().optional(),
       })
       .partial()
       .passthrough()
