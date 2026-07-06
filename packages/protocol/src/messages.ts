@@ -155,6 +155,53 @@ const MutableChatConfigSchema = z
   })
   .passthrough();
 
+const MutableMcpStdioServerConfigSchema = z
+  .object({
+    type: z.literal("stdio"),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .passthrough();
+
+const MutableMcpHttpServerConfigSchema = z
+  .object({
+    type: z.literal("http"),
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .passthrough();
+
+const MutableMcpSseServerConfigSchema = z
+  .object({
+    type: z.literal("sse"),
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .passthrough();
+
+const MutableMcpServerConfigSchema = z.discriminatedUnion("type", [
+  MutableMcpStdioServerConfigSchema,
+  MutableMcpHttpServerConfigSchema,
+  MutableMcpSseServerConfigSchema,
+]);
+
+const MutableMcpConnectionConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    server: MutableMcpServerConfigSchema,
+  })
+  .passthrough();
+
+const MutableMcpConnectionsConfigSchema = z
+  .object({
+    servers: z.record(z.string(), MutableMcpConnectionConfigSchema).default({}),
+  })
+  .passthrough();
+
 export const MutableDaemonConfigSchema = z
   .object({
     mcp: z
@@ -164,6 +211,7 @@ export const MutableDaemonConfigSchema = z
       .passthrough(),
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: false }),
     chat: MutableChatConfigSchema.default({ defaults: {} }),
+    mcpConnections: MutableMcpConnectionsConfigSchema.default({ servers: {} }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -180,6 +228,13 @@ export const MutableDaemonConfigPatchSchema = z
     chat: z
       .object({
         defaults: MutableChatDefaultsConfigSchema.partial().optional(),
+      })
+      .partial()
+      .passthrough()
+      .optional(),
+    mcpConnections: z
+      .object({
+        servers: z.record(z.string(), MutableMcpConnectionConfigSchema).optional(),
       })
       .partial()
       .passthrough()

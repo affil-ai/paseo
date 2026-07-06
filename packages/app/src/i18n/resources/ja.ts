@@ -1462,6 +1462,7 @@ export const ja: TranslationResources = {
       connections: "接続",
       agents: "エージェント",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "ワークスペース",
       providers: "プロバイダー",
       usage: "使用状況",

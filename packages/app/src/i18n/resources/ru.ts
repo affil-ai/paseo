@@ -1476,6 +1476,7 @@ export const ru: TranslationResources = {
       connections: "Соединения",
       agents: "Agents",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "Workspaces",
       providers: "Провайдеры",
       usage: "Использование",

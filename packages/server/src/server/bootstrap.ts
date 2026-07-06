@@ -139,7 +139,7 @@ import { startRelayTransport, type RelayTransportController } from "./relay-tran
 import type { PushNotificationSender } from "./push/notifications.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
-import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
+import type { AgentClient, AgentProvider, McpServerConfig } from "./agent/agent-sdk-types.js";
 import type { FirstAgentContext, TerminalProfile } from "@getpaseo/protocol/messages";
 import type {
   AgentProviderRuntimeSettingsMap,
@@ -383,6 +383,13 @@ export interface PaseoDaemonConfig {
     modeId?: string;
     thinkingOptionId?: string;
   };
+  mcpConnections?: Record<
+    string,
+    {
+      enabled?: boolean;
+      server: McpServerConfig;
+    }
+  >;
   providerOverrides?: Record<string, ProviderOverride>;
   log?: PersistedConfig["log"];
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
@@ -462,6 +469,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? false },
     chat: { defaults: config.chatDefaults ?? {} },
+    mcpConnections: { servers: config.mcpConnections ?? {} },
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
@@ -764,6 +772,7 @@ export async function createPaseoDaemon(
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
     mcpAuthToken: agentMcpAuthToken,
+    mcpConnections: config.mcpConnections,
     logger,
   });
 
@@ -1209,6 +1218,13 @@ export async function createPaseoDaemon(
             });
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
+            });
+            daemonConfigStore.onFieldChange("mcpConnections.servers", (value) => {
+              agentManager.setMcpConnections(
+                value && typeof value === "object" && !Array.isArray(value)
+                  ? (value as PaseoDaemonConfig["mcpConnections"])
+                  : undefined,
+              );
             });
             const relayEnabled = config.relayEnabled ?? true;
             const relayEndpoint = config.relayEndpoint ?? "relay.paseo.sh:443";

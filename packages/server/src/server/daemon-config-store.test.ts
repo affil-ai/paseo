@@ -206,6 +206,101 @@ describe("DaemonConfigStore", () => {
     });
   });
 
+  test("patch persists MCP connections into config.json", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+
+    const store = new DaemonConfigStore(
+      paseoHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        chat: { defaults: {} },
+        mcpConnections: { servers: {} },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      mcpConnections: {
+        servers: {
+          executor: {
+            enabled: true,
+            server: {
+              type: "http",
+              url: "https://executor.example.com/mcp",
+              headers: { Authorization: "Bearer token" },
+            },
+          },
+        },
+      },
+    });
+
+    const persisted = loadPersistedConfig(paseoHome);
+    expect(persisted.mcpConnections?.servers).toEqual({
+      executor: {
+        enabled: true,
+        server: {
+          type: "http",
+          url: "https://executor.example.com/mcp",
+          headers: { Authorization: "Bearer token" },
+        },
+      },
+    });
+  });
+
+  test("patch replaces MCP connection map in config.json", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+
+    const store = new DaemonConfigStore(
+      paseoHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        chat: { defaults: {} },
+        mcpConnections: {
+          servers: {
+            executor: {
+              enabled: true,
+              server: { type: "http", url: "https://executor.example.com/mcp" },
+            },
+          },
+        },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      mcpConnections: {
+        servers: {
+          linear: {
+            enabled: true,
+            server: { type: "sse", url: "https://linear.example.com/sse" },
+          },
+        },
+      },
+    });
+
+    const persisted = loadPersistedConfig(paseoHome);
+    expect(persisted.mcpConnections?.servers).toEqual({
+      linear: {
+        enabled: true,
+        server: { type: "sse", url: "https://linear.example.com/sse" },
+      },
+    });
+  });
+
   test("patch persists provider additional models into config.json", () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);

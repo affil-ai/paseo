@@ -100,7 +100,26 @@ export class DaemonConfigStore {
 
   public patch(partial: MutableDaemonConfigPatch): MutableDaemonConfig {
     const parsedPatch = MutableDaemonConfigPatchSchema.parse(partial);
-    const next = MutableDaemonConfigSchema.parse(deepMerge(this.current, parsedPatch));
+    const parsedPatchRecord = parsedPatch as Record<string, unknown>;
+    const mcpConnectionsPatch = isRecord(parsedPatchRecord["mcpConnections"])
+      ? parsedPatchRecord["mcpConnections"]
+      : null;
+    const mcpServersPatch = isRecord(mcpConnectionsPatch?.["servers"])
+      ? mcpConnectionsPatch["servers"]
+      : null;
+    const merged = deepMerge(this.current, parsedPatch);
+    const next = MutableDaemonConfigSchema.parse(
+      mcpServersPatch
+        ? {
+            ...merged,
+            mcpConnections: {
+              ...(isRecord(this.current.mcpConnections) ? this.current.mcpConnections : {}),
+              ...mcpConnectionsPatch,
+              servers: mcpServersPatch,
+            },
+          }
+        : merged,
+    );
 
     const changedFieldPaths = Array.from(this.fieldChangeHandlers.keys()).filter((path) => {
       return !isEqualValue(getValueAtPath(this.current, path), getValueAtPath(next, path));
@@ -174,6 +193,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const { persisted, mutable } = params;
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
   const chatDefaults = readChatDefaults(mutable);
+  const mcpConnections = readMcpConnections(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const providerOverrides = applyMutableProviderConfigToOverrides(
     persisted.agents?.providers as Record<string, ProviderOverride> | undefined,
@@ -208,6 +228,10 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       ...persisted.chat,
       defaults: chatDefaults,
     },
+    mcpConnections: {
+      ...persisted.mcpConnections,
+      servers: mcpConnections,
+    },
     daemon: {
       ...persisted.daemon,
       mcp: {
@@ -227,6 +251,27 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     },
     agents: nextAgents,
   } as PersistedConfig;
+}
+
+function readMcpConnections(
+  mutable: MutableDaemonConfig,
+): NonNullable<NonNullable<PersistedConfig["mcpConnections"]>["servers"]> {
+  const mcpConnections = mutable.mcpConnections;
+  if (!isRecord(mcpConnections)) {
+    return {};
+  }
+  const servers = mcpConnections["servers"];
+  if (!isRecord(servers)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(servers).flatMap(([name, connection]) => {
+      if (!isRecord(connection) || !isRecord(connection["server"])) {
+        return [];
+      }
+      return [[name, connection]];
+    }),
+  ) as NonNullable<NonNullable<PersistedConfig["mcpConnections"]>["servers"]>;
 }
 
 function readChatDefaults(mutable: MutableDaemonConfig): {

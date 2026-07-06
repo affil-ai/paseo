@@ -1470,6 +1470,7 @@ export const ptBR: TranslationResources = {
       connections: "Conexões",
       agents: "Agentes",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "Workspaces",
       providers: "Provedores",
       usage: "Uso",

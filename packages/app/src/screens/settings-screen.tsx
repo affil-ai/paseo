@@ -34,6 +34,7 @@ import {
   FolderGit2,
   SquareTerminal,
   MessageSquare,
+  Plug,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { AppDiagnosticSheet } from "@/components/app-diagnostic-sheet";
@@ -98,6 +99,7 @@ import {
   HostTerminalsPage,
 } from "@/screens/settings/host-page";
 import { ChatOfficePage } from "@/screens/settings/chat-office-page";
+import { McpConnectionsPage } from "@/screens/settings/mcp-connections-page";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -162,6 +164,7 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
   { id: "chat", labelKey: "settings.hostSections.chat", icon: MessageSquare },
+  { id: "mcp", labelKey: "settings.hostSections.mcp", icon: Plug },
   { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
@@ -180,6 +183,8 @@ function renderHostSettingsContent(
       return <HostAgentsPage serverId={view.serverId} />;
     case "chat":
       return <ChatOfficePage serverId={view.serverId} />;
+    case "mcp":
+      return <McpConnectionsPage serverId={view.serverId} />;
     case "workspaces":
       return <HostWorkspacesPage serverId={view.serverId} />;
     case "providers":

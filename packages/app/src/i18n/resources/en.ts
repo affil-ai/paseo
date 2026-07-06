@@ -1453,6 +1453,7 @@ export const en = {
       connections: "Connections",
       agents: "Agents",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "Workspaces",
       providers: "Providers",
       usage: "Usage",

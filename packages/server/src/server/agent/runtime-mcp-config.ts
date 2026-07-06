@@ -37,21 +37,52 @@ export function withRuntimePaseoMcpServer(params: {
    */
   mcpAuthToken: string | null;
 }): AgentSessionConfig {
+  return withRuntimeMcpServers({
+    ...params,
+    mcpServers: {},
+  });
+}
+
+export function withRuntimeMcpServers(params: {
+  config: AgentSessionConfig;
+  agentId: string;
+  mcpBaseUrl: string | null;
+  /**
+   * Capability token authenticating the injected connection to the daemon's
+   * Agent MCP endpoint. The daemon password is gated off this route, so without
+   * this header the agent's MCP requests are rejected when a password is set.
+   */
+  mcpAuthToken: string | null;
+  mcpServers?: Record<string, McpServerConfig>;
+}): AgentSessionConfig {
   const storedConfig = stripInternalPaseoMcpServer(params.config);
-  if (!params.mcpBaseUrl || storedConfig.mcpServers?.[PASEO_MCP_SERVER_NAME]) {
+  const runtimeMcpServers: Record<string, McpServerConfig> = {};
+
+  if (params.mcpBaseUrl && !storedConfig.mcpServers?.[PASEO_MCP_SERVER_NAME]) {
+    runtimeMcpServers[PASEO_MCP_SERVER_NAME] = {
+      type: "http",
+      url: `${params.mcpBaseUrl}?callerAgentId=${params.agentId}`,
+      ...(params.mcpAuthToken
+        ? { headers: { Authorization: `Bearer ${params.mcpAuthToken}` } }
+        : {}),
+    };
+  }
+
+  for (const [name, serverConfig] of Object.entries(params.mcpServers ?? {})) {
+    if (storedConfig.mcpServers?.[name]) {
+      continue;
+    }
+    runtimeMcpServers[name] = serverConfig;
+  }
+
+  if (Object.keys(runtimeMcpServers).length === 0) {
     return storedConfig;
   }
 
   return {
     ...storedConfig,
     mcpServers: {
-      [PASEO_MCP_SERVER_NAME]: {
-        type: "http",
-        url: `${params.mcpBaseUrl}?callerAgentId=${params.agentId}`,
-        ...(params.mcpAuthToken
-          ? { headers: { Authorization: `Bearer ${params.mcpAuthToken}` } }
-          : {}),
-      },
+      ...runtimeMcpServers,
       ...storedConfig.mcpServers,
     },
   };

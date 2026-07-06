@@ -403,6 +403,10 @@ function resolveChatDefaults(persisted: ReturnType<typeof loadPersistedConfig>) 
   return persisted.chat?.defaults;
 }
 
+function resolveMcpConnections(persisted: ReturnType<typeof loadPersistedConfig>) {
+  return persisted.mcpConnections?.servers;
+}
+
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
   return persisted.daemon?.browserTools?.enabled ?? false;
 }
@@ -487,6 +491,7 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     chatDefaults: resolveChatDefaults(persisted),
+    mcpConnections: resolveMcpConnections(persisted),
     terminalProfiles,
     mcpDebug: env.MCP_DEBUG === "1",
     isDev: resolvePaseoNodeEnv(env) === "development",

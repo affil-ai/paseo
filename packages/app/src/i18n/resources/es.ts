@@ -1484,6 +1484,7 @@ export const es: TranslationResources = {
       connections: "Conexiones",
       agents: "Agents",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "Workspaces",
       providers: "Proveedores",
       usage: "Uso",

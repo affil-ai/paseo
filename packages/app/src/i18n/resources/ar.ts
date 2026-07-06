@@ -1445,6 +1445,7 @@ export const ar: TranslationResources = {
       connections: "اتصالات",
       agents: "Agents",
       chat: "Chat",
+      mcp: "MCP",
       workspaces: "Workspaces",
       providers: "مقدمي الخدمات",
       usage: "الاستخدام",

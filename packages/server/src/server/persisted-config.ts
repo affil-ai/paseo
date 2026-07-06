@@ -170,6 +170,53 @@ const ChatConfigSchema = z
   })
   .strict();
 
+const McpStdioServerConfigSchema = z
+  .object({
+    type: z.literal("stdio"),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .strict();
+
+const McpHttpServerConfigSchema = z
+  .object({
+    type: z.literal("http"),
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .strict();
+
+const McpSseServerConfigSchema = z
+  .object({
+    type: z.literal("sse"),
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    alwaysLoad: z.boolean().optional(),
+  })
+  .strict();
+
+const McpServerConfigSchema = z.discriminatedUnion("type", [
+  McpStdioServerConfigSchema,
+  McpHttpServerConfigSchema,
+  McpSseServerConfigSchema,
+]);
+
+const McpConnectionConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    server: McpServerConfigSchema,
+  })
+  .strict();
+
+const McpConnectionsConfigSchema = z
+  .object({
+    servers: z.record(z.string(), McpConnectionConfigSchema).optional(),
+  })
+  .strict();
+
 const StructuredGenerationProviderConfigSchema = z
   .object({
     provider: z.string().min(1),
@@ -310,6 +357,7 @@ export const PersistedConfigSchema = z
 
     providers: ProvidersSchema.optional(),
     chat: ChatConfigSchema.optional(),
+    mcpConnections: McpConnectionsConfigSchema.optional(),
     worktrees: WorktreesConfigSchema.optional(),
     agents: z
       .object({
