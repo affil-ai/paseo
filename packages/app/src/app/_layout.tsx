@@ -307,7 +307,7 @@ function useDaemonStartIsRunning(): boolean {
   );
 }
 
-const STARTUP_GIVE_UP_TIMEOUT_MS = 5_000;
+const STARTUP_GIVE_UP_TIMEOUT_MS = 15_000;
 
 async function shouldStartBuiltInDaemon(): Promise<boolean> {
   if (!shouldUseDesktopDaemon()) {

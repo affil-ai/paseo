@@ -12,7 +12,7 @@ import { PairLinkModal } from "./pair-link-modal";
 import { Button } from "@/components/ui/button";
 import { resolveAppVersion } from "@/utils/app-version";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
-import { buildOpenProjectRoute } from "@/utils/host-routes";
+import { buildHostRootRoute } from "@/utils/host-routes";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isWeb, isNative } from "@/constants/platform";
@@ -170,12 +170,8 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
 
   useEffect(() => {
     if (!anyOnlineServerId) return;
-    router.replace(buildOpenProjectRoute());
+    router.replace(buildHostRootRoute(anyOnlineServerId));
   }, [anyOnlineServerId, router]);
-
-  const finishOnboarding = useCallback(() => {
-    router.replace(buildOpenProjectRoute());
-  }, [router]);
 
   const handleOpenPaseoSite = useCallback(() => {
     void openExternalUrl("https://paseo.sh");
@@ -196,9 +192,9 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const handleHostSaved = useCallback(
     ({ profile }: { profile: HostProfile; serverId: string }) => {
       onHostAdded?.(profile);
-      finishOnboarding();
+      router.replace(buildHostRootRoute(profile.serverId));
     },
-    [onHostAdded, finishOnboarding],
+    [onHostAdded, router],
   );
 
   const actions: WelcomeAction[] = isWeb
