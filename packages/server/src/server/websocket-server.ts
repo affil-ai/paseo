@@ -1227,6 +1227,8 @@ export class VoiceAssistantWebSocketServer {
         projectRemove: true,
         // COMPAT(projectAdd): added in v0.1.97, drop the gate when floor >= v0.1.97.
         projectAdd: true,
+        // COMPAT(projectClone): added in v0.1.104, drop the gate when floor >= v0.1.104.
+        projectClone: true,
         // COMPAT(worktreeRestore): added in v0.1.97, drop the gate when floor >= v0.1.97
         worktreeRestore: true,
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.

@@ -71,6 +71,56 @@ describe("workspace message schemas", () => {
     });
   });
 
+  test("parses project.clone request and response", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "project.clone.request",
+        requestId: "req-clone-project",
+        repoUrl: "https://github.com/affil-ai/paseo.git",
+        destinationParent: "/workspace",
+        directoryName: "paseo",
+      }),
+    ).toEqual({
+      type: "project.clone.request",
+      requestId: "req-clone-project",
+      repoUrl: "https://github.com/affil-ai/paseo.git",
+      destinationParent: "/workspace",
+      directoryName: "paseo",
+    });
+
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "project.clone.response",
+        payload: {
+          requestId: "req-clone-project",
+          clonedPath: "/workspace/paseo",
+          project: {
+            projectId: "/workspace/paseo",
+            projectDisplayName: "paseo",
+            projectCustomName: null,
+            projectRootPath: "/workspace/paseo",
+            projectKind: "git",
+          },
+          error: null,
+        },
+      }),
+    ).toEqual({
+      type: "project.clone.response",
+      payload: {
+        requestId: "req-clone-project",
+        clonedPath: "/workspace/paseo",
+        project: {
+          projectId: "/workspace/paseo",
+          projectDisplayName: "paseo",
+          projectCustomName: null,
+          projectRootPath: "/workspace/paseo",
+          projectKind: "git",
+        },
+        error: null,
+      },
+    });
+  });
+
   test("parses active-scoped fetch_agents_request as an optional extension", () => {
     const legacy = SessionInboundMessageSchema.parse({
       type: "fetch_agents_request",

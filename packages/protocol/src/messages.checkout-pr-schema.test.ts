@@ -355,17 +355,19 @@ describe("checkout PR schemas", () => {
     });
   });
 
-  test("accepts the project add server_info feature flag", () => {
+  test("accepts project management server_info feature flags", () => {
     expect(
       ServerInfoStatusPayloadSchema.parse({
         status: "server_info",
         serverId: "srv_test",
         features: {
           projectAdd: true,
+          projectClone: true,
         },
       }).features,
     ).toEqual({
       projectAdd: true,
+      projectClone: true,
     });
   });
 });

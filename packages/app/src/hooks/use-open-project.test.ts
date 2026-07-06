@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getOpenProjectFailureReason, openProjectDirectly } from "@/hooks/open-project";
+import {
+  cloneProjectDirectly,
+  getOpenProjectFailureReason,
+  openProjectDirectly,
+} from "@/hooks/open-project";
 import type { EmptyProjectDescriptor as ProjectWithoutWorkspacesDescriptor } from "@/stores/session-store";
 
 const SERVER_ID = "server-1";
@@ -127,6 +131,76 @@ describe("openProjectDirectly", () => {
       ok: false,
       errorCode: "directory_not_found",
       error: "Directory not found: /repo/project",
+    });
+    expect(session.projects).toEqual([]);
+    expect(session.hydrated).toEqual([]);
+  });
+});
+
+describe("cloneProjectDirectly", () => {
+  it("clones the project and marks workspaces hydrated without opening a workspace", async () => {
+    const session = createFakeSession();
+    const projectPayload = buildProjectPayload();
+
+    const result = await cloneProjectDirectly({
+      serverId: SERVER_ID,
+      repoUrl: "https://github.com/affil-ai/paseo.git",
+      destinationParent: "/workspace",
+      isConnected: true,
+      canCloneProject: true,
+      client: {
+        cloneProject: async () => ({
+          requestId: "request-clone",
+          error: null,
+          clonedPath: PROJECT_PATH,
+          project: projectPayload,
+        }),
+      },
+      addEmptyProject: session.addEmptyProject,
+      setHasHydratedWorkspaces: session.setHasHydratedWorkspaces,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(session.projects).toEqual([
+      {
+        serverId: SERVER_ID,
+        project: {
+          projectId: "project-1",
+          projectDisplayName: "project",
+          projectCustomName: null,
+          projectKind: "git",
+          projectRootPath: PROJECT_PATH,
+        },
+      },
+    ]);
+    expect(session.hydrated).toEqual([{ serverId: SERVER_ID, hydrated: true }]);
+  });
+
+  it("fails before sending when the host does not support cloning projects", async () => {
+    const session = createFakeSession();
+
+    const result = await cloneProjectDirectly({
+      serverId: SERVER_ID,
+      repoUrl: "https://github.com/affil-ai/paseo.git",
+      destinationParent: "/workspace",
+      isConnected: true,
+      canCloneProject: false,
+      client: {
+        cloneProject: async () => ({
+          requestId: "request-clone",
+          error: null,
+          clonedPath: PROJECT_PATH,
+          project: buildProjectPayload(),
+        }),
+      },
+      addEmptyProject: session.addEmptyProject,
+      setHasHydratedWorkspaces: session.setHasHydratedWorkspaces,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: null,
+      error: "Update the host to clone repositories from Paseo.",
     });
     expect(session.projects).toEqual([]);
     expect(session.hydrated).toEqual([]);

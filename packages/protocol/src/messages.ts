@@ -1762,6 +1762,14 @@ export const ProjectAddRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const ProjectCloneRequestSchema = z.object({
+  type: z.literal("project.clone.request"),
+  repoUrl: z.string().trim().min(1),
+  destinationParent: z.string().trim().min(1),
+  directoryName: z.string().trim().min(1).optional(),
+  requestId: z.string(),
+});
+
 export const ArchiveWorkspaceRequestSchema = z.object({
   type: z.literal("archive_workspace_request"),
   workspaceId: z.string(),
@@ -2133,6 +2141,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   LegacyOpenInEditorRequestSchema,
   OpenProjectRequestSchema,
   ProjectAddRequestSchema,
+  ProjectCloneRequestSchema,
   ArchiveWorkspaceRequestSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceClearAttentionRequestSchema,
@@ -2359,6 +2368,8 @@ export const ServerInfoStatusPayloadSchema = z
         projectRemove: z.boolean().optional(),
         // COMPAT(projectAdd): added in v0.1.97, drop the gate when floor >= v0.1.97.
         projectAdd: z.boolean().optional(),
+        // COMPAT(projectClone): added in v0.1.104, drop the gate when floor >= v0.1.104.
+        projectClone: z.boolean().optional(),
         // COMPAT(worktreeRestore): added in v0.1.97, drop the gate when floor >= v0.1.97
         worktreeRestore: z.boolean().optional(),
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
@@ -2864,6 +2875,20 @@ export const ProjectAddResponseSchema = z.object({
     project: WorkspaceProjectDescriptorPayloadSchema.nullable(),
     error: z.string().nullable(),
     errorCode: z.enum(["directory_not_found"]).nullish().catch(null),
+  }),
+});
+
+export const ProjectCloneResponseSchema = z.object({
+  type: z.literal("project.clone.response"),
+  payload: z.object({
+    requestId: z.string(),
+    project: WorkspaceProjectDescriptorPayloadSchema.nullable(),
+    clonedPath: z.string().nullable(),
+    error: z.string().nullable(),
+    errorCode: z
+      .enum(["invalid_repository", "directory_not_found", "destination_exists", "clone_failed"])
+      .nullish()
+      .catch(null),
   }),
 });
 
@@ -4204,6 +4229,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FetchRecentProviderSessionsResponseMessageSchema,
   FetchWorkspacesResponseMessageSchema,
   ProjectAddResponseSchema,
+  ProjectCloneResponseSchema,
   OpenProjectResponseMessageSchema,
   StartWorkspaceScriptResponseMessageSchema,
   LegacyListAvailableEditorsResponseMessageSchema,
@@ -4358,6 +4384,7 @@ export type FetchRecentProviderSessionsResponseMessage = z.infer<
 >;
 export type FetchWorkspacesResponseMessage = z.infer<typeof FetchWorkspacesResponseMessageSchema>;
 export type ProjectAddResponse = z.infer<typeof ProjectAddResponseSchema>;
+export type ProjectCloneResponse = z.infer<typeof ProjectCloneResponseSchema>;
 export type ScriptStatusUpdateMessage = z.infer<typeof ScriptStatusUpdateMessageSchema>;
 export type OpenProjectResponseMessage = z.infer<typeof OpenProjectResponseMessageSchema>;
 export type StartWorkspaceScriptResponseMessage = z.infer<
@@ -4605,6 +4632,7 @@ export type LegacyListAvailableEditorsRequest = z.infer<
 export type LegacyOpenInEditorRequest = z.infer<typeof LegacyOpenInEditorRequestSchema>;
 export type OpenProjectRequest = z.infer<typeof OpenProjectRequestSchema>;
 export type ProjectAddRequest = z.infer<typeof ProjectAddRequestSchema>;
+export type ProjectCloneRequest = z.infer<typeof ProjectCloneRequestSchema>;
 export type ArchiveWorkspaceRequest = z.infer<typeof ArchiveWorkspaceRequestSchema>;
 export type WorkspaceClearAttentionRequest = z.infer<typeof WorkspaceClearAttentionRequestSchema>;
 export type FileExplorerRequest = z.infer<typeof FileExplorerRequestSchema>;

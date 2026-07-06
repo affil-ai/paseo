@@ -1072,6 +1072,10 @@ export const en = {
         title: "Add a project",
         description: "Open a folder on your machine",
       },
+      cloneRepository: {
+        title: "Clone repository",
+        description: "Pull a Git repo onto this host",
+      },
       importSession: {
         title: "Import session",
         description: "Bring in recent external CLI sessions",
@@ -1083,6 +1087,17 @@ export const en = {
       pairDevice: {
         title: "Pair device",
         description: "Connect your phone to this daemon",
+      },
+    },
+    clone: {
+      title: "Clone repository",
+      repoUrl: "Git repository URL",
+      destinationParent: "Destination parent",
+      directoryName: "Folder name (optional)",
+      cloning: "Cloning...",
+      submit: "Clone",
+      errors: {
+        required: "Enter a repository URL and destination path.",
       },
     },
   },

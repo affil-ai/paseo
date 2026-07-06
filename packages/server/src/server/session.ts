@@ -1,8 +1,10 @@
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
-import { stat } from "node:fs/promises";
-import { basename, normalize, resolve, sep } from "path";
+import { execFile } from "node:child_process";
+import { mkdir, stat } from "node:fs/promises";
+import { basename, join, normalize, resolve, sep } from "path";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import {
   serializeAgentStreamEvent,
@@ -392,6 +394,32 @@ const nodeSessionFileSystem: SessionFileSystem = {
     return stats?.isDirectory() ?? false;
   },
 };
+
+const execFileAsync = promisify(execFile);
+const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
+
+function deriveCloneDirectoryName(repoUrl: string): string | null {
+  const withoutQuery = repoUrl
+    .trim()
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "");
+  const withoutGitSuffix = withoutQuery.endsWith(".git")
+    ? withoutQuery.slice(0, -".git".length)
+    : withoutQuery;
+  const candidate = withoutGitSuffix.split(/[/:]/).pop()?.trim() ?? "";
+  return normalizeCloneDirectoryName(candidate);
+}
+
+function normalizeCloneDirectoryName(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || trimmed === "." || trimmed === "..") {
+    return null;
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\0")) {
+    return null;
+  }
+  return trimmed;
+}
 
 // Stub types for features under development (modules not yet available)
 type AgentMcpTransportFactory = () => Promise<unknown>;
@@ -1614,6 +1642,8 @@ export class Session {
         return this.handleOpenProjectRequest(msg);
       case "project.add.request":
         return this.handleProjectAddRequest(msg);
+      case "project.clone.request":
+        return this.handleProjectCloneRequest(msg);
       case "archive_workspace_request":
         return this.handleArchiveWorkspaceRequest(msg);
       case "project.remove.request":
@@ -4670,6 +4700,89 @@ export class Session {
           requestId: request.requestId,
           project: null,
           error: message,
+        },
+      });
+    }
+  }
+
+  private async handleProjectCloneRequest(
+    request: Extract<SessionInboundMessage, { type: "project.clone.request" }>,
+  ): Promise<void> {
+    const repoUrl = request.repoUrl.trim();
+    const parentDirectory = expandTilde(request.destinationParent);
+    const directoryName =
+      normalizeCloneDirectoryName(request.directoryName) ?? deriveCloneDirectoryName(repoUrl);
+    if (!directoryName) {
+      this.emit({
+        type: "project.clone.response",
+        payload: {
+          requestId: request.requestId,
+          project: null,
+          clonedPath: null,
+          error: "Enter a valid repository URL or destination folder name.",
+          errorCode: "invalid_repository",
+        },
+      });
+      return;
+    }
+
+    const destinationPath = resolve(join(parentDirectory, directoryName));
+    const destinationExists = await stat(destinationPath)
+      .then(() => true)
+      .catch(() => false);
+    if (destinationExists) {
+      this.emit({
+        type: "project.clone.response",
+        payload: {
+          requestId: request.requestId,
+          project: null,
+          clonedPath: destinationPath,
+          error: `Destination already exists: ${destinationPath}`,
+          errorCode: "destination_exists",
+        },
+      });
+      return;
+    }
+
+    try {
+      await mkdir(parentDirectory, { recursive: true });
+      await execFileAsync("git", ["clone", "--", repoUrl, destinationPath], {
+        timeout: CLONE_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      });
+
+      const project =
+        await this.workspaceProvisioning.findOrCreateProjectForDirectory(destinationPath);
+      this.sessionLogger.info(
+        {
+          repoUrl,
+          parentDirectory,
+          destinationPath,
+          projectId: project.projectId,
+          projectKind: project.kind,
+        },
+        "Project cloned and added",
+      );
+      this.emit({
+        type: "project.clone.response",
+        payload: {
+          requestId: request.requestId,
+          project: this.buildProjectDescriptor(project),
+          clonedPath: destinationPath,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = getErrorMessageOr(error, "Failed to clone repository");
+      this.sessionLogger.error({ err: error, repoUrl, destinationPath }, "Failed to clone project");
+      this.emit({
+        type: "project.clone.response",
+        payload: {
+          requestId: request.requestId,
+          project: null,
+          clonedPath: destinationPath,
+          error: message,
+          errorCode: "clone_failed",
         },
       });
     }

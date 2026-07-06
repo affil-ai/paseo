@@ -55,6 +55,7 @@ import type {
   PaseoWorktreeArchiveResponse,
   ProjectIconResponse,
   ProjectAddResponse,
+  ProjectCloneResponse,
   OpenProjectResponseMessage,
   ArchiveWorkspaceResponseMessage,
   WorkspaceSetupStatusResponseMessage,
@@ -737,6 +738,7 @@ export interface RenameTerminalInput {
 }
 type OpenProjectPayload = OpenProjectResponseMessage["payload"];
 type ProjectAddPayload = ProjectAddResponse["payload"];
+type ProjectClonePayload = ProjectCloneResponse["payload"];
 type ArchiveWorkspacePayload = ArchiveWorkspaceResponseMessage["payload"];
 type WorkspaceSetupStatusPayload = WorkspaceSetupStatusResponseMessage["payload"];
 
@@ -1964,6 +1966,23 @@ export class DaemonClient {
         cwd,
       },
       responseType: "project.add.response",
+    });
+  }
+
+  async cloneProject(
+    input: { repoUrl: string; destinationParent: string; directoryName?: string },
+    requestId?: string,
+  ): Promise<ProjectClonePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "project.clone.request",
+        repoUrl: input.repoUrl,
+        destinationParent: input.destinationParent,
+        ...(input.directoryName ? { directoryName: input.directoryName } : {}),
+      },
+      responseType: "project.clone.response",
+      timeout: 10 * 60 * 1000,
     });
   }
 

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
-import { View, Text, Pressable } from "react-native";
+import { Modal, View, Text, TextInput, Pressable } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useRouter } from "expo-router";
-import { FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-native";
+import { GitBranch, FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { CommunityLinks } from "@/components/community-links";
 import { MenuHeader } from "@/components/headers/menu-header";
@@ -22,7 +22,7 @@ import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { buildHostAgentDetailRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useOpenProject } from "@/hooks/use-open-project";
+import { useCloneProject, useOpenProject } from "@/hooks/use-open-project";
 import type { Href } from "expo-router";
 
 export function OpenProjectScreen() {
@@ -37,6 +37,8 @@ export function OpenProjectScreen() {
   const openImportedProject = useOpenProject(importServerId);
   const [isPairDeviceOpen, setIsPairDeviceOpen] = useState(false);
   const [isImportSheetOpen, setIsImportSheetOpen] = useState(false);
+  const [cloneServerId, setCloneServerId] = useState<string | null>(null);
+  const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
 
   const isCompactLayout = useIsCompactFormFactor();
 
@@ -49,6 +51,18 @@ export function OpenProjectScreen() {
   const handleOpenPicker = useCallback(() => {
     void openProjectPicker();
   }, [openProjectPicker]);
+
+  const handleOpenClone = useCallback(() => {
+    chooseHost({
+      title: "Clone to host",
+      onChooseHost: (serverId) => {
+        setCloneServerId(serverId);
+        setIsCloneModalOpen(true);
+      },
+    });
+  }, [chooseHost]);
+
+  const handleCloseClone = useCallback(() => setIsCloneModalOpen(false), []);
 
   const handleOpenPairDevice = useCallback(() => setIsPairDeviceOpen(true), []);
   const handleClosePairDevice = useCallback(() => setIsPairDeviceOpen(false), []);
@@ -104,6 +118,18 @@ export function OpenProjectScreen() {
             accent
           />
           <HomeTile
+            icon={GitBranch}
+            title={t("openProject.tiles.cloneRepository.title", {
+              defaultValue: "Clone repository",
+            })}
+            description={t("openProject.tiles.cloneRepository.description", {
+              defaultValue: "Pull a Git repo onto this host",
+            })}
+            onPress={handleOpenClone}
+            testID="open-project-clone-repository"
+            accent
+          />
+          <HomeTile
             icon={Inbox}
             title={t("openProject.tiles.importSession.title")}
             description={t("openProject.tiles.importSession.description")}
@@ -143,7 +169,180 @@ export function OpenProjectScreen() {
         onClose={handleCloseImportSession}
         onImported={handleImported}
       />
+      <CloneRepositoryModal
+        visible={isCloneModalOpen}
+        serverId={cloneServerId}
+        onClose={handleCloseClone}
+      />
     </View>
+  );
+}
+
+function CloneRepositoryModal({
+  visible,
+  serverId,
+  onClose,
+}: {
+  visible: boolean;
+  serverId: string | null;
+  onClose: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const { t } = useTranslation();
+  const cloneProject = useCloneProject(serverId);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [destinationParent, setDestinationParent] = useState("/workspace");
+  const [directoryName, setDirectoryName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setRepoUrl("");
+    setDestinationParent("/workspace");
+    setDirectoryName("");
+    setIsSubmitting(false);
+    setErrorMessage(null);
+  }, [visible]);
+
+  const handleSubmit = useCallback(() => {
+    if (!serverId || isSubmitting) return;
+    const trimmedRepoUrl = repoUrl.trim();
+    const trimmedDestinationParent = destinationParent.trim();
+    if (!trimmedRepoUrl || !trimmedDestinationParent) {
+      setErrorMessage(
+        t("openProject.clone.errors.required", {
+          defaultValue: "Enter a repository URL and destination path.",
+        }),
+      );
+      return;
+    }
+
+    void (async () => {
+      setErrorMessage(null);
+      setIsSubmitting(true);
+      try {
+        const result = await cloneProject({
+          repoUrl: trimmedRepoUrl,
+          destinationParent: trimmedDestinationParent,
+          ...(directoryName.trim() ? { directoryName: directoryName.trim() } : {}),
+        });
+        if (result.ok) {
+          onClose();
+          return;
+        }
+        setErrorMessage(result.error ?? "Unable to clone repository.");
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
+  }, [cloneProject, destinationParent, directoryName, isSubmitting, onClose, repoUrl, serverId, t]);
+
+  const panelStyle = useMemo(
+    () => [
+      styles.clonePanel,
+      { backgroundColor: theme.colors.surface0, borderColor: theme.colors.border },
+    ],
+    [theme.colors.border, theme.colors.surface0],
+  );
+  const inputStyle = useMemo(
+    () => [
+      styles.cloneInput,
+      {
+        color: theme.colors.foreground,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      },
+    ],
+    [theme.colors.border, theme.colors.foreground, theme.colors.surface1],
+  );
+  const errorStyle = useMemo(
+    () => [styles.cloneError, { color: theme.colors.destructive }],
+    [theme.colors.destructive],
+  );
+  const secondaryActionTextStyle = useMemo(
+    () => [styles.cloneSecondaryActionText, { color: theme.colors.foreground }],
+    [theme.colors.foreground],
+  );
+  const primaryActionStyle = useMemo(
+    () => [
+      styles.clonePrimaryAction,
+      { backgroundColor: theme.colors.accent },
+      isSubmitting && styles.cloneActionDisabled,
+    ],
+    [isSubmitting, theme.colors.accent],
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.cloneOverlay}>
+        <Pressable style={styles.cloneBackdrop} onPress={onClose} />
+        <View style={panelStyle}>
+          <Text style={styles.cloneTitle}>
+            {t("openProject.clone.title", { defaultValue: "Clone repository" })}
+          </Text>
+          <Text style={styles.cloneLabel}>
+            {t("openProject.clone.repoUrl", { defaultValue: "Git repository URL" })}
+          </Text>
+          <TextInput
+            value={repoUrl}
+            onChangeText={setRepoUrl}
+            placeholder="https://github.com/affil-ai/paseo.git"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            style={inputStyle}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!isSubmitting}
+          />
+          <Text style={styles.cloneLabel}>
+            {t("openProject.clone.destinationParent", { defaultValue: "Destination parent" })}
+          </Text>
+          <TextInput
+            value={destinationParent}
+            onChangeText={setDestinationParent}
+            placeholder="/workspace"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            style={inputStyle}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!isSubmitting}
+          />
+          <Text style={styles.cloneLabel}>
+            {t("openProject.clone.directoryName", { defaultValue: "Folder name (optional)" })}
+          </Text>
+          <TextInput
+            value={directoryName}
+            onChangeText={setDirectoryName}
+            placeholder="paseo"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            style={inputStyle}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!isSubmitting}
+            onSubmitEditing={handleSubmit}
+          />
+          {errorMessage ? <Text style={errorStyle}>{errorMessage}</Text> : null}
+          <View style={styles.cloneActions}>
+            <Pressable
+              style={styles.cloneSecondaryAction}
+              onPress={onClose}
+              disabled={isSubmitting}
+            >
+              <Text style={secondaryActionTextStyle}>
+                {t("common.actions.cancel", { defaultValue: "Cancel" })}
+              </Text>
+            </Pressable>
+            <Pressable style={primaryActionStyle} onPress={handleSubmit} disabled={isSubmitting}>
+              <Text style={styles.clonePrimaryActionText}>
+                {isSubmitting
+                  ? t("openProject.clone.cloning", { defaultValue: "Cloning..." })
+                  : t("openProject.clone.submit", { defaultValue: "Clone" })}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -264,5 +463,77 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     alignItems: "center",
     gap: 0,
+  },
+  cloneOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: theme.spacing[4],
+  },
+  cloneBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  clonePanel: {
+    width: 480,
+    maxWidth: "100%",
+    borderWidth: 1,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[5],
+    gap: theme.spacing[3],
+    ...theme.shadow.lg,
+  },
+  cloneTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.semibold,
+    marginBottom: theme.spacing[1],
+  },
+  cloneLabel: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  cloneInput: {
+    borderWidth: 1,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    fontSize: theme.fontSize.base,
+    outlineStyle: "none",
+  } as object,
+  cloneError: {
+    fontSize: theme.fontSize.sm,
+    lineHeight: 18,
+  },
+  cloneActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
+    marginTop: theme.spacing[2],
+  },
+  cloneSecondaryAction: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+  },
+  cloneSecondaryActionText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  clonePrimaryAction: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[4],
+    borderRadius: theme.borderRadius.md,
+  },
+  cloneActionDisabled: {
+    opacity: 0.6,
+  },
+  clonePrimaryActionText: {
+    color: theme.colors.accentForeground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
 }));
