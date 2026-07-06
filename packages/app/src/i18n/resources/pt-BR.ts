@@ -247,6 +247,12 @@ export const ptBR: TranslationResources = {
       copyCode: "Copiar código",
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensagem",
+      forkMenu: "Bifurcar mensagem",
+      forkInNewTab: "Bifurcar em uma nova aba",
+      forkInNewWorkspace: "Bifurcar em um novo workspace",
+      forkUnavailable: "Atualize o host para usar isto.",
+      forkMissingWorkspace: "Este agente não está em um workspace.",
+      forkFailed: "Falha ao bifurcar o chat",
       openFile: "Abrir arquivo",
       copied: "Copiado",
     },
@@ -419,7 +425,21 @@ export const ptBR: TranslationResources = {
         enterUrl: "Inserir URL",
         openDevTools: "Abrir ferramentas de desenvolvedor do navegador",
         cancelSelector: "Cancelar seletor de elemento",
-        selectElement: "Selecionar elemento",
+        annotateElement: "Anotar elemento",
+        screenshotElement: "Capturar elemento",
+        screenshotCopied: "Captura copiada para a área de transferência",
+        elementCopied: "Elemento copiado para a área de transferência",
+        screenshotFailed: "Não foi possível copiar a captura",
+      },
+      annotate: {
+        title: "Anotar elemento",
+        placeholder: "Mensagem ao agente sobre este elemento…",
+        submit: "Anexar",
+        cancel: "Cancelar",
+      },
+      devices: {
+        label: "Tamanho do dispositivo",
+        responsive: "Responsivo",
       },
       errors: {
         failedToLoad: "Falha ao carregar página",
@@ -783,6 +803,7 @@ export const ptBR: TranslationResources = {
     sections: {
       sessions: "Histórico",
       dashboard: "Dashboard",
+      schedules: "Agendamentos",
     },
     worktreeSetup: {
       title: "Configurar scripts de worktree",
@@ -951,8 +972,17 @@ export const ptBR: TranslationResources = {
         upToDate: "O app está atualizado.",
         upToDateWithLastChecked: "Atualizado. Última verificação às {{time}}.",
         pending: "Avisaremos quando a atualização estiver pronta.",
+        pendingWithLastChecked:
+          "Avisaremos quando a atualização estiver pronta. Última verificação às {{time}}.",
+        pendingWithVersion: "Atualização encontrada: {{version}}. Baixando...",
+        pendingWithVersionAndLastChecked:
+          "Atualização encontrada: {{version}}. Baixando... Última verificação às {{time}}.",
         availableWithVersion: "Atualização pronta: {{version}}",
+        availableWithVersionAndLastChecked:
+          "Atualização pronta: {{version}}. Última verificação às {{time}}.",
         available: "Há uma atualização do app pronta para instalar.",
+        availableWithLastChecked:
+          "Há uma atualização do app pronta para instalar. Última verificação às {{time}}.",
         installed: "Atualização do app instalada. Reinicialização obrigatória.",
         failed: "Falha ao atualizar o app.",
         idle: "O status de atualização ainda não foi verificado.",
