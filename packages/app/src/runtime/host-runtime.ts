@@ -1318,6 +1318,7 @@ export class HostRuntimeController {
 const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
 const LOCALHOST_FALLBACK_ENDPOINT = "localhost:6767";
 const DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS = 2500;
+const INITIAL_CONNECTION_HINT_BOOTSTRAP_RETRY_MS = 1_000;
 const E2E_STORAGE_KEY = "@paseo:e2e";
 const INITIAL_DAEMON_CONNECTION_HINT_GLOBAL_KEY = "__PASEO_INITIAL_DAEMON_CONNECTION__";
 
@@ -1395,6 +1396,7 @@ export class HostRuntimeStore {
   private lastConnectionStatusByServer = new Map<string, HostRuntimeConnectionStatus>();
   private agentDirectoryBootstrapInFlight = new Map<string, Promise<void>>();
   private configuredOverrideBootstrapInFlight: Promise<void> | null = null;
+  private initialConnectionHintBootstrapInFlight: Promise<void> | null = null;
   private bootStarted = false;
   private storage: HostRuntimeStorage;
 
@@ -1591,19 +1593,45 @@ export class HostRuntimeStore {
       return true;
     }
 
-    try {
-      await this.probeAndUpsertConnection({
-        connection: connectionWithHint,
-        timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
-      });
+    if (this.initialConnectionHintBootstrapInFlight) {
       return true;
-    } catch (error) {
-      console.warn("[HostRuntime] initial connection hint probe failed", {
-        listen: hint.listen,
-        useTls: hint.useTls,
-        error,
-      });
-      return false;
+    }
+
+    const bootstrap = this.runInitialConnectionHintBootstrap(hint, connectionWithHint).finally(
+      () => {
+        if (this.initialConnectionHintBootstrapInFlight === bootstrap) {
+          this.initialConnectionHintBootstrapInFlight = null;
+        }
+      },
+    );
+    this.initialConnectionHintBootstrapInFlight = bootstrap;
+    return true;
+  }
+
+  private async runInitialConnectionHintBootstrap(
+    hint: InitialDaemonConnectionHint,
+    connection: HostConnection,
+  ): Promise<void> {
+    let attempt = 0;
+    while (!registryHasConnection(this.hosts, connection)) {
+      attempt += 1;
+      try {
+        await this.probeAndUpsertConnection({
+          connection,
+          timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
+        });
+        return;
+      } catch (error) {
+        if (attempt === 1 || attempt % 10 === 0) {
+          console.warn("[HostRuntime] initial connection hint probe failed", {
+            listen: hint.listen,
+            useTls: hint.useTls,
+            attempt,
+            error,
+          });
+        }
+        await delay(INITIAL_CONNECTION_HINT_BOOTSTRAP_RETRY_MS);
+      }
     }
   }
 

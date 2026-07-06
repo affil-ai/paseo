@@ -2101,6 +2101,56 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
     store.syncHosts([]);
   });
 
+  it("keeps retrying the explicit initial connection hint after a transient probe failure", async () => {
+    useHostRuntimeClock();
+    const seenProbes: { endpoint: string; useTls?: boolean }[] = [];
+    let attempts = 0;
+    const firstProbeFailed = createDeferred<void>();
+    const store = new HostRuntimeStore({
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ connection }) => {
+          attempts += 1;
+          if (connection.type === "directTcp") {
+            seenProbes.push({ endpoint: connection.endpoint, useTls: connection.useTls });
+          }
+          if (attempts === 1) {
+            firstProbeFailed.resolve();
+            throw new Error("probe not ready yet");
+          }
+          return {
+            client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+            serverId: "srv_hint",
+            hostname: "hint host",
+          };
+        },
+        getClientId: async () => "cid_test_runtime",
+        readInitialConnectionHint: () => ({
+          listen: "daemon-origin:6767",
+          useTls: true,
+        }),
+      },
+      storage: createMemoryHostRuntimeStorage(),
+    });
+
+    const hostAdded = onceHostListMatches(store, () => store.getHosts().length > 0);
+    store.boot();
+    await firstProbeFailed.promise;
+    expect(store.getHosts()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await hostAdded;
+
+    expect(attempts).toBe(2);
+    expect(seenProbes).toEqual([
+      { endpoint: "daemon-origin:6767", useTls: true },
+      { endpoint: "daemon-origin:6767", useTls: true },
+    ]);
+    expect(store.getHosts()[0]?.serverId).toBe("srv_hint");
+
+    store.syncHosts([]);
+  });
+
   it("does not infer window.location.host when no explicit hint is present", async () => {
     const seenProbes: { endpoint: string; useTls?: boolean }[] = [];
     const firstProbe = createDeferred<void>();
