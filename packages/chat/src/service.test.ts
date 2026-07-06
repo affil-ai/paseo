@@ -70,10 +70,11 @@ class FakeChat {
 
 function fakeDaemonClient(
   labels: Record<string, unknown> = { [CHAT_THREAD_ID_LABEL]: "slack:C1:111.222" },
+  cwd = "/tmp/office",
 ) {
   return {
     sendAgentMessage: async () => {},
-    fetchAgent: async () => ({ agent: { labels } }),
+    fetchAgent: async () => ({ agent: { cwd, labels } }),
   };
 }
 
@@ -112,6 +113,48 @@ describe("ChatBridgeService", () => {
       officeAgentId: "agent-office",
       externalThreadId: "slack:C123:111.222",
     });
+  });
+
+  it("lets root agents in the configured office repo start outbound conversations", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient({}, "/tmp/office"), store, {
+      people: {},
+      channels: {},
+      officeRepoPath: "/tmp/office",
+    });
+
+    const result = await service.startConversation({
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C123" },
+      message: "hello channel",
+    });
+
+    expect(result.externalThreadId).toBe("slack:C123:111.222");
+  });
+
+  it("blocks delegated agents in the configured office repo from starting conversations", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(
+      chat,
+      fakeDaemonClient({ [PARENT_AGENT_ID_LABEL]: "agent-office" }, "/tmp/office"),
+      store,
+      {
+        people: {},
+        channels: {},
+        officeRepoPath: "/tmp/office",
+      },
+    );
+
+    await expect(
+      service.startConversation({
+        officeAgentId: "agent-child",
+        destination: { kind: "channel", id: "C123" },
+        message: "hello channel",
+      }),
+    ).rejects.toMatchObject({ code: "not_office_agent" });
+    expect(chat.posted).toHaveLength(0);
   });
 
   it("blocks delegated agents before posting a new conversation", async () => {

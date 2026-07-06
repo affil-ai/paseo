@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AdapterPostableMessage, FileUpload, SentMessage, Thread } from "chat";
-import { isChatOfficeAgent } from "@getpaseo/protocol/agent-labels";
-import type { ChatBridgeConfig } from "./config.js";
+import { isChatOfficeAgent, isDelegatedAgent } from "@getpaseo/protocol/agent-labels";
+import type { ChatBridgeConfig, ResolvedChatBridgeConfig } from "./config.js";
 import { slackMarkdownFixups } from "./render.js";
 import {
   ChatDestinationSchema,
@@ -81,7 +81,7 @@ interface ChatServiceDaemonClient {
   sendAgentMessage(agentId: string, message: string): Promise<unknown>;
   fetchAgent(
     agentId: string,
-  ): Promise<{ agent?: { labels?: Record<string, unknown> } | null } | null>;
+  ): Promise<{ agent?: { cwd?: string; labels?: Record<string, unknown> } | null } | null>;
 }
 
 export class ChatToolError extends Error {
@@ -117,6 +117,20 @@ export function normalizeSlackChannelId(value: string): string {
 
 function normalizeSlackUserId(value: string): string {
   return value.trim().replace(/^slack:/, "");
+}
+
+function isSameOrDescendantPath(basePath: string, candidatePath: string): boolean {
+  let normalizedBase = path.resolve(basePath).replace(/\\/g, "/").replace(/\/$/, "");
+  let normalizedCandidate = path.resolve(candidatePath).replace(/\\/g, "/").replace(/\/$/, "");
+
+  if (/^[a-zA-Z]:\//.test(normalizedBase) || /^[a-zA-Z]:\//.test(normalizedCandidate)) {
+    normalizedBase = normalizedBase.toLowerCase();
+    normalizedCandidate = normalizedCandidate.toLowerCase();
+  }
+
+  return (
+    normalizedCandidate === normalizedBase || normalizedCandidate.startsWith(`${normalizedBase}/`)
+  );
 }
 
 export function threadIdFromPostedMessage(
@@ -210,7 +224,8 @@ export class ChatBridgeService {
     private readonly chat: ChatLike,
     private readonly client: ChatServiceDaemonClient,
     private readonly store: ThreadSessionStore,
-    private readonly config: Pick<ChatBridgeConfig, "people" | "channels">,
+    private readonly config: Pick<ChatBridgeConfig, "people" | "channels"> &
+      Partial<Pick<ResolvedChatBridgeConfig, "officeRepoPath">>,
   ) {}
 
   async startConversation(input: StartConversationInput): Promise<ChatPostResult> {
@@ -353,12 +368,20 @@ export class ChatBridgeService {
 
   private async assertOfficeAgent(agentId: string): Promise<void> {
     const result = await this.client.fetchAgent(agentId).catch(() => null);
-    if (result?.agent && isChatOfficeAgent(result.agent)) {
+    const agent = result?.agent;
+    if (
+      agent &&
+      (isChatOfficeAgent(agent) ||
+        (agent.cwd &&
+          this.config.officeRepoPath &&
+          !isDelegatedAgent(agent) &&
+          isSameOrDescendantPath(this.config.officeRepoPath, agent.cwd)))
+    ) {
       return;
     }
     throw new ChatToolError(
       "not_office_agent",
-      "Only the office agent bound to a chat thread can start conversations.",
+      "Only root agents in the configured office repo can start conversations.",
       { agentId },
     );
   }

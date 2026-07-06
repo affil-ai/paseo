@@ -1075,6 +1075,7 @@ export async function createPaseoDaemon(
     browserToolsEnabled: browserToolsPolicy.isEnabled(),
     browserToolsBroker,
     paseoHome: config.paseoHome,
+    chatOfficeRepoPath: config.chatRepository?.projectRootPath,
     worktreesRoot: config.worktreesRoot,
     callerAgentId: runtime.callerAgentId,
     enableVoiceTools: runtime.enableVoiceTools,

@@ -1,4 +1,4 @@
-import { isChatOfficeAgent } from "@getpaseo/protocol/agent-labels";
+import { isChatOfficeAgent, isDelegatedAgent } from "@getpaseo/protocol/agent-labels";
 import { z } from "zod";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
@@ -115,6 +115,7 @@ export interface PaseoToolHostDependencies {
   browserToolsEnabled?: boolean;
   browserToolsBroker?: BrowserToolsBroker | null;
   paseoHome?: string;
+  chatOfficeRepoPath?: string;
   worktreesRoot?: string;
   /**
    * ID of the agent that is using this tool catalog.
@@ -522,8 +523,19 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     return parentAgent;
   };
 
+  const isConfiguredOfficeRepoAgent = (agent: { cwd: string; labels?: Record<string, string> }) =>
+    Boolean(
+      options.chatOfficeRepoPath &&
+      !isDelegatedAgent(agent) &&
+      isSameOrDescendantPath(options.chatOfficeRepoPath, agent.cwd),
+    );
+
   const callerAgentForChatTools = callerAgentId ? agentManager.getAgent(callerAgentId) : null;
-  if (callerAgentForChatTools && isChatOfficeAgent(callerAgentForChatTools)) {
+  if (
+    callerAgentForChatTools &&
+    (isChatOfficeAgent(callerAgentForChatTools) ||
+      isConfiguredOfficeRepoAgent(callerAgentForChatTools))
+  ) {
     registerChatTools(registerTool, {
       callerAgentId,
       resolveCallerCwd: () => resolveCallerAgent()?.cwd,
