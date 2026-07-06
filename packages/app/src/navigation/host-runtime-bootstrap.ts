@@ -2,9 +2,9 @@ import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-worksp
 import type { DaemonStartResult } from "@/runtime/daemon-start-service";
 import type { Href } from "expo-router";
 import {
+  buildHostOpenProjectRoute,
   buildHostRootRoute,
   buildHostWorkspaceRoute,
-  buildOpenProjectRoute,
 } from "@/utils/host-routes";
 
 export interface HostRuntimeBootstrapStore {
@@ -185,7 +185,7 @@ export function resolveHostIndexRoute(input: {
   ) {
     return buildHostWorkspaceRoute(input.serverId, input.workspaceSelection.workspaceId);
   }
-  return buildOpenProjectRoute();
+  return buildHostOpenProjectRoute(input.serverId);
 }
 
 function isIndexPathname(pathname: string) {
@@ -243,7 +243,7 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
 
   const fallbackServerId = input.hosts[0]?.serverId ?? null;
   if (fallbackServerId) {
-    return { kind: "redirect", href: buildOpenProjectRoute() };
+    return { kind: "redirect", href: buildHostOpenProjectRoute(fallbackServerId) };
   }
 
   return { kind: "redirect", href: WELCOME_ROUTE };

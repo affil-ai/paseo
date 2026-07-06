@@ -24,6 +24,7 @@ import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useCloneProject, useOpenProject } from "@/hooks/use-open-project";
 import type { Href } from "expo-router";
+import { useHostRouteServerId } from "@/navigation/host-route-context";
 
 export function OpenProjectScreen() {
   const { t } = useTranslation();
@@ -31,6 +32,7 @@ export function OpenProjectScreen() {
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const openProjectPicker = useOpenProjectPicker();
   const chooseHost = useHostChooser();
+  const routeServerId = useHostRouteServerId();
   const localServerId = useLocalDaemonServerId();
   const [importServerId, setImportServerId] = useState<string | null>(null);
   const importClient = useHostRuntimeClient(importServerId ?? "");
@@ -53,6 +55,11 @@ export function OpenProjectScreen() {
   }, [openProjectPicker]);
 
   const handleOpenClone = useCallback(() => {
+    if (routeServerId) {
+      setCloneServerId(routeServerId);
+      setIsCloneModalOpen(true);
+      return;
+    }
     chooseHost({
       title: "Clone to host",
       onChooseHost: (serverId) => {
@@ -60,7 +67,7 @@ export function OpenProjectScreen() {
         setIsCloneModalOpen(true);
       },
     });
-  }, [chooseHost]);
+  }, [chooseHost, routeServerId]);
 
   const handleCloseClone = useCallback(() => setIsCloneModalOpen(false), []);
 
@@ -68,6 +75,11 @@ export function OpenProjectScreen() {
   const handleClosePairDevice = useCallback(() => setIsPairDeviceOpen(false), []);
 
   const handleOpenImportSession = useCallback(() => {
+    if (routeServerId) {
+      setImportServerId(routeServerId);
+      setIsImportSheetOpen(true);
+      return;
+    }
     chooseHost({
       title: "Import from host",
       onChooseHost: (serverId) => {
@@ -75,7 +87,7 @@ export function OpenProjectScreen() {
         setIsImportSheetOpen(true);
       },
     });
-  }, [chooseHost]);
+  }, [chooseHost, routeServerId]);
   const handleCloseImportSession = useCallback(() => setIsImportSheetOpen(false), []);
 
   const handleImported = useCallback(
@@ -92,13 +104,17 @@ export function OpenProjectScreen() {
   );
 
   const handleOpenProviders = useCallback(() => {
+    if (routeServerId) {
+      router.push(buildSettingsHostSectionRoute(routeServerId, "providers"));
+      return;
+    }
     chooseHost({
       title: "Choose host",
       onChooseHost: (serverId) => {
         router.push(buildSettingsHostSectionRoute(serverId, "providers"));
       },
     });
-  }, [chooseHost, router]);
+  }, [chooseHost, routeServerId, router]);
 
   return (
     <View style={styles.container}>
