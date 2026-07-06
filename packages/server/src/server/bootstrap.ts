@@ -389,6 +389,11 @@ export interface PaseoDaemonConfig {
     channel?: string;
     supportAddress?: string;
   };
+  chatRepository?: {
+    projectId?: string;
+    projectRootPath?: string;
+    projectDisplayName?: string;
+  };
   mcpConnections?: Record<
     string,
     {
@@ -498,7 +503,11 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? false },
-    chat: { defaults: config.chatDefaults ?? {}, email: config.chatEmail ?? {} },
+    chat: {
+      defaults: config.chatDefaults ?? {},
+      email: config.chatEmail ?? {},
+      repository: config.chatRepository ?? {},
+    },
     mcpConnections: createInitialMcpConnections(config.mcpConnections),
     providers,
     metadataGeneration: {

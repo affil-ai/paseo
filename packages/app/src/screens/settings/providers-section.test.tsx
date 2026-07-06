@@ -221,7 +221,7 @@ function makeConfig(providers: MutableDaemonConfig["providers"] = {}): MutableDa
   return {
     mcp: { injectIntoAgents: false },
     browserTools: { enabled: false },
-    chat: { defaults: {}, email: {} },
+    chat: { defaults: {}, email: {}, repository: {} },
     mcpConnections: { servers: {} },
     providers,
     metadataGeneration: { providers: [] },

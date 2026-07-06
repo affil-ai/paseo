@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, resolveEmailConfig } from "./config.js";
+import { loadConfig, resolveEmailConfig, resolveRepositoryConfig } from "./config.js";
 
 const tempDirs: string[] = [];
 
@@ -94,5 +94,49 @@ describe("loadConfig chat.email", () => {
     await writeFile(join(home, "config.json"), JSON.stringify({ chat: {} }));
     const config = loadConfig({ PASEO_HOME: home } as NodeJS.ProcessEnv);
     expect(config.email).toBeNull();
+  });
+});
+
+describe("resolveRepositoryConfig", () => {
+  it("returns null when no project root is configured", () => {
+    expect(resolveRepositoryConfig({ projectId: "paseo" })).toBeNull();
+  });
+
+  it("trims the configured project repository", () => {
+    expect(
+      resolveRepositoryConfig({
+        projectId: " affil-ai/paseo ",
+        projectRootPath: " /workspace/paseo ",
+        projectDisplayName: " Paseo ",
+      }),
+    ).toEqual({
+      projectId: "affil-ai/paseo",
+      projectRootPath: "/workspace/paseo",
+      projectDisplayName: "Paseo",
+    });
+  });
+});
+
+describe("loadConfig chat.repository", () => {
+  it("reads chat.repository from the persisted config.json", async () => {
+    const home = await createTempHome();
+    await writeFile(
+      join(home, "config.json"),
+      JSON.stringify({
+        chat: {
+          repository: {
+            projectId: "affil-ai/paseo",
+            projectRootPath: "/workspace/paseo",
+            projectDisplayName: "Paseo",
+          },
+        },
+      }),
+    );
+    const config = loadConfig({ PASEO_HOME: home } as NodeJS.ProcessEnv);
+    expect(config.repository).toEqual({
+      projectId: "affil-ai/paseo",
+      projectRootPath: "/workspace/paseo",
+      projectDisplayName: "Paseo",
+    });
   });
 });

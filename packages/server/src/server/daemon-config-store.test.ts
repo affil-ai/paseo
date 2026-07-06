@@ -220,6 +220,55 @@ describe("DaemonConfigStore", () => {
     expect(cleared.chat?.email).toBeUndefined();
   });
 
+  test("patch persists chat repository settings into config.json", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+
+    const store = new DaemonConfigStore(
+      paseoHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      chat: {
+        repository: {
+          projectId: " affil-ai/paseo ",
+          projectRootPath: " /workspace/paseo ",
+          projectDisplayName: " Paseo ",
+        },
+      },
+    });
+
+    const persisted = loadPersistedConfig(paseoHome);
+    expect(persisted.chat?.repository).toEqual({
+      projectId: "affil-ai/paseo",
+      projectRootPath: "/workspace/paseo",
+      projectDisplayName: "Paseo",
+    });
+
+    store.patch({
+      chat: {
+        repository: {
+          projectId: "",
+          projectRootPath: "",
+          projectDisplayName: "",
+        },
+      },
+    });
+
+    const cleared = loadPersistedConfig(paseoHome);
+    expect(cleared.chat?.repository).toBeUndefined();
+  });
+
   test("patch persists chat defaults into config.json", () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);

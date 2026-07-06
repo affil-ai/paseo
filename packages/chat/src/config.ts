@@ -73,6 +73,14 @@ const chatEmailSchema = z
   })
   .partial();
 
+const chatRepositorySchema = z
+  .object({
+    projectId: z.string().min(1).optional(),
+    projectRootPath: z.string().min(1).optional(),
+    projectDisplayName: z.string().min(1).optional(),
+  })
+  .partial();
+
 function loadPersistedChatDefaults(paseoHome: string) {
   try {
     const parsed = JSON.parse(readFileSync(path.join(paseoHome, "config.json"), "utf8"));
@@ -91,11 +99,26 @@ function loadPersistedChatEmail(paseoHome: string) {
   }
 }
 
+function loadPersistedChatRepository(paseoHome: string) {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(paseoHome, "config.json"), "utf8"));
+    return chatRepositorySchema.parse(parsed?.chat?.repository ?? {});
+  } catch {
+    return {};
+  }
+}
+
 export interface ChatEmailConfig {
   apiKey: string;
   webhookSecret: string;
   channelId: string;
   supportAddress?: string;
+}
+
+export interface ChatRepositoryConfig {
+  projectId?: string;
+  projectRootPath: string;
+  projectDisplayName?: string;
 }
 
 export function resolveEmailConfig(
@@ -125,6 +148,20 @@ export function resolveEmailConfig(
   };
 }
 
+export function resolveRepositoryConfig(
+  repository: z.infer<typeof chatRepositorySchema>,
+): ChatRepositoryConfig | null {
+  const projectRootPath = repository.projectRootPath?.trim();
+  if (!projectRootPath) return null;
+  return {
+    ...(repository.projectId?.trim() ? { projectId: repository.projectId.trim() } : {}),
+    projectRootPath,
+    ...(repository.projectDisplayName?.trim()
+      ? { projectDisplayName: repository.projectDisplayName.trim() }
+      : {}),
+  };
+}
+
 export type ChatBridgeConfig = ReturnType<typeof loadConfig>;
 export type ResolvedChatBridgeConfig = ChatBridgeConfig & { officeRepoPath: string };
 
@@ -133,6 +170,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const paseoHome = resolvePaseoHome(env);
   const persistedDefaults = loadPersistedChatDefaults(paseoHome);
   const persistedEmail = loadPersistedChatEmail(paseoHome);
+  const persistedRepository = loadPersistedChatRepository(paseoHome);
   const channels = parseJsonMap(parsed.PASEO_CHAT_CHANNELS_JSON);
   return {
     provider: persistedDefaults.provider ?? parsed.PASEO_CHAT_PROVIDER,
@@ -164,6 +202,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     people: parseJsonMap(parsed.PASEO_CHAT_PEOPLE_JSON),
     channels,
     email: resolveEmailConfig(persistedEmail, channels),
+    repository: resolveRepositoryConfig(persistedRepository),
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };
 }

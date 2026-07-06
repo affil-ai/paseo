@@ -173,10 +173,19 @@ const ChatEmailSchema = z
   })
   .strict();
 
+const ChatRepositorySchema = z
+  .object({
+    projectId: z.string().min(1).optional(),
+    projectRootPath: z.string().min(1).optional(),
+    projectDisplayName: z.string().min(1).optional(),
+  })
+  .strict();
+
 const ChatConfigSchema = z
   .object({
     defaults: ChatDefaultsSchema.optional(),
     email: ChatEmailSchema.optional(),
+    repository: ChatRepositorySchema.optional(),
   })
   .strict();
 

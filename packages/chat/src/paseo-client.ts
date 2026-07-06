@@ -1,6 +1,6 @@
 import { DaemonClient, type WebSocketLike } from "@getpaseo/client/internal/daemon-client";
 import { WebSocket } from "ws";
-import type { ChatBridgeConfig } from "./config.js";
+import type { ChatBridgeConfig, ChatRepositoryConfig } from "./config.js";
 
 function createWebSocketFactory() {
   return (
@@ -32,22 +32,29 @@ export async function connectToPaseoDaemon(config: ChatBridgeConfig): Promise<Da
   return client;
 }
 
-export async function resolveChatRepositoryPath(client: DaemonClient): Promise<string> {
+export async function resolveChatRepositoryPath(
+  client: DaemonClient,
+  repository?: ChatRepositoryConfig | null,
+): Promise<string> {
+  const configuredPath = repository?.projectRootPath.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
+
   let cursor: string | undefined;
   do {
     const page = await client.fetchWorkspaces({
       page: { limit: 200, ...(cursor ? { cursor } : {}) },
     });
-    const workspace = page.entries.find(
-      (entry) => entry.chatRepository && entry.workspaceDirectory?.trim(),
-    );
-    if (workspace?.workspaceDirectory) {
-      return workspace.workspaceDirectory;
+    const workspace = page.entries.find((entry) => entry.chatRepository);
+    const repoPath = workspace?.projectRootPath?.trim() || workspace?.workspaceDirectory?.trim();
+    if (repoPath) {
+      return repoPath;
     }
     cursor = page.pageInfo.nextCursor ?? undefined;
   } while (cursor);
 
   throw new Error(
-    "No chat repo configured. Use the Paseo workspace menu to mark a workspace as the chat repo.",
+    "No chat repo configured. Use Settings -> Host -> Chat to choose the main chat project.",
   );
 }

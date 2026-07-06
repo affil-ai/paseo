@@ -17,7 +17,7 @@ export async function main(): Promise<void> {
   const client = await connectToPaseoDaemon(baseConfig);
   const config = {
     ...baseConfig,
-    officeRepoPath: await resolveChatRepositoryPath(client),
+    officeRepoPath: await resolveChatRepositoryPath(client, baseConfig.repository),
   };
   const state = new ThreadSessionStore(config.stateDir);
   const chatState = new FileChatStateAdapter(config.stateDir);

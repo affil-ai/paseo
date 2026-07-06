@@ -158,10 +158,19 @@ const MutableChatEmailConfigSchema = z
   })
   .passthrough();
 
+const MutableChatRepositoryConfigSchema = z
+  .object({
+    projectId: z.string().optional(),
+    projectRootPath: z.string().optional(),
+    projectDisplayName: z.string().optional(),
+  })
+  .passthrough();
+
 const MutableChatConfigSchema = z
   .object({
     defaults: MutableChatDefaultsConfigSchema.default({}),
     email: MutableChatEmailConfigSchema.default({}),
+    repository: MutableChatRepositoryConfigSchema.default({}),
   })
   .passthrough();
 
@@ -220,7 +229,7 @@ export const MutableDaemonConfigSchema = z
       })
       .passthrough(),
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: false }),
-    chat: MutableChatConfigSchema.default({ defaults: {}, email: {} }),
+    chat: MutableChatConfigSchema.default({ defaults: {}, email: {}, repository: {} }),
     mcpConnections: MutableMcpConnectionsConfigSchema.default({ servers: {} }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
@@ -239,6 +248,7 @@ export const MutableDaemonConfigPatchSchema = z
       .object({
         defaults: MutableChatDefaultsConfigSchema.partial().optional(),
         email: MutableChatEmailConfigSchema.partial().optional(),
+        repository: MutableChatRepositoryConfigSchema.partial().optional(),
       })
       .partial()
       .passthrough()

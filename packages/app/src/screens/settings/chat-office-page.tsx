@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Check, MessageSquare } from "lucide-react-native";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
@@ -13,10 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { settingsStyles } from "@/styles/settings";
-import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+import {
+  useWorkspaceStructure,
+  type WorkspaceStructureProject,
+} from "@/stores/session-store-hooks";
 
 interface ChatOfficePageProps {
   serverId: string;
@@ -34,6 +36,12 @@ interface ChatEmailDraft extends Record<string, unknown> {
   resendWebhookSecret: string;
   channel: string;
   supportAddress: string;
+}
+
+interface ChatRepositoryDraft extends Record<string, unknown> {
+  projectId: string;
+  projectRootPath: string;
+  projectDisplayName: string;
 }
 
 const ROW_WITH_BORDER_STYLE = [settingsStyles.row, settingsStyles.rowBorder];
@@ -82,67 +90,109 @@ function normalizeEmailDraft(draft: ChatEmailDraft): ChatEmailDraft {
   };
 }
 
-function workspaceLabel(workspace: WorkspaceDescriptor): string {
+function repositoryFromConfig(config: MutableDaemonConfig | null): ChatRepositoryDraft {
+  const repository = config?.chat.repository as Partial<ChatRepositoryDraft> | undefined;
+  return {
+    projectId: typeof repository?.projectId === "string" ? repository.projectId : "",
+    projectRootPath:
+      typeof repository?.projectRootPath === "string" ? repository.projectRootPath : "",
+    projectDisplayName:
+      typeof repository?.projectDisplayName === "string" ? repository.projectDisplayName : "",
+  };
+}
+
+function normalizeRepositoryDraft(draft: ChatRepositoryDraft): ChatRepositoryDraft {
+  return {
+    projectId: draft.projectId.trim(),
+    projectRootPath: draft.projectRootPath.trim(),
+    projectDisplayName: draft.projectDisplayName.trim(),
+  };
+}
+
+function projectWorkspaceCountLabel(count: number): string {
+  return count === 1 ? "1 workspace" : `${count} workspaces`;
+}
+
+function getProjectRootForHost(project: WorkspaceStructureProject, serverId: string): string {
   return (
-    workspace.title ??
-    workspace.projectCustomName ??
-    workspace.projectDisplayName ??
-    workspace.name ??
-    workspace.workspaceDirectory
+    project.hosts.find((host) => host.serverId === serverId)?.iconWorkingDir.trim() ??
+    project.iconWorkingDir.trim()
   );
 }
 
-function useHostWorkspaces(serverId: string): WorkspaceDescriptor[] {
-  const workspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
-  return useMemo(
+function ChatRepositoryRow({
+  serverId,
+  config,
+  patchConfig,
+}: {
+  serverId: string;
+  config: MutableDaemonConfig | null;
+  patchConfig: (patch: MutableDaemonConfigPatch) => Promise<unknown>;
+}) {
+  const structure = useWorkspaceStructure(useMemo(() => [serverId], [serverId]));
+  const [savingProjectKey, setSavingProjectKey] = useState<string | null>(null);
+  const repository = useMemo(
+    () => normalizeRepositoryDraft(repositoryFromConfig(config)),
+    [config],
+  );
+  const projects = useMemo(
     () =>
-      Array.from(workspaces?.values() ?? []).sort((a, b) =>
-        workspaceLabel(a).localeCompare(workspaceLabel(b)),
-      ),
-    [workspaces],
+      structure.projects.filter((project) => getProjectRootForHost(project, serverId).length > 0),
+    [structure.projects, serverId],
   );
-}
-
-function ChatRepositoryRow({ serverId }: { serverId: string }) {
-  const workspaces = useHostWorkspaces(serverId);
-  const [savingWorkspaceId, setSavingWorkspaceId] = useState<string | null>(null);
-  const selectedWorkspace = workspaces.find((workspace) => workspace.chatRepository);
-  const selectedLabel = selectedWorkspace ? workspaceLabel(selectedWorkspace) : "Select repo";
+  const selectedProject = projects.find((project) => project.projectKey === repository.projectId);
+  const selectedLabel =
+    selectedProject?.projectName || repository.projectDisplayName || "Select project";
 
   const handleSelect = useCallback(
-    async (workspaceId: string) => {
-      const client = getHostRuntimeStore().getClient(serverId);
-      if (!client) return;
-      setSavingWorkspaceId(workspaceId);
+    async (projectKey: string) => {
+      const project = projects.find((candidate) => candidate.projectKey === projectKey);
+      if (!project) return;
+      const projectRootPath = getProjectRootForHost(project, serverId);
+      if (!projectRootPath) return;
+      setSavingProjectKey(project.projectKey);
       try {
-        await client.setWorkspaceChatRepository(workspaceId, true);
+        await patchConfig({
+          chat: {
+            repository: {
+              projectId: project.projectKey,
+              projectRootPath,
+              projectDisplayName: project.projectName,
+            },
+          },
+        });
       } finally {
-        setSavingWorkspaceId(null);
+        setSavingProjectKey(null);
       }
     },
-    [serverId],
+    [patchConfig, projects, serverId],
   );
 
   return (
     <View style={settingsStyles.row}>
       <View style={settingsStyles.rowContent}>
-        <Text style={settingsStyles.rowTitle}>Main chat repo</Text>
+        <Text style={settingsStyles.rowTitle}>Main chat project</Text>
         <Text style={settingsStyles.rowHint}>
-          Office chats create workspaces from this repository.
+          Each new Slack or email thread creates a workspace from the selected project repo root.
         </Text>
       </View>
       <DropdownMenu>
-        <DropdownMenuTrigger style={triggerStyle} accessibilityLabel="Select main chat repo">
+        <DropdownMenuTrigger style={triggerStyle} accessibilityLabel="Select main chat project">
           <Text style={styles.triggerText} numberOfLines={1}>
-            {savingWorkspaceId ? "Saving..." : selectedLabel}
+            {savingProjectKey ? "Saving..." : selectedLabel}
           </Text>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="bottom" align="end" width={320}>
-          {workspaces.length === 0 ? (
-            <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>
+          {projects.length === 0 ? (
+            <DropdownMenuItem disabled>No projects</DropdownMenuItem>
           ) : (
-            workspaces.map((workspace) => (
-              <WorkspaceMenuItem key={workspace.id} workspace={workspace} onSelect={handleSelect} />
+            projects.map((project) => (
+              <ProjectMenuItem
+                key={project.projectKey}
+                project={project}
+                selectedProjectKey={repository.projectId || selectedProject?.projectKey || null}
+                onSelect={handleSelect}
+              />
             ))
           )}
         </DropdownMenuContent>
@@ -151,19 +201,21 @@ function ChatRepositoryRow({ serverId }: { serverId: string }) {
   );
 }
 
-function WorkspaceMenuItem({
-  workspace,
+function ProjectMenuItem({
+  project,
+  selectedProjectKey,
   onSelect,
 }: {
-  workspace: WorkspaceDescriptor;
-  onSelect: (workspaceId: string) => Promise<void>;
+  project: WorkspaceStructureProject;
+  selectedProjectKey: string | null;
+  onSelect: (projectKey: string) => Promise<void>;
 }) {
   const handleSelect = useCallback(() => {
-    void onSelect(workspace.id);
-  }, [onSelect, workspace.id]);
+    void onSelect(project.projectKey);
+  }, [onSelect, project.projectKey]);
   return (
-    <DropdownMenuItem selected={workspace.chatRepository === true} onSelect={handleSelect}>
-      {workspaceLabel(workspace)}
+    <DropdownMenuItem selected={selectedProjectKey === project.projectKey} onSelect={handleSelect}>
+      {`${project.projectName} · ${projectWorkspaceCountLabel(project.workspaceKeys.length)}`}
     </DropdownMenuItem>
   );
 }
@@ -244,6 +296,7 @@ function TextSettingRow({
   border?: boolean;
   secureTextEntry?: boolean;
 }) {
+  const { theme } = useUnistyles();
   const rowStyle = useMemo(() => (border ? ROW_WITH_BORDER_STYLE : settingsStyles.row), [border]);
   return (
     <View style={rowStyle}>
@@ -257,6 +310,7 @@ function TextSettingRow({
         onChangeText={onChangeText}
         autoCapitalize="none"
         autoCorrect={false}
+        placeholderTextColor={theme.colors.foregroundMuted}
         secureTextEntry={secureTextEntry}
         style={styles.input}
       />
@@ -430,7 +484,7 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
     <View>
       <SettingsSection title="Office chat" trailing={saveButton}>
         <View style={settingsStyles.card}>
-          <ChatRepositoryRow serverId={serverId} />
+          <ChatRepositoryRow serverId={serverId} config={config} patchConfig={patchConfig} />
           <ProviderRow draft={draft} setDraft={setDraft} providers={providerIds} />
           <TextSettingRow
             label="Default model"

@@ -194,6 +194,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
   const chatDefaults = readChatDefaults(mutable);
   const chatEmail = readChatEmail(mutable);
+  const chatRepository = readChatRepository(mutable);
   const mcpConnections = readMcpConnections(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const providerOverrides = applyMutableProviderConfigToOverrides(
@@ -229,6 +230,9 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       ...persisted.chat,
       defaults: chatDefaults,
       ...(Object.keys(chatEmail).length > 0 ? { email: chatEmail } : { email: undefined }),
+      ...(Object.keys(chatRepository).length > 0
+        ? { repository: chatRepository }
+        : { repository: undefined }),
     },
     mcpConnections: {
       ...persisted.mcpConnections,
@@ -332,6 +336,33 @@ function readChatEmail(mutable: MutableDaemonConfig): {
       : {}),
     ...(typeof email["supportAddress"] === "string" && email["supportAddress"].trim()
       ? { supportAddress: email["supportAddress"].trim() }
+      : {}),
+  };
+}
+
+function readChatRepository(mutable: MutableDaemonConfig): {
+  projectId?: string;
+  projectRootPath?: string;
+  projectDisplayName?: string;
+} {
+  const chat = mutable.chat;
+  if (!isRecord(chat)) {
+    return {};
+  }
+  const repository = chat["repository"];
+  if (!isRecord(repository)) {
+    return {};
+  }
+  return {
+    ...(typeof repository["projectId"] === "string" && repository["projectId"].trim()
+      ? { projectId: repository["projectId"].trim() }
+      : {}),
+    ...(typeof repository["projectRootPath"] === "string" && repository["projectRootPath"].trim()
+      ? { projectRootPath: repository["projectRootPath"].trim() }
+      : {}),
+    ...(typeof repository["projectDisplayName"] === "string" &&
+    repository["projectDisplayName"].trim()
+      ? { projectDisplayName: repository["projectDisplayName"].trim() }
       : {}),
   };
 }
