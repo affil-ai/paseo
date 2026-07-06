@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AdapterPostableMessage, FileUpload, SentMessage, Thread } from "chat";
 import { isChatOfficeAgent, isDelegatedAgent } from "@getpaseo/protocol/agent-labels";
 import type { ChatBridgeConfig, ResolvedChatBridgeConfig } from "./config.js";
-import { slackMarkdownFixups } from "./render.js";
+import { slackPostableMessagesFromMarkdown } from "./render.js";
 import {
   ChatDestinationSchema,
   getBindingOwnerAgentId,
@@ -99,6 +99,21 @@ interface ResolvedTarget {
   externalThreadId?: string;
   target: PostableTarget;
   mode: "thread" | "new-thread";
+}
+
+function withFilesOnFirstMessage(
+  messages: AdapterPostableMessage[],
+  files: FileUpload[] | undefined,
+): AdapterPostableMessage[] {
+  if (!files?.length) return messages;
+  const [firstMessage, ...remaining] = messages;
+  return [withFiles(firstMessage ?? { markdown: "" }, files), ...remaining];
+}
+
+function withFiles(message: AdapterPostableMessage, files: FileUpload[]): AdapterPostableMessage {
+  if (typeof message === "string") return { raw: message, files };
+  if ("type" in message && message.type === "card") return { card: message, files };
+  return { ...message, files };
 }
 
 function nowIso(): string {
@@ -239,18 +254,21 @@ export class ChatBridgeService {
         : null;
       this.assertBindingOwner(input.officeAgentId, existingResolvedBinding);
 
-      const sent = await resolved.target.post({ markdown: slackMarkdownFixups(input.message) });
+      const messages = slackPostableMessagesFromMarkdown(input.message);
+      const sent = await resolved.target.post(messages[0] ?? { markdown: "" });
       const externalThreadId = threadIdFromPostedMessage(resolved.target.id, sent);
       const existingBinding =
         existingResolvedBinding ?? (await this.store.getBinding(externalThreadId));
       if (existingBinding) {
         this.assertBindingOwner(input.officeAgentId, existingBinding);
         if (input.subscribe ?? true) await this.chat.thread(externalThreadId).subscribe();
+        await this.postRemainingMessages(existingBinding.externalThreadId, messages);
         await this.suppressActiveAutoRelay(existingBinding.externalThreadId);
         const result = this.resultFromBinding(existingBinding);
         await this.completeIdempotentResult(input.idempotencyKey, result);
         return result;
       }
+      await this.postRemainingMessages(externalThreadId, messages);
       const conversationId = `conv_${randomUUID()}`;
       const binding = this.createOutboundBinding({
         conversationId,
@@ -274,10 +292,11 @@ export class ChatBridgeService {
       await this.assertOfficeAgent(input.officeAgentId);
       const binding = await this.resolveCurrentBinding(input.officeAgentId, input.conversationId);
       const files = input.files?.map(toFileUpload);
-      await this.chat.thread(binding.externalThreadId).post({
-        markdown: slackMarkdownFixups(input.message),
-        ...(files?.length ? { files } : {}),
-      });
+      const messages = withFilesOnFirstMessage(
+        slackPostableMessagesFromMarkdown(input.message),
+        files,
+      );
+      await this.postMessages(binding.externalThreadId, messages);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = this.resultFromBinding(binding);
       await this.completeIdempotentResult(input.idempotencyKey, result);
@@ -293,15 +312,32 @@ export class ChatBridgeService {
       const binding = input.destination
         ? await this.ensureDestinationBinding(input)
         : await this.resolveCurrentBinding(input.officeAgentId, input.conversationId);
-      await this.chat.thread(binding.externalThreadId).post({
-        markdown: slackMarkdownFixups(input.message ?? ""),
-        files: [toFileUpload(input.file)],
-      });
+      const messages = withFilesOnFirstMessage(
+        slackPostableMessagesFromMarkdown(input.message ?? ""),
+        [toFileUpload(input.file)],
+      );
+      await this.postMessages(binding.externalThreadId, messages);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = { ...this.resultFromBinding(binding), fileId: input.file.filename };
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
+  }
+
+  private async postMessages(
+    externalThreadId: string,
+    messages: AdapterPostableMessage[],
+  ): Promise<void> {
+    for (const message of messages) {
+      await this.chat.thread(externalThreadId).post(message);
+    }
+  }
+
+  private async postRemainingMessages(
+    externalThreadId: string,
+    messages: AdapterPostableMessage[],
+  ): Promise<void> {
+    await this.postMessages(externalThreadId, messages.slice(1));
   }
 
   async ask(input: AskInput): Promise<ChatPostResult> {

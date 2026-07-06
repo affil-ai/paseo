@@ -30,7 +30,7 @@ import {
   externalIntakeAgentPrompt,
   loadOfficePrompt,
 } from "./prompt.js";
-import { slackMarkdownFixups } from "./render.js";
+import { slackPostableMessagesFromMarkdown } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
 import {
   CHAT_THREAD_LABEL,
@@ -722,9 +722,9 @@ export class ChatBridge {
     if (!binding || getBindingOwnerAgentId(binding) !== input.agentId) {
       throw new Error("Auto relay binding owner changed before post");
     }
-    await this.postMessage(input.thread, input.externalThreadId, {
-      markdown: slackMarkdownFixups(input.text),
-    });
+    for (const message of slackPostableMessagesFromMarkdown(input.text)) {
+      await this.postMessage(input.thread, input.externalThreadId, message);
+    }
     await this.store.appendAuditRecord({
       id: `aud_${randomUUID()}`,
       timestamp: new Date().toISOString(),

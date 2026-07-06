@@ -1,64 +1,245 @@
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import type { StreamChunk } from "chat";
+import {
+  Card,
+  CardText,
+  Table,
+  type AdapterPostableMessage,
+  type CardChild,
+  type StreamChunk,
+  type TableAlignment,
+} from "chat";
+
+interface CodeFenceState {
+  character: "`" | "~";
+  length: number;
+}
+
+interface MarkdownTableBlock {
+  align?: TableAlignment[];
+  headers: string[];
+  rows: string[][];
+}
+
+interface MarkdownTextPart {
+  kind: "markdown";
+  text: string;
+}
+
+interface MarkdownTablePart {
+  kind: "table";
+  table: MarkdownTableBlock;
+}
+
+type SlackMarkdownPart = MarkdownTextPart | MarkdownTablePart;
+
+function parseCodeFence(line: string): CodeFenceState | null {
+  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+  if (!match) return null;
+  const marker = match[1] ?? "";
+  return {
+    character: marker.startsWith("`") ? "`" : "~",
+    length: marker.length,
+  };
+}
+
+function closesCodeFence(line: string, fence: CodeFenceState): boolean {
+  const match = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+  if (!match) return false;
+  const marker = match[1] ?? "";
+  const character = marker.startsWith("`") ? "`" : "~";
+  return character === fence.character && marker.length >= fence.length;
+}
+
+function countBackticks(text: string, index: number): number {
+  let cursor = index;
+  while (cursor < text.length && text[cursor] === "`") {
+    cursor += 1;
+  }
+  return cursor - index;
+}
+
+function splitMarkdownTableCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  let codeSpan = "";
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    const nextCharacter = line[index + 1] ?? "";
+
+    if (character === "\\" && nextCharacter === "|") {
+      cell += "|";
+      index += 1;
+      continue;
+    }
+
+    if (character === "`") {
+      const backtickCount = countBackticks(line, index);
+      const marker = "`".repeat(backtickCount);
+      if (codeSpan === "") {
+        codeSpan = marker;
+      } else if (codeSpan === marker) {
+        codeSpan = "";
+      }
+      cell += marker;
+      index += backtickCount - 1;
+      continue;
+    }
+
+    if (character === "|" && codeSpan === "") {
+      cells.push(cell);
+      cell = "";
+      continue;
+    }
+
+    cell += character;
+  }
+
+  cells.push(cell);
+  if (line.trimStart().startsWith("|")) cells.shift();
+  if (line.trimEnd().endsWith("|")) cells.pop();
+  return cells.map((value) => value.trim());
+}
 
 function parseMarkdownTableRow(line: string): string[] | null {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("|") || !trimmed.includes("|", 1)) return null;
-  return trimmed
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
+  if (!line.includes("|")) return null;
+  const cells = splitMarkdownTableCells(line);
+  if (cells.length < 2) return null;
+  return cells;
 }
 
-function isMarkdownTableSeparator(cells: string[]): boolean {
-  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, "")));
+function isMarkdownTableSeparator(headers: string[], cells: string[]): boolean {
+  return (
+    cells.length === headers.length &&
+    cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, "")))
+  );
 }
 
-function formatMarkdownTable(headers: string[], rows: string[][]): string {
-  return rows
-    .map((row) => {
-      if (headers.length === 2) return `- ${row[0] ?? ""}: ${row[1] ?? ""}`;
-      const label = row[0] ?? "";
-      const details = headers
-        .slice(1)
-        .map((header, index) => `${header}: ${row[index + 1] ?? ""}`)
-        .join("; ");
-      return `- ${label} — ${details}`;
-    })
-    .join("\n");
+function parseTableAlignment(separator: string[]): TableAlignment[] | undefined {
+  const align = separator.map((cell) => {
+    const value = cell.replace(/\s/g, "");
+    if (value.startsWith(":") && value.endsWith(":")) return "center";
+    if (value.endsWith(":")) return "right";
+    return "left";
+  });
+  if (align.every((value) => value === "left")) return undefined;
+  return align;
 }
 
-function flattenMarkdownTables(text: string): string {
+function normalizeMarkdownTableRow(row: string[], columnCount: number): string[] {
+  return Array.from({ length: columnCount }, (_, index) => row[index] ?? "");
+}
+
+function appendMarkdownPart(parts: SlackMarkdownPart[], lines: string[]): void {
+  if (lines.length === 0) return;
+  parts.push({ kind: "markdown", text: lines.join("\n") });
+  lines.length = 0;
+}
+
+function parseSlackMarkdownParts(text: string): SlackMarkdownPart[] {
   const lines = text.split("\n");
-  const output: string[] = [];
+  const parts: SlackMarkdownPart[] = [];
+  const markdownLines: string[] = [];
+  let codeFence: CodeFenceState | null = null;
+
   for (let index = 0; index < lines.length; index += 1) {
-    const headers = parseMarkdownTableRow(lines[index] ?? "");
+    const line = lines[index] ?? "";
+    if (codeFence) {
+      markdownLines.push(line);
+      if (closesCodeFence(line, codeFence)) codeFence = null;
+      continue;
+    }
+
+    const openingFence = parseCodeFence(line);
+    if (openingFence) {
+      codeFence = openingFence;
+      markdownLines.push(line);
+      continue;
+    }
+
+    const headers = parseMarkdownTableRow(line);
     const separator = parseMarkdownTableRow(lines[index + 1] ?? "");
-    if (!headers || !separator || !isMarkdownTableSeparator(separator)) {
-      output.push(lines[index] ?? "");
+    if (!headers || !separator || !isMarkdownTableSeparator(headers, separator)) {
+      markdownLines.push(line);
       continue;
     }
 
     const rows: string[][] = [];
-    index += 2;
-    while (index < lines.length) {
-      const row = parseMarkdownTableRow(lines[index] ?? "");
+    let rowIndex = index + 2;
+    while (rowIndex < lines.length) {
+      const row = parseMarkdownTableRow(lines[rowIndex] ?? "");
       if (!row) break;
-      rows.push(row);
-      index += 1;
+      rows.push(normalizeMarkdownTableRow(row, headers.length));
+      rowIndex += 1;
     }
-    index -= 1;
-    output.push(formatMarkdownTable(headers, rows));
+
+    if (rows.length === 0) {
+      markdownLines.push(line);
+      continue;
+    }
+
+    appendMarkdownPart(parts, markdownLines);
+    parts.push({
+      kind: "table",
+      table: {
+        align: parseTableAlignment(separator),
+        headers,
+        rows,
+      },
+    });
+    index = rowIndex - 1;
   }
-  return output.join("\n");
+
+  appendMarkdownPart(parts, markdownLines);
+  return parts;
+}
+
+function hasTablePart(parts: SlackMarkdownPart[]): boolean {
+  return parts.some((part) => part.kind === "table");
+}
+
+function appendMarkdownCardText(children: CardChild[], text: string): void {
+  const fixed = slackMarkdownFixups(text).trim();
+  if (fixed.length === 0) return;
+  children.push(CardText(fixed));
 }
 
 export function slackMarkdownFixups(text: string): string {
-  return flattenMarkdownTables(text).replace(
-    /(^|\s)(@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*)/gi,
-    "$1`$2`",
-  );
+  return text.replace(/(^|\s)(@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*)/gi, "$1`$2`");
+}
+
+export function slackPostableMessagesFromMarkdown(text: string): AdapterPostableMessage[] {
+  const parts = parseSlackMarkdownParts(text);
+  if (!hasTablePart(parts)) return [{ markdown: slackMarkdownFixups(text) }];
+
+  const messages: AdapterPostableMessage[] = [];
+  let children: CardChild[] = [];
+  let hasTable = false;
+
+  for (const part of parts) {
+    if (part.kind === "markdown") {
+      appendMarkdownCardText(children, part.text);
+      continue;
+    }
+
+    if (hasTable) {
+      messages.push({ card: Card({ children }) });
+      children = [];
+      hasTable = false;
+    }
+
+    children.push(
+      Table({
+        align: part.table.align,
+        headers: part.table.headers,
+        rows: part.table.rows,
+      }),
+    );
+    hasTable = true;
+  }
+
+  if (children.length > 0) messages.push({ card: Card({ children }) });
+  return messages;
 }
 
 function mapToolStatus(status: "running" | "completed" | "failed" | "canceled") {
