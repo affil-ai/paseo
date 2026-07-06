@@ -26,6 +26,7 @@ export interface SidebarWorkspacePlacement {
   projectKind: WorkspaceDescriptor["projectKind"];
   workspaceKind: WorkspaceDescriptor["workspaceKind"];
   name: string;
+  chatRepository?: boolean;
 }
 
 export interface SidebarStatusWorkspacePlacement extends SidebarWorkspacePlacement {
@@ -37,6 +38,7 @@ export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
   // Raw user-set title (null when the name is derived from branch/directory).
   // Prefills the rename input and signals whether a reset is available.
   title: string | null;
+  chatRepository?: boolean;
   // Checkout branch (null when not a git checkout or detached HEAD).
   currentBranch: string | null;
   archivingAt: string | null;
@@ -111,6 +113,7 @@ export function createSidebarWorkspaceEntry(input: {
     projectKind: input.workspace.projectKind,
     workspaceKind: input.workspace.workspaceKind,
     name: input.workspace.name,
+    chatRepository: input.workspace.chatRepository,
     title: input.workspace.title ?? null,
     currentBranch: normalizeCurrentBranch(input.workspace.gitRuntime?.currentBranch),
     statusBucket: effectiveStatus.status,

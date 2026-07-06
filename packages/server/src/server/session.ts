@@ -1622,6 +1622,11 @@ export class Session {
   private dispatchWorkspaceAndProjectMessage(
     msg: SessionInboundMessage,
   ): Promise<void> | undefined {
+    const metadataResult = this.dispatchWorkspaceMetadataMessage(msg);
+    if (metadataResult) {
+      return metadataResult;
+    }
+
     switch (msg.type) {
       case "fetch_workspaces_request":
         return this.handleFetchWorkspacesRequest(msg);
@@ -1652,8 +1657,6 @@ export class Session {
         return this.handleWorkspaceCreateRequest(msg);
       case "workspace.clear_attention.request":
         return this.handleWorkspaceClearAttentionRequest(msg);
-      case "workspace.title.set.request":
-        return this.handleWorkspaceTitleSetRequest(msg.workspaceId, msg.title, msg.requestId);
       case "file_explorer_request":
         return this.workspaceFilesSession.handleFileExplorerRequest(msg);
       case "project_icon_request":
@@ -1663,6 +1666,21 @@ export class Session {
       case "file.upload.request":
         this.workspaceFilesSession.handleFileUploadRequest(msg);
         return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchWorkspaceMetadataMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "workspace.title.set.request":
+        return this.handleWorkspaceTitleSetRequest(msg.workspaceId, msg.title, msg.requestId);
+      case "workspace.chat_repository.set.request":
+        return this.handleWorkspaceChatRepositorySetRequest(
+          msg.workspaceId,
+          msg.enabled,
+          msg.requestId,
+        );
       default:
         return undefined;
     }
@@ -2334,6 +2352,94 @@ export class Session {
           accepted: false,
           title: null,
           error: getErrorMessageOr(error, "Failed to set workspace title"),
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceChatRepositorySetRequest(
+    workspaceId: string,
+    enabled: boolean,
+    requestId: string,
+  ): Promise<void> {
+    this.sessionLogger.info(
+      { workspaceId, requestId, enabled },
+      "session: workspace.chat_repository.set.request",
+    );
+
+    try {
+      const existing = await this.workspaceRegistry.get(workspaceId);
+      if (!existing) {
+        this.emit({
+          type: "workspace.chat_repository.set.response",
+          payload: {
+            requestId,
+            workspaceId,
+            accepted: false,
+            enabled: false,
+            error: "Workspace not found",
+          },
+        });
+        return;
+      }
+
+      const updatedAt = new Date().toISOString();
+      const affectedWorkspaceIds = new Set<string>([workspaceId]);
+      if (enabled) {
+        for (const workspace of await this.workspaceRegistry.list()) {
+          if (workspace.workspaceId !== workspaceId && workspace.chatRepository) {
+            affectedWorkspaceIds.add(workspace.workspaceId);
+            await this.workspaceRegistry.upsert({
+              ...workspace,
+              chatRepository: false,
+              updatedAt,
+            });
+          }
+        }
+      }
+
+      await this.workspaceRegistry.upsert({
+        ...existing,
+        chatRepository: enabled,
+        updatedAt,
+      });
+
+      this.emit({
+        type: "workspace.chat_repository.set.response",
+        payload: {
+          requestId,
+          workspaceId,
+          accepted: true,
+          enabled,
+          error: null,
+        },
+      });
+
+      await this.emitWorkspaceUpdatesForWorkspaceIds(affectedWorkspaceIds, {
+        skipReconcile: true,
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, workspaceId, requestId },
+        "session: workspace.chat_repository.set.request error",
+      );
+      this.emit({
+        type: "activity_log",
+        payload: {
+          id: uuidv4(),
+          timestamp: new Date(),
+          type: "error",
+          content: `Failed to set chat repository: ${getErrorMessage(error)}`,
+        },
+      });
+      this.emit({
+        type: "workspace.chat_repository.set.response",
+        payload: {
+          requestId,
+          workspaceId,
+          accepted: false,
+          enabled: false,
+          error: getErrorMessageOr(error, "Failed to set chat repository"),
         },
       });
     }
@@ -3552,6 +3658,7 @@ export class Session {
       projectKind: (resolvedProjectRecord?.kind ?? "directory") === "git" ? "git" : "non_git",
       workspaceKind: workspace.kind,
       name: resolveWorkspaceDisplayName(workspace),
+      chatRepository: workspace.chatRepository,
       title: workspace.title,
       archivingAt: null,
       status: "done",
@@ -3636,6 +3743,7 @@ export class Session {
         title: result.workspace.title,
         derivedDisplayName: result.worktree.branchName || result.workspace.displayName,
       }),
+      chatRepository: result.workspace.chatRepository,
       title: result.workspace.title,
       archivingAt: null,
       status: "done",

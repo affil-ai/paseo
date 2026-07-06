@@ -29,6 +29,7 @@ import {
   Copy,
   Archive,
   Pencil,
+  Star,
 } from "lucide-react-native";
 import { DiffStat } from "@/components/diff-stat";
 import {
@@ -81,6 +82,7 @@ const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedStar = withUnistyles(Star);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const markAsReadLeadingIcon = (
@@ -88,6 +90,7 @@ const markAsReadLeadingIcon = (
 );
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
+const chatRepositoryLeadingIcon = <ThemedStar size={14} uniProps={foregroundMutedColorMapping} />;
 
 interface StatusWorkspaceListProps {
   workspaces: SidebarStatusWorkspacePlacement[];
@@ -444,6 +447,19 @@ function StatusWorkspaceRowWithMenu({
       await client.setWorkspaceTitle(workspace.workspaceId, title.length === 0 ? null : title);
     },
   });
+  const chatRepositoryMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const client = getHostRuntimeStore().getClient(workspace.serverId);
+      if (!client) throw new Error(t("workspace.terminal.hostDisconnected"));
+      await client.setWorkspaceChatRepository(workspace.workspaceId, enabled);
+    },
+    onSuccess: (_, enabled) => {
+      toast.show(enabled ? "Chat repo set" : "Chat repo unset", { variant: "success" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update chat repo");
+    },
+  });
 
   const handleOpenRename = useCallback(() => setIsRenameOpen(true), []);
   const handleCloseRename = useCallback(() => setIsRenameOpen(false), []);
@@ -453,6 +469,9 @@ function StatusWorkspaceRowWithMenu({
     },
     [renameMutation],
   );
+  const handleToggleChatRepository = useCallback(() => {
+    chatRepositoryMutation.mutate(!(workspace.chatRepository ?? false));
+  }, [chatRepositoryMutation, workspace.chatRepository]);
 
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
   const { hasClearableAttention, clearAttention } = useClearWorkspaceAttention({
@@ -500,6 +519,7 @@ function StatusWorkspaceRowWithMenu({
         onCopyBranchName={workspace.projectKind === "git" ? handleCopyBranchName : undefined}
         onCopyPath={handleCopyPath}
         onRename={handleOpenRename}
+        onToggleChatRepository={handleToggleChatRepository}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         archiveShortcutKeys={selected ? archiveShortcutKeys : null}
       />
@@ -532,6 +552,7 @@ function StatusWorkspaceRowInner({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   archiveShortcutKeys,
 }: {
@@ -549,6 +570,7 @@ function StatusWorkspaceRowInner({
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
 }) {
@@ -601,6 +623,7 @@ function StatusWorkspaceRowInner({
                     onCopyPath={onCopyPath}
                     onCopyBranchName={onCopyBranchName}
                     onRename={onRename}
+                    onToggleChatRepository={onToggleChatRepository}
                     onMarkAsRead={onMarkAsRead}
                     onArchive={onArchive}
                     archiveLabel={archiveLabel}
@@ -625,6 +648,7 @@ function StatusWorkspaceActionSlot({
   onCopyPath,
   onCopyBranchName,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -638,6 +662,7 @@ function StatusWorkspaceActionSlot({
   onCopyPath?: () => void;
   onCopyBranchName?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   onArchive?: () => void;
   archiveLabel?: string;
@@ -659,9 +684,11 @@ function StatusWorkspaceActionSlot({
         {onArchive ? (
           <StatusKebabMenu
             workspaceKey={workspace.workspaceKey}
+            isChatRepository={workspace.chatRepository ?? false}
             onCopyPath={onCopyPath}
             onCopyBranchName={onCopyBranchName}
             onRename={onRename}
+            onToggleChatRepository={onToggleChatRepository}
             onMarkAsRead={onMarkAsRead}
             onArchive={onArchive}
             archiveLabel={archiveLabel}
@@ -677,9 +704,11 @@ function StatusWorkspaceActionSlot({
 
 function StatusKebabMenu({
   workspaceKey,
+  isChatRepository,
   onCopyPath,
   onCopyBranchName,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -688,9 +717,11 @@ function StatusKebabMenu({
   archiveShortcutKeys,
 }: {
   workspaceKey: string;
+  isChatRepository: boolean;
   onCopyPath?: () => void;
   onCopyBranchName?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
@@ -744,6 +775,15 @@ function StatusKebabMenu({
             onSelect={onRename}
           >
             Rename workspace
+          </DropdownMenuItem>
+        ) : null}
+        {onToggleChatRepository ? (
+          <DropdownMenuItem
+            testID={`sidebar-workspace-menu-chat-repository-${workspaceKey}`}
+            leading={chatRepositoryLeadingIcon}
+            onSelect={onToggleChatRepository}
+          >
+            {isChatRepository ? "Unset chat repo" : "Set as chat repo"}
           </DropdownMenuItem>
         ) : null}
         {onMarkAsRead ? (

@@ -833,6 +833,13 @@ export const WorkspaceTitleSetRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const WorkspaceChatRepositorySetRequestSchema = z.object({
+  type: z.literal("workspace.chat_repository.set.request"),
+  workspaceId: z.string(),
+  enabled: z.boolean(),
+  requestId: z.string(),
+});
+
 export const SetVoiceModeMessageSchema = z.object({
   type: z.literal("set_voice_mode"),
   enabled: z.boolean(),
@@ -1434,6 +1441,19 @@ export const WorkspaceTitleSetResponsePayloadSchema = z.object({
 export const WorkspaceTitleSetResponseSchema = z.object({
   type: z.literal("workspace.title.set.response"),
   payload: WorkspaceTitleSetResponsePayloadSchema,
+});
+
+export const WorkspaceChatRepositorySetResponsePayloadSchema = z.object({
+  requestId: z.string(),
+  workspaceId: z.string(),
+  accepted: z.boolean(),
+  enabled: z.boolean(),
+  error: z.string().nullable(),
+});
+
+export const WorkspaceChatRepositorySetResponseSchema = z.object({
+  type: z.literal("workspace.chat_repository.set.response"),
+  payload: WorkspaceChatRepositorySetResponsePayloadSchema,
 });
 
 export const SetVoiceModeResponseMessageSchema = z.object({
@@ -2070,6 +2090,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProjectRenameRequestSchema,
   ProjectRemoveRequestSchema,
   WorkspaceTitleSetRequestSchema,
+  WorkspaceChatRepositorySetRequestSchema,
   SetVoiceModeMessageSchema,
   SendAgentMessageRequestSchema,
   WaitForFinishRequestSchema,
@@ -2654,6 +2675,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     // COMPAT(workspaces): keep legacy directory workspace kind parseable.
     workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
     name: z.string(),
+    chatRepository: z.boolean().optional(),
     // COMPAT(workspaceTitles): added in v0.1.97, drop the optional gate when floor >= v0.1.97.
     // When the user has titled a workspace, `name` carries the resolved value
     // (title) and `title` mirrors the raw override so the rename UI can prefill
@@ -4261,6 +4283,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProjectRenameResponseSchema,
   ProjectRemoveResponseSchema,
   WorkspaceTitleSetResponseSchema,
+  WorkspaceChatRepositorySetResponseSchema,
   WaitForFinishResponseMessageSchema,
   AgentPermissionRequestMessageSchema,
   AgentPermissionResolvedMessageSchema,

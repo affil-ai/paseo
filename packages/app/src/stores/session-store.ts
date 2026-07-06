@@ -130,6 +130,7 @@ export interface WorkspaceDescriptor {
   projectKind: WorkspaceDescriptorPayload["projectKind"];
   workspaceKind: WorkspaceDescriptorPayload["workspaceKind"];
   name: string;
+  chatRepository?: boolean;
   title?: string | null;
   status: WorkspaceDescriptorPayload["status"];
   statusEnteredAt: Date | null;
@@ -162,6 +163,7 @@ export function normalizeWorkspaceDescriptor(
     projectKind: payload.projectKind,
     workspaceKind: payload.workspaceKind,
     name: payload.name,
+    chatRepository: payload.chatRepository ?? false,
     title: payload.title ?? null,
     status: payload.status,
     statusEnteredAt,

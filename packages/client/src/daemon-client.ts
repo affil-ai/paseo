@@ -2309,6 +2309,26 @@ export class DaemonClient {
     return { title: payload.title };
   }
 
+  async setWorkspaceChatRepository(
+    workspaceId: string,
+    enabled: boolean,
+    requestId?: string,
+  ): Promise<{ enabled: boolean }> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "workspace.chat_repository.set.request",
+        workspaceId,
+        enabled,
+      },
+      responseType: "workspace.chat_repository.set.response",
+    });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "setWorkspaceChatRepository rejected");
+    }
+    return { enabled: payload.enabled };
+  }
+
   async resumeAgent(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,

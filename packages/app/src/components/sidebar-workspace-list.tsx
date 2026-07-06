@@ -50,6 +50,7 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  Star,
   Trash2,
 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
@@ -151,6 +152,7 @@ const ThemedSettings = withUnistyles(Settings);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedStar = withUnistyles(Star);
 
 const foregroundColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
@@ -287,6 +289,7 @@ interface WorkspaceRowInnerProps {
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
 }
@@ -546,6 +549,7 @@ const markAsReadLeadingIcon = (
 );
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
+const chatRepositoryLeadingIcon = <ThemedStar size={14} uniProps={foregroundMutedColorMapping} />;
 const openInNewWindowLeadingIcon = (
   <ThemedExternalLink size={14} uniProps={foregroundMutedColorMapping} />
 );
@@ -651,6 +655,7 @@ function WorkspaceRowRightGroup({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  onToggleChatRepository,
 }: {
   workspace: SidebarWorkspaceEntry;
   isHovered: boolean;
@@ -667,6 +672,7 @@ function WorkspaceRowRightGroup({
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
 }) {
   const { t } = useTranslation();
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
@@ -695,9 +701,11 @@ function WorkspaceRowRightGroup({
             {onArchive ? (
               <WorkspaceKebabMenu
                 workspaceKey={workspace.workspaceKey}
+                isChatRepository={workspace.chatRepository ?? false}
                 onCopyPath={onCopyPath}
                 onCopyBranchName={onCopyBranchName}
                 onRename={onRename}
+                onToggleChatRepository={onToggleChatRepository}
                 onMarkAsRead={onMarkAsRead}
                 onArchive={onArchive}
                 archiveLabel={archiveLabel}
@@ -715,9 +723,11 @@ function WorkspaceRowRightGroup({
 
 function WorkspaceKebabMenu({
   workspaceKey,
+  isChatRepository,
   onCopyPath,
   onCopyBranchName,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -726,9 +736,11 @@ function WorkspaceKebabMenu({
   archiveShortcutKeys,
 }: {
   workspaceKey: string;
+  isChatRepository: boolean;
   onCopyPath?: () => void;
   onCopyBranchName?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
@@ -778,6 +790,19 @@ function WorkspaceKebabMenu({
             onSelect={onRename}
           >
             {t("sidebar.workspace.actions.rename")}
+          </DropdownMenuItem>
+        ) : null}
+        {onToggleChatRepository ? (
+          <DropdownMenuItem
+            testID={`sidebar-workspace-menu-chat-repository-${workspaceKey}`}
+            leading={chatRepositoryLeadingIcon}
+            onSelect={onToggleChatRepository}
+          >
+            {t(
+              isChatRepository
+                ? "sidebar.workspace.actions.unsetChatRepository"
+                : "sidebar.workspace.actions.setChatRepository",
+            )}
           </DropdownMenuItem>
         ) : null}
         {onMarkAsRead ? (
@@ -1438,6 +1463,8 @@ function WorkspaceRowInner({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  onToggleChatRepository,
+  onMarkAsRead,
   archiveShortcutKeys,
 }: WorkspaceRowInnerProps) {
   const _isCompact = useIsCompactFormFactor();
@@ -1525,6 +1552,8 @@ function WorkspaceRowInner({
                   onCopyBranchName={onCopyBranchName}
                   onCopyPath={onCopyPath}
                   onRename={onRename}
+                  onToggleChatRepository={onToggleChatRepository}
+                  onMarkAsRead={onMarkAsRead}
                 />
               </SidebarWorkspaceRowContent>
             </Pressable>
@@ -1640,6 +1669,28 @@ function WorkspaceRowWithMenu({
       await client.setWorkspaceTitle(workspace.workspaceId, title.length === 0 ? null : title);
     },
   });
+  const chatRepositoryMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const client = getHostRuntimeStore().getClient(workspace.serverId);
+      if (!client) {
+        throw new Error(t("sidebar.workspace.toasts.hostDisconnected"));
+      }
+      await client.setWorkspaceChatRepository(workspace.workspaceId, enabled);
+    },
+    onSuccess: (_, enabled) => {
+      toast.show(
+        enabled
+          ? t("sidebar.workspace.toasts.chatRepositorySet")
+          : t("sidebar.workspace.toasts.chatRepositoryUnset"),
+        { variant: "success" },
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : t("sidebar.workspace.toasts.chatRepositoryFailed"),
+      );
+    },
+  });
 
   const handleOpenRename = useCallback(() => {
     setIsRenameOpen(true);
@@ -1655,6 +1706,9 @@ function WorkspaceRowWithMenu({
     },
     [renameMutation],
   );
+  const handleToggleChatRepository = useCallback(() => {
+    chatRepositoryMutation.mutate(!(workspace.chatRepository ?? false));
+  }, [chatRepositoryMutation, workspace.chatRepository]);
 
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
   const { hasClearableAttention, clearAttention } = useClearWorkspaceAttention({
@@ -1704,6 +1758,7 @@ function WorkspaceRowWithMenu({
         onCopyBranchName={canCopyBranchName ? handleCopyBranchName : undefined}
         onCopyPath={handleCopyPath}
         onRename={handleOpenRename}
+        onToggleChatRepository={handleToggleChatRepository}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         archiveShortcutKeys={selected ? archiveShortcutKeys : null}
       />

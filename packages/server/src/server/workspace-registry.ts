@@ -53,6 +53,7 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  chatRepository: z.boolean().optional().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
   archivedAt: z.string().nullable(),
@@ -254,6 +255,7 @@ export function createPersistedWorkspaceRecord(input: {
   title?: string | null;
   branch?: string | null;
   baseBranch?: string | null;
+  chatRepository?: boolean;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string | null;
@@ -263,6 +265,7 @@ export function createPersistedWorkspaceRecord(input: {
     title: input.title ?? null,
     branch: input.branch ?? null,
     baseBranch: input.baseBranch ?? null,
+    chatRepository: input.chatRepository ?? false,
     archivedAt: input.archivedAt ?? null,
   });
 }

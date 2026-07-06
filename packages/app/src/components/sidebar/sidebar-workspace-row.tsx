@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useState, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text, Pressable, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { Archive, CircleCheck, Copy, MoreVertical, Pencil } from "lucide-react-native";
+import { Archive, CircleCheck, Copy, MoreVertical, Pencil, Star } from "lucide-react-native";
 import { useMutation } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import type { Theme } from "@/styles/theme";
@@ -46,12 +46,14 @@ const ThemedCopy = withUnistyles(Copy);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
+const ThemedStar = withUnistyles(Star);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
 const markAsReadLeadingIcon = (
   <ThemedCircleCheck size={14} uniProps={foregroundMutedColorMapping} />
 );
+const chatRepositoryLeadingIcon = <ThemedStar size={14} uniProps={foregroundMutedColorMapping} />;
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 
 function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }) {
@@ -178,6 +180,28 @@ export function SidebarWorkspaceRow({
       await client.setWorkspaceTitle(workspace.workspaceId, title.length === 0 ? null : title);
     },
   });
+  const chatRepositoryMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const client = getHostRuntimeStore().getClient(workspace.serverId);
+      if (!client) {
+        throw new Error(t("sidebar.workspace.toasts.hostDisconnected"));
+      }
+      await client.setWorkspaceChatRepository(workspace.workspaceId, enabled);
+    },
+    onSuccess: (_, enabled) => {
+      toast.show(
+        enabled
+          ? t("sidebar.workspace.toasts.chatRepositorySet")
+          : t("sidebar.workspace.toasts.chatRepositoryUnset"),
+        { variant: "success" },
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : t("sidebar.workspace.toasts.chatRepositoryFailed"),
+      );
+    },
+  });
 
   const handleOpenRename = useCallback(() => {
     setIsRenameOpen(true);
@@ -193,6 +217,9 @@ export function SidebarWorkspaceRow({
     },
     [renameMutation],
   );
+  const handleToggleChatRepository = useCallback(() => {
+    chatRepositoryMutation.mutate(!(workspace.chatRepository ?? false));
+  }, [chatRepositoryMutation, workspace.chatRepository]);
 
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
   const { hasClearableAttention, clearAttention } = useClearWorkspaceAttention({
@@ -244,6 +271,7 @@ export function SidebarWorkspaceRow({
         onCopyBranchName={canCopyBranchName ? handleCopyBranchName : undefined}
         onCopyPath={handleCopyPath}
         onRename={handleOpenRename}
+        onToggleChatRepository={handleToggleChatRepository}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         archiveShortcutKeys={selected ? archiveShortcutKeys : null}
       />
@@ -280,6 +308,7 @@ interface WorkspaceRowBodyProps {
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
 }
@@ -303,6 +332,7 @@ function WorkspaceRowBody({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   archiveShortcutKeys,
 }: WorkspaceRowBodyProps) {
@@ -389,6 +419,7 @@ function WorkspaceRowBody({
                   onCopyBranchName={onCopyBranchName}
                   onCopyPath={onCopyPath}
                   onRename={onRename}
+                  onToggleChatRepository={onToggleChatRepository}
                   onMarkAsRead={onMarkAsRead}
                 />
               </SidebarWorkspaceRowContent>
@@ -416,6 +447,7 @@ function WorkspaceRowTrailingActions({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  onToggleChatRepository,
 }: {
   workspace: SidebarWorkspaceEntry;
   isHovered: boolean;
@@ -432,6 +464,7 @@ function WorkspaceRowTrailingActions({
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
 }) {
   const { t } = useTranslation();
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
@@ -460,9 +493,11 @@ function WorkspaceRowTrailingActions({
             {onArchive ? (
               <WorkspaceKebabMenu
                 workspaceKey={workspace.workspaceKey}
+                isChatRepository={workspace.chatRepository ?? false}
                 onCopyPath={onCopyPath}
                 onCopyBranchName={onCopyBranchName}
                 onRename={onRename}
+                onToggleChatRepository={onToggleChatRepository}
                 onMarkAsRead={onMarkAsRead}
                 onArchive={onArchive}
                 archiveLabel={archiveLabel}
@@ -480,9 +515,11 @@ function WorkspaceRowTrailingActions({
 
 function WorkspaceKebabMenu({
   workspaceKey,
+  isChatRepository,
   onCopyPath,
   onCopyBranchName,
   onRename,
+  onToggleChatRepository,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -491,9 +528,11 @@ function WorkspaceKebabMenu({
   archiveShortcutKeys,
 }: {
   workspaceKey: string;
+  isChatRepository: boolean;
   onCopyPath?: () => void;
   onCopyBranchName?: () => void;
   onRename?: () => void;
+  onToggleChatRepository?: () => void;
   onMarkAsRead?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
@@ -543,6 +582,19 @@ function WorkspaceKebabMenu({
             onSelect={onRename}
           >
             {t("sidebar.workspace.actions.rename")}
+          </DropdownMenuItem>
+        ) : null}
+        {onToggleChatRepository ? (
+          <DropdownMenuItem
+            testID={`sidebar-workspace-menu-chat-repository-${workspaceKey}`}
+            leading={chatRepositoryLeadingIcon}
+            onSelect={onToggleChatRepository}
+          >
+            {t(
+              isChatRepository
+                ? "sidebar.workspace.actions.unsetChatRepository"
+                : "sidebar.workspace.actions.setChatRepository",
+            )}
           </DropdownMenuItem>
         ) : null}
         {onMarkAsRead ? (
