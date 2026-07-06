@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
 import {
   DropdownMenu,
@@ -170,6 +170,7 @@ function TextRow({
   onChangeText: (value: string) => void;
   secureTextEntry?: boolean;
 }) {
+  const { theme } = useUnistyles();
   return (
     <View style={ROW_WITH_BORDER_STYLE}>
       <View style={settingsStyles.rowContent}>
@@ -182,6 +183,7 @@ function TextRow({
         onChangeText={onChangeText}
         autoCapitalize="none"
         autoCorrect={false}
+        placeholderTextColor={theme.colors.foregroundMuted}
         secureTextEntry={secureTextEntry}
         style={styles.input}
       />
