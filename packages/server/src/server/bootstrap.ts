@@ -451,6 +451,23 @@ function resolveExpressTrustProxySetting(config: PaseoDaemonConfig): true | stri
   return config.trustedProxies ?? ["loopback"];
 }
 
+interface InitialMcpConnections {
+  servers: Record<string, { enabled: boolean; server: McpServerConfig }>;
+}
+
+function createInitialMcpConnections(
+  connections: PaseoDaemonConfig["mcpConnections"],
+): InitialMcpConnections {
+  const servers: InitialMcpConnections["servers"] = {};
+  for (const [name, connection] of Object.entries(connections ?? {})) {
+    servers[name] = {
+      enabled: connection.enabled ?? true,
+      server: connection.server,
+    };
+  }
+  return { servers };
+}
+
 function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDaemonConfig {
   const providers: MutableDaemonConfig["providers"] = Object.fromEntries(
     Object.entries(config.providerOverrides ?? {}).map(([providerId, override]) => {
@@ -469,7 +486,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? false },
     chat: { defaults: config.chatDefaults ?? {} },
-    mcpConnections: { servers: config.mcpConnections ?? {} },
+    mcpConnections: createInitialMcpConnections(config.mcpConnections),
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
