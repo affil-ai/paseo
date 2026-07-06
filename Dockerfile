@@ -1,7 +1,5 @@
-# syntax=docker/dockerfile:1
-
 ARG NODE_IMAGE=node:22-bookworm-slim
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS source-pack
+FROM ${NODE_IMAGE} AS source-pack
 
 ARG PASEO_VERSION
 
