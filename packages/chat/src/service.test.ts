@@ -75,6 +75,7 @@ function fakeDaemonClient(
   return {
     sendAgentMessage: async () => {},
     fetchAgent: async () => ({ agent: { cwd, labels } }),
+    fetchAgentTimeline: async () => ({ window: { nextSeq: 10 } }),
   };
 }
 
@@ -179,6 +180,39 @@ describe("ChatBridgeService", () => {
     await expect(
       service.reply({ officeAgentId: "agent-office", message: "hello" }),
     ).rejects.toMatchObject({ code: "ambiguous_current_binding" });
+  });
+
+  it("records explicit replies as Slack-visible manual deliveries", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await store.startManualReplyTurn({
+      externalThreadId: "slack:C1:111.222",
+      turnId: "turn-1",
+      agentId: "agent-office",
+      startedSeq: 5,
+      reminderAttempted: false,
+    });
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await service.reply({ officeAgentId: "agent-office", message: "manual reply" });
+
+    await expect(store.getManualReplyTurn("slack:C1:111.222")).resolves.toMatchObject({
+      deliverySeq: 10,
+    });
   });
 
   it("explicit replies suppress active auto relay for that binding", async () => {

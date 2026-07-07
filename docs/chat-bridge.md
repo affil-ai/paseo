@@ -61,6 +61,14 @@ Slack output must stay in the user's message thread:
 - Slack-bound markdown converts valid GitHub/Markdown table blocks into native Slack table blocks; the Paseo UI keeps rendering the original markdown.
 - If a Slack-bound chat tool message expands to multiple posts because it contains multiple tables, file uploads stay attached to the first emitted post.
 
+Manual relay mode keeps progress updates explicit: the office agent calls `chat.reply` /
+`chat.sendFile` / `chat.sendImage` for Slack-visible updates instead of relying on automatic
+final-message relay. To prevent silent endings, manual mode persists a final-reply watchdog for
+each inbound Slack turn. When the agent finishes without a Slack-visible delivery after the
+latest relayable assistant text, the bridge sends one reminder turn asking the same office agent
+to post the missing final reply. If the reminder also finishes without delivery, the bridge posts
+a generic fallback and clears the watchdog to avoid loops.
+
 Slack input should match the app's default send behavior:
 
 - If a human replies while the bound office agent is still running, the follow-up interrupts the

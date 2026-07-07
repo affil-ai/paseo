@@ -16,6 +16,13 @@ interface RelayTurnInput {
   postFirstReply: boolean;
 }
 
+interface ManualWatchdogInput {
+  externalThreadId: string;
+  agentId: string;
+  turnId: string;
+  startedSeq: number;
+}
+
 type TimelineItem =
   | { type: "assistant_message"; text: string }
   | { type: "reasoning"; text: string };
@@ -221,6 +228,171 @@ describe("ChatBridge auto relay", () => {
       });
     } finally {
       await rm(result.stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ChatBridge manual final reply watchdog", () => {
+  async function createManualWatchdogHarness(input?: { deliverySeq?: number; reminder?: boolean }) {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    const externalThreadId = "slack:D123:111.222";
+    const rootAgentId = "agent-1";
+    const turnId = input?.reminder ? "turn-1:final-reply-reminder" : "turn-1";
+    const store = new ThreadSessionStore(stateDir);
+    const postedMessages: unknown[] = [];
+    const sendCalls: Array<{ agentId: string; text: string }> = [];
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId,
+      rootAgentId,
+      muted: false,
+      activeRelayId: null,
+      title: "existing",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.startManualReplyTurn({
+      externalThreadId,
+      turnId,
+      agentId: rootAgentId,
+      startedSeq: 5,
+      reminderAttempted: input?.reminder ?? false,
+    });
+    if (input?.deliverySeq !== undefined) {
+      await store.recordManualVisibleDelivery({
+        externalThreadId,
+        agentId: rootAgentId,
+        deliverySeq: input.deliverySeq,
+      });
+    }
+
+    let waitCount = 0;
+    const client = {
+      waitForFinish: async () => {
+        waitCount += 1;
+        if (waitCount === 1) return { status: "idle", final: true };
+        return new Promise(() => {});
+      },
+      fetchAgentTimeline: async () => ({
+        window: { nextSeq: 9 },
+        entries: [timelineEntry(8, { type: "assistant_message", text: "Final internal answer" })],
+        agent: { status: "idle" },
+      }),
+      sendAgentMessage: async (agentId: string, text: string) => {
+        sendCalls.push({ agentId, text });
+      },
+      getLastServerInfoMessage: () => ({ serverId: "local" }),
+    };
+    const bridge = new ChatBridge(
+      {
+        stateDir,
+        relayMode: "manual",
+        officeRepoPath: "/tmp/office",
+        provider: "pi",
+        model: "openai-codex/gpt-5.5",
+        modeId: "high",
+        deepLinkBaseUrl: "https://paseo.example",
+      } as never,
+      client as never,
+      store,
+      { answerPendingQuestion: async () => false } as never,
+      {} as never,
+      {
+        postMessage: async (threadId: string, message: unknown) => {
+          postedMessages.push(message);
+          return { id: "fallback-message", threadId, raw: null };
+        },
+      },
+    );
+    const enforceManualFinalReply = (
+      bridge as unknown as {
+        enforceManualFinalReply: (input: ManualWatchdogInput) => Promise<void>;
+      }
+    ).enforceManualFinalReply;
+
+    return {
+      stateDir,
+      store,
+      externalThreadId,
+      rootAgentId,
+      turnId,
+      sendCalls,
+      postedMessages,
+      enforce: () =>
+        enforceManualFinalReply.call(bridge, {
+          externalThreadId,
+          agentId: rootAgentId,
+          turnId,
+          startedSeq: 5,
+        }),
+    };
+  }
+
+  it("reminds the same agent when a manual Slack turn ends without chat delivery", async () => {
+    const harness = await createManualWatchdogHarness();
+    try {
+      await harness.enforce();
+
+      expect(harness.sendCalls).toEqual([
+        {
+          agentId: harness.rootAgentId,
+          text: [
+            "You ended the Slack turn without sending a Slack-visible final response.",
+            "Send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
+            `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+          ].join("\n"),
+        },
+      ]);
+      await expect(
+        harness.store.getManualReplyTurn(harness.externalThreadId),
+      ).resolves.toMatchObject({
+        turnId: "turn-1:final-reply-reminder",
+        reminderAttempted: true,
+        deliverySeq: null,
+      });
+    } finally {
+      await rm(harness.stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a manual progress reply followed by later assistant text as missing final delivery", async () => {
+    const harness = await createManualWatchdogHarness({ deliverySeq: 6 });
+    try {
+      await harness.enforce();
+
+      expect(harness.sendCalls).toHaveLength(1);
+      expect(harness.sendCalls[0]?.text).toContain(
+        "without sending a Slack-visible final response",
+      );
+    } finally {
+      await rm(harness.stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the watchdog when chat delivery happens after the latest assistant text", async () => {
+    const harness = await createManualWatchdogHarness({ deliverySeq: 9 });
+    try {
+      await harness.enforce();
+
+      expect(harness.sendCalls).toEqual([]);
+      await expect(harness.store.getManualReplyTurn(harness.externalThreadId)).resolves.toBeNull();
+    } finally {
+      await rm(harness.stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("posts one fallback instead of looping when the reminder turn also omits chat delivery", async () => {
+    const harness = await createManualWatchdogHarness({ reminder: true });
+    try {
+      await harness.enforce();
+
+      expect(harness.sendCalls).toEqual([]);
+      expect(harness.postedMessages).toEqual([
+        "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
+      ]);
+      await expect(harness.store.getManualReplyTurn(harness.externalThreadId)).resolves.toBeNull();
+    } finally {
+      await rm(harness.stateDir, { recursive: true, force: true });
     }
   });
 });

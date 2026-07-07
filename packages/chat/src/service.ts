@@ -76,8 +76,16 @@ interface ChatLike {
   thread(threadId: string): Thread;
 }
 
+interface TimelineSeqSnapshot {
+  window: { nextSeq: number };
+}
+
 interface ChatServiceDaemonClient {
   sendAgentMessage(agentId: string, message: string): Promise<unknown>;
+  fetchAgentTimeline(
+    agentId: string,
+    options: { direction: "tail"; projection: "canonical"; limit: number },
+  ): Promise<TimelineSeqSnapshot>;
 }
 
 export class ChatToolError extends Error {
@@ -244,6 +252,10 @@ export class ChatBridgeService {
         this.assertBindingOwner(input.officeAgentId, existingBinding);
         if (input.subscribe ?? true) await this.chat.thread(externalThreadId).subscribe();
         await this.postRemainingMessages(existingBinding.externalThreadId, messages);
+        await this.recordManualVisibleDelivery(
+          existingBinding.externalThreadId,
+          input.officeAgentId,
+        );
         await this.suppressActiveAutoRelay(existingBinding.externalThreadId);
         const result = this.resultFromBinding(existingBinding);
         await this.completeIdempotentResult(input.idempotencyKey, result);
@@ -277,6 +289,7 @@ export class ChatBridgeService {
         files,
       );
       await this.postMessages(binding.externalThreadId, messages);
+      await this.recordManualVisibleDelivery(binding.externalThreadId, input.officeAgentId);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = this.resultFromBinding(binding);
       await this.completeIdempotentResult(input.idempotencyKey, result);
@@ -296,6 +309,7 @@ export class ChatBridgeService {
         [toFileUpload(input.file)],
       );
       await this.postMessages(binding.externalThreadId, messages);
+      await this.recordManualVisibleDelivery(binding.externalThreadId, input.officeAgentId);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = { ...this.resultFromBinding(binding), fileId: input.file.filename };
       await this.completeIdempotentResult(input.idempotencyKey, result);
@@ -385,6 +399,30 @@ export class ChatBridgeService {
     await this.store.updateBinding(externalThreadId, (binding) => {
       binding.activeRelayId = null;
     });
+  }
+
+  private async recordManualVisibleDelivery(
+    externalThreadId: string,
+    officeAgentId: string,
+  ): Promise<void> {
+    try {
+      const timeline = await this.client.fetchAgentTimeline(officeAgentId, {
+        direction: "tail",
+        projection: "canonical",
+        limit: 1,
+      });
+      await this.store.recordManualVisibleDelivery({
+        externalThreadId,
+        agentId: officeAgentId,
+        deliverySeq: timeline.window.nextSeq,
+      });
+    } catch (error) {
+      console.warn("Failed to record manual chat delivery for watchdog", {
+        externalThreadId,
+        officeAgentId,
+        error,
+      });
+    }
   }
 
   private async ensureDestinationBinding(input: SendFileInput): Promise<ChatBinding> {
@@ -505,7 +543,9 @@ export class ChatBridgeService {
     conversationId?: string,
   ): Promise<ChatBinding> {
     if (conversationId) {
-      const binding = await this.store.getConversation(conversationId);
+      const binding =
+        (await this.store.getConversation(conversationId)) ??
+        (await this.store.getBinding(conversationId));
       if (!binding)
         throw new ChatToolError(
           "conversation_not_found",
