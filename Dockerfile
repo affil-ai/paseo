@@ -41,6 +41,7 @@ ENV HOME=/home/paseo \
     XDG_DATA_HOME=/home/paseo/.local/share \
     XDG_STATE_HOME=/home/paseo/.local/state \
     XDG_CACHE_HOME=/home/paseo/.cache \
+    PLAYWRIGHT_BROWSERS_PATH=/home/paseo/.cache/ms-playwright \
     ONNXRUNTIME_NODE_INSTALL=skip
 
 RUN set -eux; \
@@ -48,13 +49,49 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
       bash \
       ca-certificates \
+      chromium \
       curl \
+      fonts-freefont-ttf \
+      fonts-ipafont-gothic \
+      fonts-liberation \
+      fonts-noto-color-emoji \
+      fonts-tlwg-loma-otf \
+      fonts-unifont \
+      fonts-wqy-zenhei \
       git \
       gosu \
       lbzip2 \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libatspi2.0-0 \
+      libcairo2 \
+      libcups2 \
+      libdbus-1-3 \
+      libdrm2 \
+      libgbm1 \
+      libglib2.0-0 \
+      libgtk-3-0 \
+      libnspr4 \
+      libnss3 \
+      libpango-1.0-0 \
+      libx11-6 \
+      libx11-xcb1 \
+      libxcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxext6 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      libxshmfence1 \
+      libxss1 \
+      libxtst6 \
       openssh-client \
       procps \
-      tini; \
+      tini \
+      xfonts-scalable \
+      xvfb; \
     mkdir -p -m 755 /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
@@ -67,6 +104,7 @@ COPY --from=source-pack /tmp/paseo-packs /tmp/paseo-packs
 RUN set -eux; \
     npm install -g /tmp/paseo-packs/*.tgz; \
     rm -rf /tmp/paseo-packs; \
+    npm install -g pnpm bun; \
     npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai; \
     npm install -g @earendil-works/pi-coding-agent --ignore-scripts; \
     npm cache clean --force; \
@@ -102,7 +140,8 @@ RUN set -eux; \
       "$XDG_CONFIG_HOME" \
       "$XDG_DATA_HOME" \
       "$XDG_STATE_HOME" \
-      "$XDG_CACHE_HOME"; \
+      "$XDG_CACHE_HOME" \
+      "$PLAYWRIGHT_BROWSERS_PATH"; \
     chown -R paseo:paseo /home/paseo /workspace
 
 COPY docker/base/rootfs/ /
