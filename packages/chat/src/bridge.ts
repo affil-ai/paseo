@@ -21,6 +21,7 @@ import type { FocusRelay } from "./focus.js";
 import {
   captureThreadContext,
   normalizeMessage,
+  shouldIgnoreAuthor,
   shouldIgnoreAmbient,
   titleFromText,
 } from "./intake/slack.js";
@@ -335,6 +336,7 @@ export class ChatBridge {
     message: Message,
     source: "mention" | "dm" | "subscribed",
   ): Promise<void> {
+    if (shouldIgnoreAuthor(message)) return;
     const normalized = await normalizeMessage(thread, message, {
       attachmentDir: join(this.config.stateDir, "inbound-attachments"),
     });

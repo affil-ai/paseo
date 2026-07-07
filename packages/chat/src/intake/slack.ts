@@ -252,3 +252,7 @@ export function shouldIgnoreAmbient(
 ): boolean {
   return !thread.isDM && !hasSession && !message.isMention;
 }
+
+export function shouldIgnoreAuthor(message: Message): boolean {
+  return Boolean(message.author.isBot || message.author.isMe);
+}

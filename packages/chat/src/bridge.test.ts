@@ -575,4 +575,75 @@ describe("ChatBridge follow-up delivery", () => {
       await rm(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("ignores bot-authored Slack messages on existing sessions", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const rootAgentId = "agent-1";
+      const store = new ThreadSessionStore(stateDir);
+      await store.upsertSession({
+        kind: "inbound-session",
+        externalThreadId,
+        rootAgentId,
+        muted: false,
+        activeRelayId: null,
+        title: "existing",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const sendCalls: Array<{ agentId: string; text: string }> = [];
+      const client = {
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 1 } }),
+        sendAgentMessage: async (agentId: string, text: string) => {
+          sendCalls.push({ agentId, text });
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "Final response: stopped.",
+        raw: { text: "Final response: stopped.", thread_ts: "111.222" },
+        author: {
+          userId: "U0BEGMBCB2L",
+          userName: "office-of-the-cto",
+          fullName: "Office of the CTO",
+          isBot: true,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: false,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "subscribed");
+
+      expect(sendCalls).toHaveLength(0);
+      expect(await store.hasEventReceipt(`slack:${externalThreadId}:333.444`)).toBe(false);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });
