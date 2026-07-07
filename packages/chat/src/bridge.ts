@@ -26,6 +26,7 @@ import {
   titleFromText,
 } from "./intake/slack.js";
 import {
+  assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
   externalIntakeAgentPrompt,
@@ -424,6 +425,7 @@ export class ChatBridge {
   async createExternalSession(input: {
     externalThreadId: string;
     title: string;
+    systemPrompt?: string;
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;
     attachments?: AgentAttachment[];
@@ -445,6 +447,7 @@ export class ChatBridge {
       modeId: this.config.modeId,
       model: this.config.model,
       thinkingOptionId: this.config.thinkingOptionId,
+      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
       initialPrompt: input.initialPrompt,
       images: input.images ?? [],
       attachments: input.attachments ?? [],
@@ -505,9 +508,11 @@ export class ChatBridge {
     const session = await this.createExternalSession({
       externalThreadId: normalized.externalThreadId,
       title,
-      initialPrompt: assembleInitialPrompt({
+      systemPrompt: assembleExternalIntakeSystemPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,
+      }),
+      initialPrompt: assembleInitialPrompt({
         sender: normalized.sender,
         text: normalized.cleanedText,
         threadContext: thread.isDM ? "" : await captureThreadContext(thread, message.id),

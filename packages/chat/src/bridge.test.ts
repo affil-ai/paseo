@@ -128,6 +128,63 @@ describe("buildStartedCardUrl", () => {
   });
 });
 
+describe("ChatBridge session creation", () => {
+  it("passes external intake instructions as provider systemPrompt", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const store = new ThreadSessionStore(stateDir);
+      const createAgentCalls: unknown[] = [];
+      const client = {
+        createWorkspace: async () => ({
+          workspace: { id: "workspace-1" },
+        }),
+        createAgent: async (input: unknown) => {
+          createAgentCalls.push(input);
+          return { id: "agent-1" };
+        },
+        getLastServerInfoMessage: () => ({ serverId: "local" }),
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+      const thread = {
+        id: "slack:D123:111.222",
+        adapter: {},
+        post: async () => {},
+      };
+
+      await bridge.createExternalSession({
+        externalThreadId: "slack:D123:111.222",
+        title: "Slack request",
+        systemPrompt: "system rules",
+        initialPrompt: "Jane: please check this",
+        thread: thread as never,
+      });
+
+      expect(createAgentCalls).toEqual([
+        expect.objectContaining({
+          systemPrompt: "system rules",
+          initialPrompt: "Jane: please check this",
+        }),
+      ]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("ChatBridge auto relay", () => {
   it("does not post system-error-only artifacts or fall back to Done", async () => {
     const result = await runAutoRelayWithTimeline([

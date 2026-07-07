@@ -28,21 +28,21 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 - Use chat.send again mid-turn whenever you have a meaningful progress update, blocker, decision point, or partial result the user should see.
 - End every Slack turn with a final chat.send to the current Slack thread containing the completed answer, result, file/image, handoff summary, or brief stopped/declined status; your final assistant message is not posted automatically and is not visible in Slack.
 - The only exception is when the Slack user explicitly tells you not to send another Slack message.
-- Use chat.send for text, files/images, current thread replies, and new person/channel/conversation destinations. Use chat.ask when you need a reply from a person, channel, conversation, or current thread.`;
+- Use chat.send for Slack-visible text, files/images, and current-thread replies. Do not start separate chat conversations unless the user explicitly asks you to contact someone elsewhere.`;
   }
 
   return `Slack delivery mode: automatic.
 - Final assistant text is automatically posted to Slack.
 - Do not call chat.send for the current thread unless you intentionally want to override automatic relay for the turn.
-- Use chat.send/chat.ask only for new conversations, other destinations, blocking asks, or explicit file/image uploads.`;
+- Use chat.send only for new conversations the user explicitly asks you to start, other explicit destinations, or explicit file/image uploads.`;
 }
 
 function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
-    return "This message came from Slack. Manual Slack delivery is enabled: immediately acknowledge this message with `chat.send` before doing tool work; use `chat.send` again mid-turn for meaningful progress updates, blockers, decision points, partial results, or files/images; and end the turn with a final `chat.send` to the current Slack thread containing the completed answer, result, file/image, handoff summary, or brief stopped/declined status. Your final assistant message is not sent automatically and is not visible in Slack. The only exception is when the Slack user explicitly tells you not to send another Slack message.";
+    return "This message came from Slack. Manual Slack delivery is enabled; follow the Slack delivery mode instructions from your system prompt for this turn.";
   }
 
-  return "This message came from Slack. Your final assistant message will be sent to Slack automatically; do not call `chat.send` for this thread unless you intentionally want to override the automatic reply.";
+  return "This message came from Slack. Automatic Slack delivery is enabled; follow the Slack delivery mode instructions from your system prompt for this turn.";
 }
 
 export function incomingEmailInstruction(
@@ -66,6 +66,16 @@ export function externalIntakeAgentPrompt(relayMode: ChatRelayMode): string {
   return `${EXTERNAL_INTAKE_AGENT_PROMPT}\n\n${relayModePrompt(relayMode)}`;
 }
 
+export function assembleExternalIntakeSystemPrompt(input: {
+  basePrompt?: string;
+  customPrompt?: string;
+}): string {
+  return [input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT, input.customPrompt]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function loadOfficePrompt(config: ChatBridgeConfig): Promise<string> {
   if (!config.officePromptPath) return "";
   return fs.readFile(config.officePromptPath, "utf8");
@@ -77,15 +87,13 @@ export function senderLine(sender: SenderIdentity): string {
 }
 
 export function assembleInitialPrompt(input: {
-  basePrompt?: string;
-  customPrompt?: string;
   sender: SenderIdentity;
   text: string;
   threadContext?: string;
   relayMode: ChatRelayMode;
   sourceInstruction?: string;
 }): string {
-  return `<office_agent_prompt>\n${input.basePrompt ?? EXTERNAL_INTAKE_AGENT_PROMPT}\n${input.customPrompt ? `\n${input.customPrompt}\n` : ""}</office_agent_prompt>\n\n${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${input.sourceInstruction ?? incomingSlackInstruction(input.relayMode)}\n\n${senderLine(input.sender)}: ${input.text}`;
+  return `${input.threadContext ? `Prior thread context:\n${input.threadContext}\n\n` : ""}${input.sourceInstruction ?? incomingSlackInstruction(input.relayMode)}\n\n${senderLine(input.sender)}: ${input.text}`;
 }
 
 export function assembleFollowupPrompt(

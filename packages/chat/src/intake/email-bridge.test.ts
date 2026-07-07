@@ -51,6 +51,7 @@ interface Harness {
   createdSessions: Array<{
     externalThreadId: string;
     title: string;
+    systemPrompt: string | undefined;
     initialPrompt: string;
     images: unknown;
     attachments: unknown;
@@ -156,6 +157,7 @@ async function createHarness(
         harness.createdSessions.push({
           externalThreadId: input.externalThreadId,
           title: input.title,
+          systemPrompt: input.systemPrompt,
           initialPrompt: input.initialPrompt,
           images: input.images,
           attachments: input.attachments,
@@ -255,9 +257,9 @@ describe("EmailIntakeBridge", () => {
     expect(session?.externalThreadId).toBe("slack:C42:111.222");
     expect(session?.title).toBe("Support: Cannot log in");
     expect(session?.initialPrompt).toContain("inbound support email");
-    expect(session?.initialPrompt).toContain("office custom prompt");
-    expect(session?.initialPrompt).toContain("Support email triage:");
     expect(session?.initialPrompt).toContain("Subject: Cannot log in");
+    expect(session?.systemPrompt).toContain("office custom prompt");
+    expect(session?.systemPrompt).toContain("Support email triage:");
     expect(harness.relays).toEqual([
       {
         externalThreadId: "slack:C42:111.222",

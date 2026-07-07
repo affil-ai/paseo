@@ -623,18 +623,19 @@ Pacific") and confirm the scheduled time back, since "9am" alone is ambiguous.
 
 ## Office system prompt — **v1**
 
-The initial prompt sent to the agent is **assembled**, not just the user's raw text. The
-office agent's behavior is shaped almost entirely by a configurable system-prompt block, since
-the bridge offloads all routing decisions to the agent:
+Slack-created office agents receive durable bridge behavior as a provider `systemPrompt`, since
+the bridge offloads routing and delivery decisions to the agent:
 
 ```
-<office_agent_prompt>
+systemPrompt:
   <base intake instructions>          ← hardcoded bridge constant
+  <Slack relay-mode instructions>     ← auto/manual delivery contract
   <custom office prompt>              ← from config (promptPath)
-</office_agent_prompt>
 
-User request:
-<the actual message text (+ captured thread context, attachments)>
+initialPrompt:
+  <captured thread context, if any>
+  <per-message source line>
+  <sender>: <the actual message text>
 ```
 
 Set the custom prompt with `PASEO_CHAT_OFFICE_PROMPT_PATH`; the office deployment uses the structured office-repo path `/home/olumbe/code/office/prompts/chat/slack-office-agent.md`.
@@ -649,8 +650,8 @@ The custom office prompt is where you encode the operator's identity and guardra
 - "Ask for confirmation before destructive or external write actions."
 - "Summarize actions clearly back to the thread."
 
-This is the _initial-prompt_ layer; a persistent provider system prompt (Claude/Pi) is a
-separate provider concern and not something the bridge sets per message.
+The per-message initial prompt should carry only message-specific context. Do not put durable
+Slack delivery rules there; update the system prompt builder instead.
 
 ## Default provider — **v1**
 

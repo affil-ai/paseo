@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
+  externalIntakeAgentPrompt,
   incomingEmailInstruction,
 } from "./prompt.js";
 
@@ -12,20 +14,31 @@ const sender = {
 };
 
 describe("Slack chat prompt delivery instructions", () => {
-  it("adds the manual-mode chat.send instruction next to initial Slack messages", () => {
+  it("puts durable manual-mode Slack delivery instructions in the system prompt", () => {
+    const prompt = assembleExternalIntakeSystemPrompt({
+      basePrompt: externalIntakeAgentPrompt("manual"),
+      customPrompt: "custom office rules",
+    });
+
+    expect(prompt).toContain("Slack delivery mode: manual.");
+    expect(prompt).toContain("End every Slack turn with a final chat.send");
+    expect(prompt).toContain("not visible in Slack");
+    expect(prompt).toContain("The only exception");
+    expect(prompt).not.toContain("chat.ask");
+    expect(prompt).toContain("custom office rules");
+  });
+
+  it("keeps manual-mode Slack delivery rules out of the initial user prompt", () => {
     const prompt = assembleInitialPrompt({
-      basePrompt: "base",
       sender,
       text: "Can you check this?",
       relayMode: "manual",
     });
 
     expect(prompt).toContain("This message came from Slack.");
-    expect(prompt).toContain("immediately acknowledge this message with `chat.send`");
-    expect(prompt).toContain("use `chat.send` again mid-turn");
-    expect(prompt).toContain("end the turn with a final `chat.send`");
-    expect(prompt).toContain("not visible in Slack");
-    expect(prompt).toContain("The only exception");
+    expect(prompt).toContain("follow the Slack delivery mode instructions from your system prompt");
+    expect(prompt).not.toContain("End every Slack turn");
+    expect(prompt).not.toContain("final `chat.send`");
     expect(prompt).toContain("Jane Doe (@jane): Can you check this?");
   });
 
@@ -33,15 +46,14 @@ describe("Slack chat prompt delivery instructions", () => {
     const prompt = assembleFollowupPrompt(sender, "Thanks", "auto");
 
     expect(prompt).toContain("This message came from Slack.");
-    expect(prompt).toContain("will be sent to Slack automatically");
-    expect(prompt).toContain("do not call `chat.send`");
+    expect(prompt).toContain("Automatic Slack delivery is enabled");
+    expect(prompt).toContain("follow the Slack delivery mode instructions from your system prompt");
     expect(prompt).toContain("Jane Doe (@jane): Thanks");
   });
 
   it("uses the email source instruction when provided instead of the Slack one", () => {
     const emailSender = { userId: "jane@customer.com", name: "Jane Doe" };
     const prompt = assembleInitialPrompt({
-      basePrompt: "base",
       sender: emailSender,
       text: "Subject: Help",
       relayMode: "auto",

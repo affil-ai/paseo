@@ -4,6 +4,7 @@ import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { AdapterPostableMessage, FileUpload, SentMessage } from "chat";
 import type { ChatEmailConfig, ChatRelayMode } from "../config.js";
 import {
+  assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
   EMAIL_TRIAGE_INSTRUCTION,
@@ -78,6 +79,7 @@ export interface EmailSessionBridge {
   createExternalSession(input: {
     externalThreadId: string;
     title: string;
+    systemPrompt?: string;
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;
     attachments?: AgentAttachment[];
@@ -368,11 +370,13 @@ export class EmailIntakeBridge {
       const session = await this.deps.bridge.createExternalSession({
         externalThreadId,
         title: supportEmailTitle(input.email),
-        initialPrompt: assembleInitialPrompt({
+        systemPrompt: assembleExternalIntakeSystemPrompt({
           basePrompt: externalIntakeAgentPrompt(this.deps.relayMode),
           customPrompt: [await this.deps.officePrompt, EMAIL_TRIAGE_INSTRUCTION]
             .filter(Boolean)
             .join("\n\n"),
+        }),
+        initialPrompt: assembleInitialPrompt({
           sender: emailSenderIdentity(input.email),
           text: formatSupportEmailForAgent(input.email, input.processed.attachments, this.context),
           relayMode: this.deps.relayMode,
