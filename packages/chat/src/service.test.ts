@@ -389,6 +389,7 @@ describe("ChatBridgeService", () => {
     });
 
     expect(second.conversationId).toBe(first.conversationId);
+    expect(chat.targets.get(first.externalThreadId)?.subscribed).toContain(first.externalThreadId);
     expect(chat.posted).toMatchObject([
       { targetId: "slack:C123:", message: { markdown: "hi" } },
       { targetId: first.externalThreadId, message: { markdown: "again" } },

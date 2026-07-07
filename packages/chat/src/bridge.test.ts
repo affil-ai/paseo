@@ -416,6 +416,92 @@ describe("ChatBridge manual final reply watchdog", () => {
 });
 
 describe("ChatBridge follow-up delivery", () => {
+  it("routes subscribed outbound conversation replies to the owning office agent", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const officeAgentId = "agent-office";
+      const store = new ThreadSessionStore(stateDir);
+      const timestamp = new Date().toISOString();
+      await store.upsertBinding({
+        kind: "outbound-conversation",
+        conversationId: "conv_1",
+        externalThreadId,
+        officeAgentId,
+        destination: { kind: "channel", id: "C123" },
+        subscribed: true,
+        activeRelayId: null,
+        title: "outbound",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      const sendCalls: Array<{ agentId: string; text: string }> = [];
+      let createAgentCalls = 0;
+      const client = {
+        createAgent: async () => {
+          createAgentCalls += 1;
+          throw new Error("should not create a new agent for outbound replies");
+        },
+        createWorkspace: async () => {
+          throw new Error("should not create a new workspace for outbound replies");
+        },
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 7 } }),
+        waitForFinish: async () => new Promise(() => {}),
+        sendAgentMessage: async (agentId: string, text: string) => {
+          sendCalls.push({ agentId, text });
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "yes, sounds good",
+        raw: { text: "yes, sounds good", thread_ts: "111.222" },
+        author: {
+          userId: "U1",
+          userName: "vivek",
+          fullName: "Vivek",
+          isBot: false,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: false,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "subscribed");
+
+      expect(createAgentCalls).toBe(0);
+      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls[0]).toMatchObject({ agentId: officeAgentId });
+      expect(sendCalls[0]?.text).toContain("yes, sounds good");
+      expect(await store.hasEventReceipt(`slack:${externalThreadId}:333.444`)).toBe(true);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("marks a Slack follow-up processed only after the agent accepts it", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {
