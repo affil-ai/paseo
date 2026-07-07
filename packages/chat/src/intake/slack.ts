@@ -82,7 +82,8 @@ async function normalizeMentionsForPrompt(thread: Thread, message: Message): Pro
 
 export function parseCommand(text: string): ThreadCommand {
   const cleaned = cleanSlackText(text).toLowerCase();
-  if (/^(mute|quiet)\b/.test(cleaned)) return "mute";
+  if (/^(mute|quiet|stop|shut up|silence)\b/.test(cleaned)) return "mute";
+  if (/\b(mute|shut up|stop replying|be quiet)\b/.test(cleaned)) return "mute";
   if (/^(unmute|resume replies)\b/.test(cleaned)) return "unmute";
   if (/^(done|archive)\b/.test(cleaned)) return "done";
   if (/^↑\s*$/.test(cleaned) || /^up\s*$/.test(cleaned)) return "escape";

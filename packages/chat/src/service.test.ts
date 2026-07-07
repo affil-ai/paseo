@@ -408,6 +408,32 @@ describe("ChatBridgeService", () => {
     });
   });
 
+  it("blocks replies into muted inbound sessions", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    const chat = new FakeChat();
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: true,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await expect(
+      service.reply({ officeAgentId: "agent-office", message: "still talking" }),
+    ).rejects.toMatchObject({ code: "conversation_muted" });
+    expect(chat.posted).toHaveLength(0);
+  });
+
   it("uploads files through Chat SDK file payloads and suppresses idempotent retries", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();

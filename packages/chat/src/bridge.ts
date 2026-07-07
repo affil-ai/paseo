@@ -285,8 +285,20 @@ export class ChatBridge {
     if (normalized.command === "mute" || normalized.command === "unmute") {
       if (existing?.kind === "inbound-session") {
         await this.store.updateSession(normalized.externalThreadId, (binding) => {
-          if (binding.kind === "inbound-session") binding.muted = normalized.command === "mute";
+          if (binding.kind === "inbound-session") {
+            binding.muted = normalized.command === "mute";
+            if (normalized.command === "mute") binding.activeRelayId = null;
+          }
         });
+        if (normalized.command === "mute") {
+          await this.client.archiveAgent(getBindingOwnerAgentId(existing)).catch((error) => {
+            console.warn("Failed to archive muted chat agent", {
+              agentId: getBindingOwnerAgentId(existing),
+              externalThreadId: normalized.externalThreadId,
+              error,
+            });
+          });
+        }
       }
       await this.reactToMuteCommand(thread, message, normalized.command);
       return true;
@@ -352,54 +364,7 @@ export class ChatBridge {
       const session = existing ?? (await this.startNewSession(thread, message, normalized));
       if (!existing && !(await this.store.markEventProcessed(normalized.eventId))) return;
       if (await this.handleChatAnswer(normalized, Boolean(existing))) return;
-      const relayId = message.id;
-      const ownerAgentId = getBindingOwnerAgentId(session);
-      const sinceSeq = existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
-      if (this.config.relayMode === "manual") {
-        await this.store.startManualReplyTurn({
-          externalThreadId: normalized.externalThreadId,
-          turnId: relayId,
-          agentId: ownerAgentId,
-          startedSeq: sinceSeq,
-          reminderCount: 0,
-        });
-      }
-      if (this.config.relayMode === "auto") {
-        await this.store.updateSession(normalized.externalThreadId, (current) => {
-          current.activeRelayId = relayId;
-        });
-      }
-      if (existing) {
-        await this.client.sendAgentMessage(
-          ownerAgentId,
-          assembleFollowupPrompt(normalized.sender, normalized.cleanedText, this.config.relayMode),
-          {
-            images: normalized.images,
-            attachments: normalized.attachments,
-          },
-        );
-        await this.store.markEventProcessed(normalized.eventId);
-      }
-      if (this.config.relayMode === "manual") {
-        this.startManualFinalReplyWatchdog({
-          externalThreadId: normalized.externalThreadId,
-          agentId: ownerAgentId,
-          turnId: relayId,
-          startedSeq: sinceSeq,
-        });
-      }
-      if (this.config.relayMode === "auto") {
-        this.startBackgroundRelay({
-          thread,
-          externalThreadId: normalized.externalThreadId,
-          agentId: ownerAgentId,
-          messageId: message.id,
-          source,
-          sinceSeq,
-          relayId,
-          postFirstReply: true,
-        });
-      }
+      await this.dispatchAgentTurn({ thread, message, source, normalized, existing, session });
     } catch (error) {
       await this.store.clearManualReplyTurn(normalized.externalThreadId, message.id);
       const reason = error instanceof Error ? error.message : String(error);
@@ -408,6 +373,68 @@ export class ChatBridge {
         normalized.externalThreadId,
         `I couldn't start a task from this message. Reason: ${reason}`,
       );
+    }
+  }
+
+  private async dispatchAgentTurn(input: {
+    thread: Thread;
+    message: Message;
+    source: "mention" | "dm" | "subscribed";
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>;
+    existing: ChatBinding | null;
+    session: ChatBinding;
+  }): Promise<void> {
+    const relayId = input.message.id;
+    const ownerAgentId = getBindingOwnerAgentId(input.session);
+    const sinceSeq = input.existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
+    if (this.config.relayMode === "manual") {
+      await this.store.startManualReplyTurn({
+        externalThreadId: input.normalized.externalThreadId,
+        turnId: relayId,
+        agentId: ownerAgentId,
+        startedSeq: sinceSeq,
+        reminderCount: 0,
+      });
+    }
+    if (this.config.relayMode === "auto") {
+      await this.store.updateSession(input.normalized.externalThreadId, (current) => {
+        current.activeRelayId = relayId;
+      });
+    }
+    if (input.existing) {
+      await this.client.sendAgentMessage(
+        ownerAgentId,
+        assembleFollowupPrompt(
+          input.normalized.sender,
+          input.normalized.cleanedText,
+          this.config.relayMode,
+        ),
+        {
+          images: input.normalized.images,
+          attachments: input.normalized.attachments,
+        },
+      );
+      await this.store.markEventProcessed(input.normalized.eventId);
+    }
+    if (this.config.relayMode === "manual") {
+      this.startManualFinalReplyWatchdog({
+        externalThreadId: input.normalized.externalThreadId,
+        agentId: ownerAgentId,
+        turnId: relayId,
+        startedSeq: sinceSeq,
+      });
+    }
+    if (this.config.relayMode === "auto") {
+      this.startBackgroundRelay({
+        thread: input.thread,
+        externalThreadId: input.normalized.externalThreadId,
+        agentId: ownerAgentId,
+        messageId: input.message.id,
+        source: input.source,
+        sinceSeq,
+        relayId,
+        postFirstReply: true,
+      });
     }
   }
 

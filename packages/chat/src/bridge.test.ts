@@ -646,4 +646,86 @@ describe("ChatBridge follow-up delivery", () => {
       await rm(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("mutes and archives the inbound agent for natural stop commands", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const rootAgentId = "agent-1";
+      const store = new ThreadSessionStore(stateDir);
+      await store.upsertSession({
+        kind: "inbound-session",
+        externalThreadId,
+        rootAgentId,
+        muted: false,
+        activeRelayId: "relay-1",
+        title: "existing",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const archived: string[] = [];
+      const sendCalls: Array<{ agentId: string; text: string }> = [];
+      const client = {
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 1 } }),
+        archiveAgent: async (agentId: string) => {
+          archived.push(agentId);
+        },
+        sendAgentMessage: async (agentId: string, text: string) => {
+          sendCalls.push({ agentId, text });
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        createSentMessageFromMessage: () => ({
+          addReaction: async () => {},
+        }),
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "<@U0BEGMBCB2L> dude shut up mute stop",
+        raw: { text: "<@U0BEGMBCB2L> dude shut up mute stop", thread_ts: "111.222" },
+        author: {
+          userId: "U1",
+          userName: "john",
+          fullName: "John",
+          isBot: false,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: true,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "mention");
+
+      expect(sendCalls).toHaveLength(0);
+      expect(archived).toEqual([rootAgentId]);
+      await expect(store.getSession(externalThreadId)).resolves.toMatchObject({
+        muted: true,
+        activeRelayId: null,
+      });
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });

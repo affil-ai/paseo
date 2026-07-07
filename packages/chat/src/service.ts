@@ -446,6 +446,7 @@ export class ChatBridgeService {
     externalThreadId: string,
     messages: AdapterPostableMessage[],
   ): Promise<void> {
+    await this.assertCanPostToBinding(externalThreadId);
     for (const message of messages) {
       await this.chat.thread(externalThreadId).post(message);
     }
@@ -520,6 +521,16 @@ export class ChatBridgeService {
     await this.store.updateBinding(externalThreadId, (binding) => {
       binding.activeRelayId = null;
     });
+  }
+
+  private async assertCanPostToBinding(externalThreadId: string): Promise<void> {
+    const binding = await this.store.getBinding(externalThreadId);
+    if (binding?.kind === "inbound-session" && binding.muted) {
+      throw new ChatToolError(
+        "conversation_muted",
+        "This Slack thread is muted. Do not send more messages unless a human unmuted it.",
+      );
+    }
   }
 
   private async recordManualVisibleDelivery(

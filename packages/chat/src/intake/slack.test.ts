@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Attachment, Message, Thread } from "chat";
 import { afterEach, describe, expect, it } from "vitest";
-import { normalizeMessage } from "./slack.js";
+import { normalizeMessage, parseCommand } from "./slack.js";
 
 const tempDirs: string[] = [];
 
@@ -15,6 +15,14 @@ async function createTempDir(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("parseCommand", () => {
+  it("treats natural stop and mute phrases as mute commands", () => {
+    expect(parseCommand("stop i'm already working on this")).toBe("mute");
+    expect(parseCommand("dude shut up mute stop")).toBe("mute");
+    expect(parseCommand("please mute this thread")).toBe("mute");
+  });
 });
 
 function mockThread(): Thread {
