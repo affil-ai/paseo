@@ -7,6 +7,7 @@ const DEFAULT_DAEMON_HOST = "localhost:6767";
 
 export type ChatRelayMode = "auto" | "manual";
 export type ChatEmailProvider = "resend" | "none";
+export type ChatEmailClassifierProvider = "pi" | "none";
 
 function resolveHome(input: string): string {
   if (input === "~") return os.homedir();
@@ -28,8 +29,9 @@ function parseJsonMap(value: string | undefined): Record<string, string> {
 
 const envSchema = z.object({
   PASEO_CHAT_PROVIDER: z.string().default("pi"),
-  PASEO_CHAT_MODEL: z.string().default("openai-codex/gpt-5.5"),
-  PASEO_CHAT_MODE_ID: z.string().default("medium"),
+  PASEO_CHAT_MODEL: z.string().default("openrouter/anthropic/claude-fable-5"),
+  PASEO_CHAT_MODE_ID: z.string().default(""),
+  PASEO_CHAT_THINKING_OPTION_ID: z.string().default("high"),
   PASEO_CHAT_ACK_EMOJI: z.string().optional(),
   PASEO_CHAT_OFFICE_PROMPT_PATH: z.string().optional(),
   PASEO_CHAT_DEEP_LINK_BASE_URL: z.string().default("http://localhost:6767"),
@@ -46,6 +48,11 @@ const envSchema = z.object({
   PASEO_CHAT_SERVICE_HOST: z.string().default("127.0.0.1"),
   PASEO_CHAT_SERVICE_PORT: z.coerce.number().int().positive().default(8788),
   PASEO_CHAT_EMAIL_PROVIDER: z.string().optional(),
+  PASEO_CHAT_EMAIL_CLASSIFIER_PROVIDER: z.enum(["pi", "none"]).default("pi"),
+  PASEO_CHAT_EMAIL_CLASSIFIER_MODEL: z.string().default("openrouter/anthropic/claude-sonnet-5"),
+  PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID: z.string().default("off"),
+  PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND: z.string().optional(),
   PASEO_CHAT_PEOPLE_JSON: z.string().optional(),
   PASEO_CHAT_CHANNELS_JSON: z.string().optional(),
   PASEO_CHAT_MAX_UPLOAD_BYTES: z.coerce
@@ -128,6 +135,14 @@ export interface ChatRepositoryConfig {
   projectId?: string;
   projectRootPath: string;
   projectDisplayName?: string;
+}
+
+export interface ChatEmailClassifierConfig {
+  provider: "pi";
+  model: string;
+  thinkingOptionId: string;
+  timeoutMs: number;
+  command?: string;
 }
 
 function inferEmailProvider(input: {
@@ -224,7 +239,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     provider: persistedDefaults.provider ?? parsed.PASEO_CHAT_PROVIDER,
     model: persistedDefaults.model ?? parsed.PASEO_CHAT_MODEL,
     modeId: persistedDefaults.modeId ?? parsed.PASEO_CHAT_MODE_ID,
-    thinkingOptionId: persistedDefaults.thinkingOptionId,
+    thinkingOptionId: persistedDefaults.thinkingOptionId ?? parsed.PASEO_CHAT_THINKING_OPTION_ID,
     ackEmoji: parsed.PASEO_CHAT_ACK_EMOJI,
     officePromptPath: parsed.PASEO_CHAT_OFFICE_PROMPT_PATH
       ? path.resolve(resolveHome(parsed.PASEO_CHAT_OFFICE_PROMPT_PATH))
@@ -250,6 +265,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     people: parseJsonMap(parsed.PASEO_CHAT_PEOPLE_JSON),
     channels,
     email: resolveEmailConfig(parsed.PASEO_CHAT_EMAIL_PROVIDER, persistedEmail, channels),
+    emailClassifier:
+      parsed.PASEO_CHAT_EMAIL_CLASSIFIER_PROVIDER === "none"
+        ? null
+        : {
+            provider: "pi" as const,
+            model: parsed.PASEO_CHAT_EMAIL_CLASSIFIER_MODEL,
+            thinkingOptionId: parsed.PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID,
+            timeoutMs: parsed.PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS,
+            ...(parsed.PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND?.trim()
+              ? { command: parsed.PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND.trim() }
+              : {}),
+          },
     repository: resolveRepositoryConfig(persistedRepository),
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };

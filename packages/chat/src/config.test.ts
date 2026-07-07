@@ -116,6 +116,54 @@ describe("loadConfig chat.email", () => {
   });
 });
 
+describe("loadConfig chat.defaults", () => {
+  it("defaults chat-created agents to Pi with OpenRouter Fable 5 high thinking", async () => {
+    const home = await createTempHome();
+    const config = loadConfig({ PASEO_HOME: home } as NodeJS.ProcessEnv);
+    expect(config.provider).toBe("pi");
+    expect(config.model).toBe("openrouter/anthropic/claude-fable-5");
+    expect(config.modeId).toBe("");
+    expect(config.thinkingOptionId).toBe("high");
+  });
+
+  it("lets persisted chat defaults override environment defaults", async () => {
+    const home = await createTempHome();
+    await writeFile(
+      join(home, "config.json"),
+      JSON.stringify({
+        chat: {
+          defaults: {
+            provider: "codex",
+            model: "gpt-5.4-mini",
+            modeId: "auto",
+            thinkingOptionId: "low",
+          },
+        },
+      }),
+    );
+    const config = loadConfig({
+      PASEO_HOME: home,
+      PASEO_CHAT_PROVIDER: "pi",
+      PASEO_CHAT_MODEL: "openrouter/anthropic/claude-fable-5",
+      PASEO_CHAT_MODE_ID: "",
+      PASEO_CHAT_THINKING_OPTION_ID: "high",
+    } as NodeJS.ProcessEnv);
+    expect(config.provider).toBe("codex");
+    expect(config.model).toBe("gpt-5.4-mini");
+    expect(config.modeId).toBe("auto");
+    expect(config.thinkingOptionId).toBe("low");
+  });
+
+  it("allows the chat thinking default to be set from the environment", async () => {
+    const home = await createTempHome();
+    const config = loadConfig({
+      PASEO_HOME: home,
+      PASEO_CHAT_THINKING_OPTION_ID: "xhigh",
+    } as NodeJS.ProcessEnv);
+    expect(config.thinkingOptionId).toBe("xhigh");
+  });
+});
+
 describe("resolveRepositoryConfig", () => {
   it("returns null when no project root is configured", () => {
     expect(resolveRepositoryConfig({ projectId: "paseo" })).toBeNull();

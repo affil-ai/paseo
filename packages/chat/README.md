@@ -19,8 +19,9 @@ Optional:
 - `PASEO_PASSWORD=...` if your daemon requires it
 - `PASEO_CHAT_DEEP_LINK_BASE_URL=http://localhost:6767`
 - `PASEO_CHAT_PROVIDER=pi`
-- `PASEO_CHAT_MODEL=openai-codex/gpt-5.5`
-- `PASEO_CHAT_MODE_ID=medium`
+- `PASEO_CHAT_MODEL=openrouter/anthropic/claude-fable-5`
+- `PASEO_CHAT_MODE_ID=` (empty by default; Pi does not need a mode)
+- `PASEO_CHAT_THINKING_OPTION_ID=high`
 - `PASEO_CHAT_OFFICE_PROMPT_PATH=/path/to/prompt.md` — custom instructions injected after the built-in chat bridge prompt. In the office deployment this points to `/home/olumbe/code/office/prompts/chat/slack-office-agent.md`.
 - `PASEO_CHAT_ACK_EMOJI=cto`
 - `PASEO_CHAT_STATE_DIR=$PASEO_HOME/chat-bridge`

@@ -28,7 +28,7 @@ product HTTP surface.
 - Low-level `DaemonClient` from `@getpaseo/client/internal/daemon-client`; connect to
   `127.0.0.1:6767` (mirror `packages/cli/src/utils/client.ts`).
 - Office agent: `directory` workspace at the configured `officeRepoPath` (the office repo);
-  provider `pi`, model `openai-codex/gpt-5.5`, mode `medium` (all from config).
+  provider `pi`, model `openrouter/anthropic/claude-fable-5`, thinking `high` (all from config).
 - Chat SDK is the only Slack client; bot built with `concurrency: "queue"`.
 - File-backed state under `$PASEO_HOME/chat-bridge/`; copy `writeJsonFileAtomic` locally.
 - `ThreadSession { rootAgentId, muted, activeRelayId }` keyed by `externalThreadId`.
@@ -64,13 +64,13 @@ product HTTP surface.
 
 **Change map**
 
-| File                 | Change                                                                                                                                                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `package.json` (pkg) | name `@getpaseo/chat`, private, type module, deps: `chat`, `@chat-adapter/slack`, `@getpaseo/client`, `@getpaseo/protocol`, `ws`, `zod`                                                                        |
-| `tsconfig.json`      | extend `../../tsconfig.base.json`, NodeNext                                                                                                                                                                    |
-| `config.ts`          | Zod-parsed env: `officeRepoPath`, `provider` (default `pi`), `model` (default `openai-codex/gpt-5.5`), `modeId` (default `medium`), `ackEmoji`, `officePromptPath`, `deepLinkBaseUrl`, daemon host, `stateDir` |
-| `paseo-client.ts`    | `connect()` mirroring `cli/src/utils/client.ts` (DaemonClient over `ws://127.0.0.1:6767`, reconnect enabled)                                                                                                   |
-| `index.ts`           | boot: load config → connect daemon → (Slice 5) construct Chat + adapters → register handlers                                                                                                                   |
+| File                 | Change                                                                                                                                                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package.json` (pkg) | name `@getpaseo/chat`, private, type module, deps: `chat`, `@chat-adapter/slack`, `@getpaseo/client`, `@getpaseo/protocol`, `ws`, `zod`                                                                                                                         |
+| `tsconfig.json`      | extend `../../tsconfig.base.json`, NodeNext                                                                                                                                                                                                                     |
+| `config.ts`          | Zod-parsed env: `officeRepoPath`, `provider` (default `pi`), `model` (default `openrouter/anthropic/claude-fable-5`), `modeId` (default empty), `thinkingOptionId` (default `high`), `ackEmoji`, `officePromptPath`, `deepLinkBaseUrl`, daemon host, `stateDir` |
+| `paseo-client.ts`    | `connect()` mirroring `cli/src/utils/client.ts` (DaemonClient over `ws://127.0.0.1:6767`, reconnect enabled)                                                                                                                                                    |
+| `index.ts`           | boot: load config → connect daemon → (Slice 5) construct Chat + adapters → register handlers                                                                                                                                                                    |
 
 **Tests**
 
@@ -198,7 +198,7 @@ const ws = await client.createWorkspace({
 });
 const agent = await client.createAgent({
   provider: cfg.provider, // "pi"
-  config: { model: cfg.model, modeId: cfg.modeId }, // openai-codex/gpt-5.5, medium
+  config: { model: cfg.model, modeId: cfg.modeId, thinkingOptionId: cfg.thinkingOptionId },
   workspaceId: ws.workspaceId,
   initialPrompt: assemblePrompt(sender, cleanedText, threadContext),
   images,

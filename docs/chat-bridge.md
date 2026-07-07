@@ -846,8 +846,9 @@ packages/chat/
   src/
     index.ts              # boot: load config, connect daemon, construct Chat + adapters, register handlers
     config.ts             # env: officeRepoPath (the office repo), provider (default pi), model
-                          #   (default codex gpt-5.5), modeId (default medium), ackEmoji,
-                          #   officePromptPath, deepLinkBaseUrl, daemon host/password, stateDir
+                          #   (default OpenRouter Fable 5), thinkingOptionId (default high),
+                          #   modeId (default empty), ackEmoji, officePromptPath, deepLinkBaseUrl,
+                          #   daemon host/password, stateDir
                           #   (Slack tokens are read by @chat-adapter/slack, not by us)
     paseo-client.ts       # connect() helper mirroring packages/cli/src/utils/client.ts (reconnect: enabled)
     bridge.ts             # core: handleMessage — filters/gates, new-thread vs follow-up, dedup,
@@ -947,8 +948,8 @@ interface change as a small, contained fix.
 2. `thread.subscribe()`.
 3. Resolve sender identity; capture human-thread context if present.
 4. `client.createWorkspace({ source: { kind: "directory", path: <office repo path from config> } })`.
-5. `client.createAgent({ provider: "pi", model: "openai-codex/gpt-5.5", modeId: "medium", workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalThreadId, "paseo.chat-source": "slack" } })`
-   (provider/model/mode come from config; the default is Pi + Codex gpt-5.5 medium).
+5. `client.createAgent({ provider: "pi", model: "openrouter/anthropic/claude-fable-5", thinkingOptionId: "high", workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalThreadId, "paseo.chat-source": "slack" } })`
+   (provider/model/thinking come from config; the default is Pi + OpenRouter Fable 5 high).
 6. Persist `ThreadSession { rootAgentId: agentId }`; react `:eyes:` on
    the triggering message; post the compact "Working on it" card with a `View chat` button.
 7. Poll the office agent's projected timeline. Post the first complete assistant text block,

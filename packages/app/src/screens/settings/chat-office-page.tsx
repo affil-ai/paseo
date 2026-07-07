@@ -490,21 +490,21 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
             label="Default model"
             hint="Exact model id passed to the provider."
             value={draft.model}
-            placeholder="openai-codex/gpt-5.5"
+            placeholder="openrouter/anthropic/claude-fable-5"
             onChangeText={handleModelChange}
           />
           <TextSettingRow
             label="Default mode"
             hint="Provider mode id for new office chat sessions."
             value={draft.modeId}
-            placeholder="medium"
+            placeholder="Provider default"
             onChangeText={handleModeIdChange}
           />
           <TextSettingRow
             label="Thinking"
             hint="Optional thinking or reasoning level."
             value={draft.thinkingOptionId}
-            placeholder="default"
+            placeholder="high"
             onChangeText={handleThinkingOptionIdChange}
           />
         </View>
