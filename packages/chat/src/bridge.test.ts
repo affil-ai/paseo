@@ -233,11 +233,16 @@ describe("ChatBridge auto relay", () => {
 });
 
 describe("ChatBridge manual final reply watchdog", () => {
-  async function createManualWatchdogHarness(input?: { deliverySeq?: number; reminder?: boolean }) {
+  async function createManualWatchdogHarness(input?: {
+    deliverySeq?: number;
+    reminderCount?: number;
+  }) {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     const externalThreadId = "slack:D123:111.222";
     const rootAgentId = "agent-1";
-    const turnId = input?.reminder ? "turn-1:final-reply-reminder" : "turn-1";
+    const turnId = input?.reminderCount
+      ? `turn-1:final-reply-reminder-${input.reminderCount}`
+      : "turn-1";
     const store = new ThreadSessionStore(stateDir);
     const postedMessages: unknown[] = [];
     const sendCalls: Array<{ agentId: string; text: string }> = [];
@@ -256,7 +261,7 @@ describe("ChatBridge manual final reply watchdog", () => {
       turnId,
       agentId: rootAgentId,
       startedSeq: 5,
-      reminderAttempted: input?.reminder ?? false,
+      reminderCount: input?.reminderCount ?? 0,
     });
     if (input?.deliverySeq !== undefined) {
       await store.recordManualVisibleDelivery({
@@ -300,7 +305,7 @@ describe("ChatBridge manual final reply watchdog", () => {
       {
         postMessage: async (threadId: string, message: unknown) => {
           postedMessages.push(message);
-          return { id: "fallback-message", threadId, raw: null };
+          return { id: "bridge-message", threadId, raw: null };
         },
       },
     );
@@ -338,7 +343,7 @@ describe("ChatBridge manual final reply watchdog", () => {
           agentId: harness.rootAgentId,
           text: [
             "You ended the Slack turn without sending a Slack-visible final response.",
-            "Send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
+            "Reminder attempt 1: send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
             `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
           ].join("\n"),
         },
@@ -346,8 +351,8 @@ describe("ChatBridge manual final reply watchdog", () => {
       await expect(
         harness.store.getManualReplyTurn(harness.externalThreadId),
       ).resolves.toMatchObject({
-        turnId: "turn-1:final-reply-reminder",
-        reminderAttempted: true,
+        turnId: "turn-1:final-reply-reminder-1",
+        reminderCount: 1,
         deliverySeq: null,
       });
     } finally {
@@ -381,16 +386,29 @@ describe("ChatBridge manual final reply watchdog", () => {
     }
   });
 
-  it("posts one fallback instead of looping when the reminder turn also omits chat delivery", async () => {
-    const harness = await createManualWatchdogHarness({ reminder: true });
+  it("sends another reminder instead of posting fallback when a reminder also omits chat delivery", async () => {
+    const harness = await createManualWatchdogHarness({ reminderCount: 1 });
     try {
       await harness.enforce();
 
-      expect(harness.sendCalls).toEqual([]);
-      expect(harness.postedMessages).toEqual([
-        "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
+      expect(harness.postedMessages).toEqual([]);
+      expect(harness.sendCalls).toEqual([
+        {
+          agentId: harness.rootAgentId,
+          text: [
+            "You ended the Slack turn without sending a Slack-visible final response.",
+            "Reminder attempt 2: send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
+            `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+          ].join("\n"),
+        },
       ]);
-      await expect(harness.store.getManualReplyTurn(harness.externalThreadId)).resolves.toBeNull();
+      await expect(
+        harness.store.getManualReplyTurn(harness.externalThreadId),
+      ).resolves.toMatchObject({
+        turnId: "turn-1:final-reply-reminder-2",
+        reminderCount: 2,
+        deliverySeq: null,
+      });
     } finally {
       await rm(harness.stateDir, { recursive: true, force: true });
     }

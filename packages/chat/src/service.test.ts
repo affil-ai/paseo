@@ -201,7 +201,7 @@ describe("ChatBridgeService", () => {
       turnId: "turn-1",
       agentId: "agent-office",
       startedSeq: 5,
-      reminderAttempted: false,
+      reminderCount: 0,
     });
     const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
       people: {},

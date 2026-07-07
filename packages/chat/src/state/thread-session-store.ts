@@ -92,15 +92,22 @@ const PendingRequestSchema = z.object({
   updatedAt: z.string(),
 });
 
-const ManualReplyTurnSchema = z.object({
-  turnId: z.string(),
-  agentId: z.string(),
-  startedSeq: z.number().int().nonnegative(),
-  reminderAttempted: z.boolean().default(false),
-  deliverySeq: z.number().int().nonnegative().nullable().default(null),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+const ManualReplyTurnSchema = z
+  .object({
+    turnId: z.string(),
+    agentId: z.string(),
+    startedSeq: z.number().int().nonnegative(),
+    reminderCount: z.number().int().nonnegative().optional(),
+    // COMPAT(manualReplyTurnsReminderAttempted): reads v0.1.104-beta.3 state written before 2026-07-07; remove after 2027-01-07.
+    reminderAttempted: z.boolean().optional(),
+    deliverySeq: z.number().int().nonnegative().nullable().default(null),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .transform(({ reminderAttempted, ...turn }) => ({
+    ...turn,
+    reminderCount: turn.reminderCount ?? (reminderAttempted ? 1 : 0),
+  }));
 
 const LegacyDeliveryReceiptSchema = z
   .string()
@@ -427,14 +434,14 @@ export class ThreadSessionStore {
     turnId: string;
     agentId: string;
     startedSeq: number;
-    reminderAttempted: boolean;
+    reminderCount: number;
   }): Promise<ManualReplyTurn> {
     const timestamp = new Date().toISOString();
     const turn: ManualReplyTurn = {
       turnId: input.turnId,
       agentId: input.agentId,
       startedSeq: input.startedSeq,
-      reminderAttempted: input.reminderAttempted,
+      reminderCount: input.reminderCount,
       deliverySeq: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -458,7 +465,7 @@ export class ThreadSessionStore {
         turnId: turn.turnId,
         agentId: turn.agentId,
         startedSeq: turn.startedSeq,
-        reminderAttempted: turn.reminderAttempted,
+        reminderCount: turn.reminderCount,
         deliverySeq: turn.deliverySeq,
         createdAt: turn.createdAt,
         updatedAt: turn.updatedAt,
@@ -484,20 +491,25 @@ export class ThreadSessionStore {
     });
   }
 
-  async markManualReplyReminderAttempted(
-    externalThreadId: string,
-    turnId: string,
-  ): Promise<ManualReplyTurn | null> {
+  async advanceManualReplyReminder(input: {
+    externalThreadId: string;
+    currentTurnId: string;
+    nextTurnId: string;
+    startedSeq: number;
+  }): Promise<ManualReplyTurn | null> {
     let updated: ManualReplyTurn | null = null;
     await this.store.update((data) => {
-      const turn = data.manualReplyTurns[externalThreadId];
-      if (!turn || turn.turnId !== turnId) return;
+      const turn = data.manualReplyTurns[input.externalThreadId];
+      if (!turn || turn.turnId !== input.currentTurnId) return;
       updated = {
         ...turn,
-        reminderAttempted: true,
+        turnId: input.nextTurnId,
+        startedSeq: input.startedSeq,
+        reminderCount: turn.reminderCount + 1,
+        deliverySeq: null,
         updatedAt: new Date().toISOString(),
       };
-      data.manualReplyTurns[externalThreadId] = updated;
+      data.manualReplyTurns[input.externalThreadId] = updated;
     });
     return updated;
   }

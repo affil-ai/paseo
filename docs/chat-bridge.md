@@ -65,9 +65,11 @@ Manual relay mode keeps progress updates explicit: the office agent calls `chat.
 `chat.sendFile` / `chat.sendImage` for Slack-visible updates instead of relying on automatic
 final-message relay. To prevent silent endings, manual mode persists a final-reply watchdog for
 each inbound Slack turn. When the agent finishes without a Slack-visible delivery after the
-latest relayable assistant text, the bridge sends one reminder turn asking the same office agent
-to post the missing final reply. If the reminder also finishes without delivery, the bridge posts
-a generic fallback and clears the watchdog to avoid loops.
+latest relayable assistant text, the bridge sends a reminder/follow-up to the same office agent
+requiring it to post the missing final reply. If a reminder turn also finishes without delivery,
+the bridge sends another reminder on the next agent-finish cycle instead of posting bridge-authored
+fallback text to Slack. The Slack thread should only receive agent-authored `chat.*` deliveries
+for this watchdog path.
 
 Slack input should match the app's default send behavior:
 
