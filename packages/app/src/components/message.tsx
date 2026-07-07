@@ -45,8 +45,11 @@ import {
   Scissors,
   MicVocal,
   FileSymlink,
+  Slack,
+  Mail,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import type { ChatUserMessageSource } from "@getpaseo/protocol/agent-labels";
 import type { Theme } from "@/styles/theme";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import Animated, {
@@ -132,6 +135,7 @@ interface UserMessageProps {
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
   disableOuterSpacing?: boolean;
+  source?: ChatUserMessageSource;
 }
 
 const MessageOuterSpacingContext = createContext(false);
@@ -171,6 +175,8 @@ const ThemedTodoCheckIcon = withUnistyles(Check);
 const ThemedFileSymlinkIcon = withUnistyles(FileSymlink);
 const ThemedTriangleAlertIcon = withUnistyles(TriangleAlertIcon);
 const ThemedChevronRightIcon = withUnistyles(ChevronRight);
+const ThemedSlackIcon = withUnistyles(Slack);
+const ThemedSupportIcon = withUnistyles(Mail);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -355,6 +361,16 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
   },
+  bubbleWithSource: {
+    paddingTop: theme.spacing[4] + theme.spacing[1],
+    paddingRight: theme.spacing[6],
+  },
+  sourceBadge: {
+    position: "absolute",
+    top: theme.spacing[2],
+    right: theme.spacing[2],
+    opacity: 0.82,
+  },
   text: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
@@ -458,6 +474,7 @@ export const UserMessage = memo(function UserMessage({
   isFirstInGroup = true,
   isLastInGroup = true,
   disableOuterSpacing,
+  source,
 }: UserMessageProps) {
   const isCompact = useIsCompactFormFactor();
   const { t } = useTranslation();
@@ -469,6 +486,7 @@ export const UserMessage = memo(function UserMessage({
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
   const showTrailingRow = hasText && (isCompact || isNative || isHovered);
+  const hasExternalSource = source !== undefined;
   const formattedTimestamp = useMemo(
     () => formatMessageTimestamp(new Date(timestamp)),
     [timestamp],
@@ -510,6 +528,13 @@ export const UserMessage = memo(function UserMessage({
     ],
     [hasText],
   );
+  const bubbleStyle = useMemo(
+    () => [
+      userMessageStylesheet.bubble,
+      hasExternalSource ? userMessageStylesheet.bubbleWithSource : null,
+    ],
+    [hasExternalSource],
+  );
   const trailingRowStyle = useMemo(
     () => [
       userMessageStylesheet.trailingRow,
@@ -527,7 +552,16 @@ export const UserMessage = memo(function UserMessage({
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
-        <View style={userMessageStylesheet.bubble}>
+        <View style={bubbleStyle}>
+          {source ? (
+            <View style={userMessageStylesheet.sourceBadge} pointerEvents="none">
+              {source === "slack" ? (
+                <ThemedSlackIcon size={13} uniProps={foregroundMutedColorMapping} />
+              ) : (
+                <ThemedSupportIcon size={13} uniProps={foregroundMutedColorMapping} />
+              )}
+            </View>
+          ) : null}
           {hasImages ? (
             <View style={imagePreviewContainerStyle}>
               {images.map((image) => (
@@ -1314,7 +1348,9 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
   },
   chatToolMessage: {
     marginHorizontal: 13,
-    marginTop: theme.spacing[1],
+    marginTop: theme.spacing[2],
+    alignSelf: "flex-start",
+    maxWidth: "100%",
   },
   detailWrapper: {
     borderBottomLeftRadius: theme.borderRadius.lg,
@@ -1366,6 +1402,37 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
     left: 0,
   },
 }));
+
+const chatToolReplyBubbleStylesheet = StyleSheet.create((theme) => ({
+  bubble: {
+    backgroundColor: theme.colors.surface3,
+    borderRadius: theme.borderRadius["2xl"],
+    borderTopLeftRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[4],
+    paddingTop: theme.spacing[4] + theme.spacing[1],
+    paddingLeft: theme.spacing[6],
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  slackSourceBadge: {
+    position: "absolute",
+    top: theme.spacing[2],
+    left: theme.spacing[2],
+    opacity: 0.82,
+  },
+}));
+
+function ChatToolReplyBubble({ message }: { message: string }) {
+  return (
+    <View style={chatToolReplyBubbleStylesheet.bubble}>
+      <View style={chatToolReplyBubbleStylesheet.slackSourceBadge} pointerEvents="none">
+        <ThemedSlackIcon size={13} uniProps={foregroundMutedColorMapping} />
+      </View>
+      <MarkdownRenderer text={message} enableHtmlish={false} />
+    </View>
+  );
+}
 
 interface NativeExpandableBadgeShimmerProps {
   label: string;
@@ -3137,8 +3204,7 @@ export const ToolCall = memo(function ToolCall({
     [toolName, args, effectiveDetail],
   );
   const chatToolMessageContent = useMemo(
-    () =>
-      chatToolMessage ? <MarkdownRenderer text={chatToolMessage} enableHtmlish={false} /> : null,
+    () => (chatToolMessage ? <ChatToolReplyBubble message={chatToolMessage} /> : null),
     [chatToolMessage],
   );
   const handleOpenFile = useMemo(() => {

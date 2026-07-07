@@ -1,9 +1,10 @@
 import path from "node:path";
-import { CHAT_THREAD_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { CHAT_SOURCE_LABEL, CHAT_THREAD_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { z } from "zod";
 import { JsonFileStore } from "./json-state.js";
 
 export const CHAT_THREAD_LABEL = CHAT_THREAD_ID_LABEL;
+export const CHAT_SOURCE_LABEL_KEY = CHAT_SOURCE_LABEL;
 
 export const ChatDestinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("current") }),

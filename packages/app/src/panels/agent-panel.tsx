@@ -87,6 +87,7 @@ interface ChatAgentStateShape {
   status: Agent["status"] | null;
   cwd: string | null;
   workspaceId?: string;
+  labels?: Agent["labels"];
   capabilities?: Agent["capabilities"];
   currentModeId?: Agent["currentModeId"];
   model?: Agent["model"];
@@ -137,6 +138,7 @@ function selectChatAgentState(
     status: agent.status,
     cwd: agent.cwd,
     workspaceId: agent.workspaceId,
+    labels: agent.labels,
     capabilities: agent.capabilities,
     currentModeId: agent.currentModeId,
     model: agent.model,
@@ -164,6 +166,7 @@ function buildChatAgentFromState(
     status: state.status,
     cwd: state.cwd,
     workspaceId: state.workspaceId,
+    labels: state.labels,
     capabilities: state.capabilities,
     currentModeId: state.currentModeId,
     model: state.model,

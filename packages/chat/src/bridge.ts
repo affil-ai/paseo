@@ -35,6 +35,7 @@ import {
 import { slackPostableMessagesFromMarkdown } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
 import {
+  CHAT_SOURCE_LABEL_KEY,
   CHAT_THREAD_LABEL,
   getBindingOwnerAgentId,
   ThreadSessionStore,
@@ -424,6 +425,7 @@ export class ChatBridge {
 
   async createExternalSession(input: {
     externalThreadId: string;
+    source: "slack" | "support";
     title: string;
     systemPrompt?: string;
     initialPrompt: string;
@@ -451,7 +453,10 @@ export class ChatBridge {
       initialPrompt: input.initialPrompt,
       images: input.images ?? [],
       attachments: input.attachments ?? [],
-      labels: { [CHAT_THREAD_LABEL]: input.externalThreadId },
+      labels: {
+        [CHAT_THREAD_LABEL]: input.externalThreadId,
+        [CHAT_SOURCE_LABEL_KEY]: input.source,
+      },
     });
 
     const now = new Date().toISOString();
@@ -507,6 +512,7 @@ export class ChatBridge {
     const title = titleFromText(normalized.cleanedText);
     const session = await this.createExternalSession({
       externalThreadId: normalized.externalThreadId,
+      source: "slack",
       title,
       systemPrompt: assembleExternalIntakeSystemPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),

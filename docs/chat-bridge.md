@@ -376,6 +376,10 @@ workspace row under it:
   `paseo.chat-thread-id` label. Because the bridge does not interface with child agents, it does
   not stamp or relay children; child association comes from the normal parent/subagent relation in
   the Paseo UI.
+- **`paseo.chat-source` label.** The bridge also stamps the office agent with the source used for
+  user-message attribution in Paseo. Current values are `slack` for direct Slack intake and
+  `support` for support-email sessions that announce into Slack. UI code must resolve this through
+  `getChatUserMessageSourceFromLabels()` rather than parsing prompt text or Slack thread ids.
 
 ## Release roadmap
 
@@ -943,8 +947,7 @@ interface change as a small, contained fix.
 2. `thread.subscribe()`.
 3. Resolve sender identity; capture human-thread context if present.
 4. `client.createWorkspace({ source: { kind: "directory", path: <office repo path from config> } })`.
-5. `client.createAgent({ provider: "pi", model: "openai-codex/gpt-5.5", modeId: "medium",
-workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalThreadId } })`
+5. `client.createAgent({ provider: "pi", model: "openai-codex/gpt-5.5", modeId: "medium", workspaceId, initialPrompt, images, labels: { "paseo.chat-thread-id": externalThreadId, "paseo.chat-source": "slack" } })`
    (provider/model/mode come from config; the default is Pi + Codex gpt-5.5 medium).
 6. Persist `ThreadSession { rootAgentId: agentId }`; react `:eyes:` on
    the triggering message; post the compact "Working on it" card with a `View chat` button.

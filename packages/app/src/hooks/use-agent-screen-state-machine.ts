@@ -12,6 +12,7 @@ export interface AgentScreenAgent {
   status: "initializing" | "idle" | "running" | "error" | "closed";
   cwd: string;
   workspaceId?: string;
+  labels?: Record<string, string>;
   capabilities?: AgentCapabilityFlags;
   currentModeId?: string | null;
   model?: string | null;

@@ -167,6 +167,7 @@ describe("ChatBridge session creation", () => {
 
       await bridge.createExternalSession({
         externalThreadId: "slack:D123:111.222",
+        source: "slack",
         title: "Slack request",
         systemPrompt: "system rules",
         initialPrompt: "Jane: please check this",
@@ -177,6 +178,10 @@ describe("ChatBridge session creation", () => {
         expect.objectContaining({
           systemPrompt: "system rules",
           initialPrompt: "Jane: please check this",
+          labels: expect.objectContaining({
+            "paseo.chat-source": "slack",
+            "paseo.chat-thread-id": "slack:D123:111.222",
+          }),
         }),
       ]);
     } finally {

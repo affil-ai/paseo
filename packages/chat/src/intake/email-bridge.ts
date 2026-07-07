@@ -78,6 +78,7 @@ export interface EmailDaemonClient {
 export interface EmailSessionBridge {
   createExternalSession(input: {
     externalThreadId: string;
+    source: "slack" | "support";
     title: string;
     systemPrompt?: string;
     initialPrompt: string;
@@ -369,6 +370,7 @@ export class EmailIntakeBridge {
     try {
       const session = await this.deps.bridge.createExternalSession({
         externalThreadId,
+        source: "support",
         title: supportEmailTitle(input.email),
         systemPrompt: assembleExternalIntakeSystemPrompt({
           basePrompt: externalIntakeAgentPrompt(this.deps.relayMode),

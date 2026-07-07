@@ -50,6 +50,7 @@ interface Harness {
   sentMessages: Array<{ agentId: string; message: string; options: unknown }>;
   createdSessions: Array<{
     externalThreadId: string;
+    source: "slack" | "support";
     title: string;
     systemPrompt: string | undefined;
     initialPrompt: string;
@@ -156,6 +157,7 @@ async function createHarness(
         const agentId = `agent-${agentCounter}`;
         harness.createdSessions.push({
           externalThreadId: input.externalThreadId,
+          source: input.source,
           title: input.title,
           systemPrompt: input.systemPrompt,
           initialPrompt: input.initialPrompt,
@@ -255,6 +257,7 @@ describe("EmailIntakeBridge", () => {
     expect(harness.createdSessions).toHaveLength(1);
     const session = harness.createdSessions[0];
     expect(session?.externalThreadId).toBe("slack:C42:111.222");
+    expect(session?.source).toBe("support");
     expect(session?.title).toBe("Support: Cannot log in");
     expect(session?.initialPrompt).toContain("inbound support email");
     expect(session?.initialPrompt).toContain("Subject: Cannot log in");
