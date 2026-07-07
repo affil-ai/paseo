@@ -359,7 +359,7 @@ export class ChatBridge {
           turnId: relayId,
           agentId: ownerAgentId,
           startedSeq: sinceSeq,
-          reminderAttempted: false,
+          reminderCount: 0,
         });
       }
       if (this.config.relayMode === "auto") {
@@ -609,35 +609,31 @@ export class ChatBridge {
       return;
     }
 
-    if (turn.reminderAttempted) {
-      await this.postManualWatchdogFallback(input);
-      await this.store.clearManualReplyTurn(input.externalThreadId, input.turnId);
-      return;
-    }
-
-    await this.store.markManualReplyReminderAttempted(input.externalThreadId, input.turnId);
-    const reminderTurnId = `${input.turnId}:final-reply-reminder`;
+    const reminderCount = turn.reminderCount + 1;
+    const rootTurnId = input.turnId.replace(/(?::final-reply-reminder-\d+)+$/, "");
+    const reminderTurnId = `${rootTurnId}:final-reply-reminder-${reminderCount}`;
     const reminderStartedSeq = await this.getTimelineNextSeq(input.agentId);
-    await this.store.startManualReplyTurn({
+    const reminderTurn = await this.store.advanceManualReplyReminder({
       externalThreadId: input.externalThreadId,
-      turnId: reminderTurnId,
-      agentId: input.agentId,
+      currentTurnId: input.turnId,
+      nextTurnId: reminderTurnId,
       startedSeq: reminderStartedSeq,
-      reminderAttempted: true,
     });
+    if (!reminderTurn) return;
+
     try {
       await this.client.sendAgentMessage(
         input.agentId,
-        this.buildManualFinalReplyReminder(input.externalThreadId),
+        this.buildManualFinalReplyReminder(input.externalThreadId, reminderCount),
       );
-    } catch {
-      await this.postManualWatchdogFallback({
+    } catch (error) {
+      console.warn("Manual Slack final reply reminder failed", {
         externalThreadId: input.externalThreadId,
         agentId: input.agentId,
         turnId: reminderTurnId,
-        startedSeq: reminderStartedSeq,
+        reminderCount,
+        error,
       });
-      await this.store.clearManualReplyTurn(input.externalThreadId, reminderTurnId);
       return;
     }
     this.startManualFinalReplyWatchdog({
@@ -648,35 +644,16 @@ export class ChatBridge {
     });
   }
 
-  private buildManualFinalReplyReminder(externalThreadId: string): string {
+  private buildManualFinalReplyReminder(externalThreadId: string, reminderCount: number): string {
     return [
       "You ended the Slack turn without sending a Slack-visible final response.",
-      "Send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
-      `If you pass conversationId, use ${externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+      `Reminder attempt ${reminderCount}: send the missing final response now using chat.send to the current Slack binding.`,
+      `If you pass a destination, use { kind: "conversation", conversationId: "${externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
     ].join("\n");
   }
 
-  private async postManualWatchdogFallback(input: ManualFinalReplyWatchdogInput): Promise<void> {
-    await this.postMessage(
-      this.getThread(input.externalThreadId),
-      input.externalThreadId,
-      "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
-    );
-    await this.store.appendAuditRecord({
-      id: `aud_${randomUUID()}`,
-      timestamp: new Date().toISOString(),
-      officeAgentId: input.agentId,
-      toolName: "chat.manualFinalReplyWatchdog.fallback",
-      resolvedExternalThreadId: input.externalThreadId,
-      conversationId: input.externalThreadId,
-      messagePreview:
-        "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
-      result: "posted",
-    });
-  }
-
   private async getLatestRelayableAssistantSeq(agentId: string, sinceSeq: number): Promise<number> {
-    // Manual mode has no provider-level "this chat.reply is the final one" marker.
+    // Manual mode has no provider-level "this chat.send is the final one" marker.
     // We treat a chat.* delivery as final when it happens after the latest relayable
     // assistant text for the turn. A progress reply followed only by tool work can
     // still satisfy the watchdog because the daemon timeline has no later assistant

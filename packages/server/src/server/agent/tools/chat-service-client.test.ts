@@ -38,7 +38,7 @@ describe("prepareChatOutboundFile", () => {
     ).rejects.toMatchObject({ code: "file_not_found" });
   });
 
-  it("rejects non-image files for chat.sendImage", async () => {
+  it("rejects non-image files when image-only validation is requested", async () => {
     const dir = await createTempDir();
     const filePath = join(dir, "report.csv");
     await writeFile(filePath, "hello", "utf8");

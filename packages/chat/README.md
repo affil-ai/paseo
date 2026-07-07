@@ -25,10 +25,10 @@ Optional:
 - `PASEO_CHAT_ACK_EMOJI=cto`
 - `PASEO_CHAT_STATE_DIR=$PASEO_HOME/chat-bridge`
 - `PASEO_CHAT_SLACK_MODE=socket` (`socket` or `http`)
-- `PASEO_CHAT_RELAY_MODE=auto` (`auto` posts first/final assistant text automatically; `manual` requires the office agent to call `chat.reply` / `chat.sendFile` / `chat.sendImage`)
+- `PASEO_CHAT_RELAY_MODE=auto` (`auto` posts first/final assistant text automatically; `manual` requires the office agent to call `chat.send`)
 - `PASEO_CHAT_HTTP_PORT=8787` for HTTP mode
 - `PASEO_CHAT_SERVICE_HOST=127.0.0.1` / `PASEO_CHAT_SERVICE_PORT=8788` for daemon-owned `chat.*` tools
-- `PASEO_CHAT_PEOPLE_JSON='{"vivek":"U123..."}'` for person aliases used by `chat.startConversation` / `chat.askPerson`
+- `PASEO_CHAT_PEOPLE_JSON='{"vivek":"U123..."}'` for person aliases used by `chat.send` / `chat.ask`
 - `PASEO_CHAT_CHANNELS_JSON='{"growth":"C123..."}'` for optional channel-name aliases; direct channel IDs, names, and Slack permalinks do not need this map
 - `PASEO_CHAT_MAX_UPLOAD_BYTES=26214400` for explicit outbound file/image upload limits
 
@@ -41,7 +41,7 @@ SLACK_APP_TOKEN=xapp-... \
 node packages/chat/dist/index.js
 ```
 
-Mention the bot in Slack or DM it. Replies in the same thread continue the Office agent. In `PASEO_CHAT_RELAY_MODE=auto`, the bridge automatically relays first/final assistant text to the thread; if the office agent explicitly calls `chat.reply` for that same binding, the explicit tool post suppresses the active auto relay for that turn. In `PASEO_CHAT_RELAY_MODE=manual`, assistant text is never auto-posted and the office agent must call `chat.reply` or an upload tool to send Slack output.
+Mention the bot in Slack or DM it. Replies in the same thread continue the Office agent. In `PASEO_CHAT_RELAY_MODE=auto`, the bridge automatically relays first/final assistant text to the thread; if the office agent explicitly calls `chat.send` for that same binding, the explicit tool post suppresses the active auto relay for that turn. In `PASEO_CHAT_RELAY_MODE=manual`, assistant text is never auto-posted and the office agent must call `chat.send` to send Slack-visible text and/or files.
 
 Agent-initiated `chat.*` tools call the loopback service, authenticated by the generated `$PASEO_CHAT_STATE_DIR/service-token`, so agents never receive Slack tokens and all posts/uploads still go through Chat SDK. The daemon only exposes `chat.*` tools to agents stamped with the chat office-agent label; coding subagents do not receive those tools.
 

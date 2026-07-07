@@ -201,7 +201,7 @@ describe("ChatBridgeService", () => {
       turnId: "turn-1",
       agentId: "agent-office",
       startedSeq: 5,
-      reminderAttempted: false,
+      reminderCount: 0,
     });
     const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
       people: {},
@@ -277,6 +277,137 @@ describe("ChatBridgeService", () => {
     });
   });
 
+  it("sends an image-only DM through chat.send", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: { "jenny yoo": "U555" },
+      channels: {},
+    });
+
+    const result = await service.send({
+      officeAgentId: "agent-office",
+      destination: { kind: "person", key: "Jenny Yoo" },
+      files: [filePayload("image/png")],
+    });
+
+    expect(result.externalThreadId).toBe("slack:DU555:333.444");
+    expect(chat.posted[0]).toMatchObject({
+      targetId: "slack:DU555:",
+      message: {
+        markdown: "",
+        files: [{ filename: "chart.png", mimeType: "image/png" }],
+      },
+    });
+  });
+
+  it("sends a file-only message to the current binding through chat.send", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await service.send({ officeAgentId: "agent-office", files: [filePayload("image/png")] });
+
+    expect(chat.posted).toHaveLength(1);
+    expect(chat.posted[0]).toMatchObject({
+      targetId: "slack:C1:111.222",
+      message: {
+        markdown: "",
+        files: [{ filename: "chart.png", mimeType: "image/png" }],
+      },
+    });
+  });
+
+  it("sends text and a file together through chat.send", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await service.send({
+      officeAgentId: "agent-office",
+      message: "hi",
+      files: [filePayload()],
+    });
+
+    expect(chat.posted).toHaveLength(1);
+    expect(chat.posted[0]).toMatchObject({
+      targetId: "slack:C1:111.222",
+      message: {
+        markdown: "hi",
+        files: [{ filename: "report.csv", mimeType: "text/csv" }],
+      },
+    });
+  });
+
+  it("starts and reuses channel conversations through chat.send", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    const first = await service.send({
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C123" },
+      message: "hi",
+    });
+    const second = await service.send({
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C123" },
+      message: "again",
+    });
+
+    expect(second.conversationId).toBe(first.conversationId);
+    expect(chat.targets.get(first.externalThreadId)?.subscribed).toContain(first.externalThreadId);
+    expect(chat.posted).toMatchObject([
+      { targetId: "slack:C123:", message: { markdown: "hi" } },
+      { targetId: first.externalThreadId, message: { markdown: "again" } },
+    ]);
+  });
+
+  it("rejects empty chat.send calls", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await expect(service.send({ officeAgentId: "agent-office" })).rejects.toMatchObject({
+      code: "empty_chat_send",
+    });
+  });
+
   it("uploads files through Chat SDK file payloads and suppresses idempotent retries", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();
@@ -314,6 +445,25 @@ describe("ChatBridgeService", () => {
     expect(uploadPosts[0]?.message).toMatchObject({
       files: [{ filename: "report.csv", mimeType: "text/csv" }],
     });
+  });
+
+  it("stores pending chat.ask requests without person/channel-specific scope", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: { vivek: "U123" },
+      channels: {},
+    });
+
+    const result = await service.ask({
+      officeAgentId: "agent-office",
+      destination: { kind: "person", key: "vivek" },
+      question: "confirm?",
+      timeoutMinutes: 5,
+    });
+
+    expect(result.status).toBe("pending");
+    const binding = await store.getConversation(result.conversationId);
+    expect(binding).toMatchObject({ pendingRequestId: result.requestId });
   });
 
   it("stores pending asks for follow-up answer routing", async () => {

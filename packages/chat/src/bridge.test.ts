@@ -233,11 +233,16 @@ describe("ChatBridge auto relay", () => {
 });
 
 describe("ChatBridge manual final reply watchdog", () => {
-  async function createManualWatchdogHarness(input?: { deliverySeq?: number; reminder?: boolean }) {
+  async function createManualWatchdogHarness(input?: {
+    deliverySeq?: number;
+    reminderCount?: number;
+  }) {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     const externalThreadId = "slack:D123:111.222";
     const rootAgentId = "agent-1";
-    const turnId = input?.reminder ? "turn-1:final-reply-reminder" : "turn-1";
+    const turnId = input?.reminderCount
+      ? `turn-1:final-reply-reminder-${input.reminderCount}`
+      : "turn-1";
     const store = new ThreadSessionStore(stateDir);
     const postedMessages: unknown[] = [];
     const sendCalls: Array<{ agentId: string; text: string }> = [];
@@ -256,7 +261,7 @@ describe("ChatBridge manual final reply watchdog", () => {
       turnId,
       agentId: rootAgentId,
       startedSeq: 5,
-      reminderAttempted: input?.reminder ?? false,
+      reminderCount: input?.reminderCount ?? 0,
     });
     if (input?.deliverySeq !== undefined) {
       await store.recordManualVisibleDelivery({
@@ -300,7 +305,7 @@ describe("ChatBridge manual final reply watchdog", () => {
       {
         postMessage: async (threadId: string, message: unknown) => {
           postedMessages.push(message);
-          return { id: "fallback-message", threadId, raw: null };
+          return { id: "bridge-message", threadId, raw: null };
         },
       },
     );
@@ -338,16 +343,16 @@ describe("ChatBridge manual final reply watchdog", () => {
           agentId: harness.rootAgentId,
           text: [
             "You ended the Slack turn without sending a Slack-visible final response.",
-            "Send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
-            `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+            "Reminder attempt 1: send the missing final response now using chat.send to the current Slack binding.",
+            `If you pass a destination, use { kind: "conversation", conversationId: "${harness.externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
           ].join("\n"),
         },
       ]);
       await expect(
         harness.store.getManualReplyTurn(harness.externalThreadId),
       ).resolves.toMatchObject({
-        turnId: "turn-1:final-reply-reminder",
-        reminderAttempted: true,
+        turnId: "turn-1:final-reply-reminder-1",
+        reminderCount: 1,
         deliverySeq: null,
       });
     } finally {
@@ -381,16 +386,29 @@ describe("ChatBridge manual final reply watchdog", () => {
     }
   });
 
-  it("posts one fallback instead of looping when the reminder turn also omits chat delivery", async () => {
-    const harness = await createManualWatchdogHarness({ reminder: true });
+  it("sends another reminder instead of posting fallback when a reminder also omits chat delivery", async () => {
+    const harness = await createManualWatchdogHarness({ reminderCount: 1 });
     try {
       await harness.enforce();
 
-      expect(harness.sendCalls).toEqual([]);
-      expect(harness.postedMessages).toEqual([
-        "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
+      expect(harness.postedMessages).toEqual([]);
+      expect(harness.sendCalls).toEqual([
+        {
+          agentId: harness.rootAgentId,
+          text: [
+            "You ended the Slack turn without sending a Slack-visible final response.",
+            "Reminder attempt 2: send the missing final response now using chat.send to the current Slack binding.",
+            `If you pass a destination, use { kind: "conversation", conversationId: "${harness.externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
+          ].join("\n"),
+        },
       ]);
-      await expect(harness.store.getManualReplyTurn(harness.externalThreadId)).resolves.toBeNull();
+      await expect(
+        harness.store.getManualReplyTurn(harness.externalThreadId),
+      ).resolves.toMatchObject({
+        turnId: "turn-1:final-reply-reminder-2",
+        reminderCount: 2,
+        deliverySeq: null,
+      });
     } finally {
       await rm(harness.stateDir, { recursive: true, force: true });
     }
@@ -398,6 +416,92 @@ describe("ChatBridge manual final reply watchdog", () => {
 });
 
 describe("ChatBridge follow-up delivery", () => {
+  it("routes subscribed outbound conversation replies to the owning office agent", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const officeAgentId = "agent-office";
+      const store = new ThreadSessionStore(stateDir);
+      const timestamp = new Date().toISOString();
+      await store.upsertBinding({
+        kind: "outbound-conversation",
+        conversationId: "conv_1",
+        externalThreadId,
+        officeAgentId,
+        destination: { kind: "channel", id: "C123" },
+        subscribed: true,
+        activeRelayId: null,
+        title: "outbound",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      const sendCalls: Array<{ agentId: string; text: string }> = [];
+      let createAgentCalls = 0;
+      const client = {
+        createAgent: async () => {
+          createAgentCalls += 1;
+          throw new Error("should not create a new agent for outbound replies");
+        },
+        createWorkspace: async () => {
+          throw new Error("should not create a new workspace for outbound replies");
+        },
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 7 } }),
+        waitForFinish: async () => new Promise(() => {}),
+        sendAgentMessage: async (agentId: string, text: string) => {
+          sendCalls.push({ agentId, text });
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "yes, sounds good",
+        raw: { text: "yes, sounds good", thread_ts: "111.222" },
+        author: {
+          userId: "U1",
+          userName: "vivek",
+          fullName: "Vivek",
+          isBot: false,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: false,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "subscribed");
+
+      expect(createAgentCalls).toBe(0);
+      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls[0]).toMatchObject({ agentId: officeAgentId });
+      expect(sendCalls[0]?.text).toContain("yes, sounds good");
+      expect(await store.hasEventReceipt(`slack:${externalThreadId}:333.444`)).toBe(true);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("marks a Slack follow-up processed only after the agent accepts it", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {
