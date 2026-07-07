@@ -92,6 +92,16 @@ const PendingRequestSchema = z.object({
   updatedAt: z.string(),
 });
 
+const ManualReplyTurnSchema = z.object({
+  turnId: z.string(),
+  agentId: z.string(),
+  startedSeq: z.number().int().nonnegative(),
+  reminderAttempted: z.boolean().default(false),
+  deliverySeq: z.number().int().nonnegative().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 const LegacyDeliveryReceiptSchema = z
   .string()
   .transform((status) => ({ status: status === "completed" ? "completed" : "started" }));
@@ -127,6 +137,7 @@ const StoreSchema = z.object({
   deliveryReceipts: z.record(z.string(), DeliveryReceiptSchema).default({}),
   pendingQuestions: z.record(z.string(), PendingQuestionSchema).default({}),
   pendingRequests: z.record(z.string(), PendingRequestSchema).default({}),
+  manualReplyTurns: z.record(z.string(), ManualReplyTurnSchema).default({}),
   auditRecords: z.array(ChatAuditRecordSchema).default([]),
   // email external id (message id / conversation key) → externalThreadId of the
   // owning Slack announce-thread session
@@ -139,6 +150,7 @@ export type OutboundConversationBinding = z.infer<typeof OutboundConversationBin
 export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;
 export type ThreadSession = ChatBinding;
 export type PendingRequest = z.infer<typeof PendingRequestSchema>;
+export type ManualReplyTurn = z.infer<typeof ManualReplyTurnSchema>;
 export type ChatAuditRecord = z.infer<typeof ChatAuditRecordSchema>;
 type StoreData = z.infer<typeof StoreSchema>;
 
@@ -149,6 +161,7 @@ function emptyStore(): StoreData {
     deliveryReceipts: {},
     pendingQuestions: {},
     pendingRequests: {},
+    manualReplyTurns: {},
     auditRecords: [],
     emailLinks: {},
   };
@@ -240,6 +253,7 @@ export class ThreadSessionStore {
     await this.store.update((data) => {
       delete data.sessions[externalThreadId];
       delete data.pendingQuestions[externalThreadId];
+      delete data.manualReplyTurns[externalThreadId];
       for (const [externalId, threadId] of Object.entries(data.emailLinks)) {
         if (threadId === externalThreadId) {
           delete data.emailLinks[externalId];
@@ -406,6 +420,94 @@ export class ThreadSessionStore {
       }
     });
     return updated;
+  }
+
+  async startManualReplyTurn(input: {
+    externalThreadId: string;
+    turnId: string;
+    agentId: string;
+    startedSeq: number;
+    reminderAttempted: boolean;
+  }): Promise<ManualReplyTurn> {
+    const timestamp = new Date().toISOString();
+    const turn: ManualReplyTurn = {
+      turnId: input.turnId,
+      agentId: input.agentId,
+      startedSeq: input.startedSeq,
+      reminderAttempted: input.reminderAttempted,
+      deliverySeq: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.store.update((data) => {
+      if (!data.sessions[input.externalThreadId]) return;
+      data.manualReplyTurns[input.externalThreadId] = turn;
+    });
+    return turn;
+  }
+
+  async getManualReplyTurn(externalThreadId: string): Promise<ManualReplyTurn | null> {
+    return (await this.load()).manualReplyTurns[externalThreadId] ?? null;
+  }
+
+  async listManualReplyTurns(): Promise<Array<ManualReplyTurn & { externalThreadId: string }>> {
+    const data = await this.load();
+    const turns: Array<ManualReplyTurn & { externalThreadId: string }> = [];
+    for (const [externalThreadId, turn] of Object.entries(data.manualReplyTurns)) {
+      turns.push({
+        turnId: turn.turnId,
+        agentId: turn.agentId,
+        startedSeq: turn.startedSeq,
+        reminderAttempted: turn.reminderAttempted,
+        deliverySeq: turn.deliverySeq,
+        createdAt: turn.createdAt,
+        updatedAt: turn.updatedAt,
+        externalThreadId,
+      });
+    }
+    return turns;
+  }
+
+  async recordManualVisibleDelivery(input: {
+    externalThreadId: string;
+    agentId: string;
+    deliverySeq: number;
+  }): Promise<void> {
+    await this.store.update((data) => {
+      const turn = data.manualReplyTurns[input.externalThreadId];
+      if (!turn || turn.agentId !== input.agentId) return;
+      data.manualReplyTurns[input.externalThreadId] = {
+        ...turn,
+        deliverySeq: Math.max(turn.deliverySeq ?? 0, input.deliverySeq),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  async markManualReplyReminderAttempted(
+    externalThreadId: string,
+    turnId: string,
+  ): Promise<ManualReplyTurn | null> {
+    let updated: ManualReplyTurn | null = null;
+    await this.store.update((data) => {
+      const turn = data.manualReplyTurns[externalThreadId];
+      if (!turn || turn.turnId !== turnId) return;
+      updated = {
+        ...turn,
+        reminderAttempted: true,
+        updatedAt: new Date().toISOString(),
+      };
+      data.manualReplyTurns[externalThreadId] = updated;
+    });
+    return updated;
+  }
+
+  async clearManualReplyTurn(externalThreadId: string, turnId: string): Promise<void> {
+    await this.store.update((data) => {
+      if (data.manualReplyTurns[externalThreadId]?.turnId === turnId) {
+        delete data.manualReplyTurns[externalThreadId];
+      }
+    });
   }
 
   async expirePendingRequests(now: Date): Promise<PendingRequest[]> {

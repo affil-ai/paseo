@@ -95,6 +95,13 @@ interface AssistantTextBlock {
   lastEntryIndex: number;
 }
 
+interface ManualFinalReplyWatchdogInput {
+  externalThreadId: string;
+  agentId: string;
+  turnId: string;
+  startedSeq: number;
+}
+
 function collectAssistantTextBlocksSince(
   entries: readonly AgentTimelineEntry[],
   sinceSeq: number,
@@ -155,6 +162,14 @@ export class ChatBridge {
           }),
         ),
       );
+      for (const turn of await this.store.listManualReplyTurns()) {
+        this.startManualFinalReplyWatchdog({
+          externalThreadId: turn.externalThreadId,
+          agentId: turn.agentId,
+          turnId: turn.turnId,
+          startedSeq: turn.startedSeq,
+        });
+      }
       return;
     }
 
@@ -338,6 +353,15 @@ export class ChatBridge {
       const relayId = message.id;
       const ownerAgentId = getBindingOwnerAgentId(session);
       const sinceSeq = existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
+      if (this.config.relayMode === "manual") {
+        await this.store.startManualReplyTurn({
+          externalThreadId: normalized.externalThreadId,
+          turnId: relayId,
+          agentId: ownerAgentId,
+          startedSeq: sinceSeq,
+          reminderAttempted: false,
+        });
+      }
       if (this.config.relayMode === "auto") {
         await this.store.updateSession(normalized.externalThreadId, (current) => {
           current.activeRelayId = relayId;
@@ -354,6 +378,14 @@ export class ChatBridge {
         );
         await this.store.markEventProcessed(normalized.eventId);
       }
+      if (this.config.relayMode === "manual") {
+        this.startManualFinalReplyWatchdog({
+          externalThreadId: normalized.externalThreadId,
+          agentId: ownerAgentId,
+          turnId: relayId,
+          startedSeq: sinceSeq,
+        });
+      }
       if (this.config.relayMode === "auto") {
         this.startBackgroundRelay({
           thread,
@@ -367,6 +399,7 @@ export class ChatBridge {
         });
       }
     } catch (error) {
+      await this.store.clearManualReplyTurn(normalized.externalThreadId, message.id);
       const reason = error instanceof Error ? error.message : String(error);
       await this.postMessage(
         thread,
@@ -546,6 +579,120 @@ export class ChatBridge {
     await this.store.updateSession(externalThreadId, (current) => {
       if (current.activeRelayId === relayId) current.activeRelayId = null;
     });
+  }
+
+  private startManualFinalReplyWatchdog(input: ManualFinalReplyWatchdogInput): void {
+    if (this.config.relayMode !== "manual") return;
+    void this.enforceManualFinalReply(input).catch((error) => {
+      console.warn("Manual Slack final reply watchdog failed", {
+        externalThreadId: input.externalThreadId,
+        agentId: input.agentId,
+        turnId: input.turnId,
+        error,
+      });
+    });
+  }
+
+  private async enforceManualFinalReply(input: ManualFinalReplyWatchdogInput): Promise<void> {
+    await this.client.waitForFinish(input.agentId, 0);
+    const turn = await this.store.getManualReplyTurn(input.externalThreadId);
+    if (!turn || turn.turnId !== input.turnId || turn.agentId !== input.agentId) return;
+
+    const latestAssistantSeq = await this.getLatestRelayableAssistantSeq(
+      input.agentId,
+      turn.startedSeq,
+    );
+    const deliveredAfterLatestAssistant =
+      turn.deliverySeq !== null && turn.deliverySeq >= latestAssistantSeq;
+    if (deliveredAfterLatestAssistant) {
+      await this.store.clearManualReplyTurn(input.externalThreadId, input.turnId);
+      return;
+    }
+
+    if (turn.reminderAttempted) {
+      await this.postManualWatchdogFallback(input);
+      await this.store.clearManualReplyTurn(input.externalThreadId, input.turnId);
+      return;
+    }
+
+    await this.store.markManualReplyReminderAttempted(input.externalThreadId, input.turnId);
+    const reminderTurnId = `${input.turnId}:final-reply-reminder`;
+    const reminderStartedSeq = await this.getTimelineNextSeq(input.agentId);
+    await this.store.startManualReplyTurn({
+      externalThreadId: input.externalThreadId,
+      turnId: reminderTurnId,
+      agentId: input.agentId,
+      startedSeq: reminderStartedSeq,
+      reminderAttempted: true,
+    });
+    try {
+      await this.client.sendAgentMessage(
+        input.agentId,
+        this.buildManualFinalReplyReminder(input.externalThreadId),
+      );
+    } catch {
+      await this.postManualWatchdogFallback({
+        externalThreadId: input.externalThreadId,
+        agentId: input.agentId,
+        turnId: reminderTurnId,
+        startedSeq: reminderStartedSeq,
+      });
+      await this.store.clearManualReplyTurn(input.externalThreadId, reminderTurnId);
+      return;
+    }
+    this.startManualFinalReplyWatchdog({
+      externalThreadId: input.externalThreadId,
+      agentId: input.agentId,
+      turnId: reminderTurnId,
+      startedSeq: reminderStartedSeq,
+    });
+  }
+
+  private buildManualFinalReplyReminder(externalThreadId: string): string {
+    return [
+      "You ended the Slack turn without sending a Slack-visible final response.",
+      "Send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
+      `If you pass conversationId, use ${externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+    ].join("\n");
+  }
+
+  private async postManualWatchdogFallback(input: ManualFinalReplyWatchdogInput): Promise<void> {
+    await this.postMessage(
+      this.getThread(input.externalThreadId),
+      input.externalThreadId,
+      "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
+    );
+    await this.store.appendAuditRecord({
+      id: `aud_${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      officeAgentId: input.agentId,
+      toolName: "chat.manualFinalReplyWatchdog.fallback",
+      resolvedExternalThreadId: input.externalThreadId,
+      conversationId: input.externalThreadId,
+      messagePreview:
+        "The office agent finished without sending a Slack-visible final reply. Open Paseo to view the full agent timeline.",
+      result: "posted",
+    });
+  }
+
+  private async getLatestRelayableAssistantSeq(agentId: string, sinceSeq: number): Promise<number> {
+    // Manual mode has no provider-level "this chat.reply is the final one" marker.
+    // We treat a chat.* delivery as final when it happens after the latest relayable
+    // assistant text for the turn. A progress reply followed only by tool work can
+    // still satisfy the watchdog because the daemon timeline has no later assistant
+    // text to distinguish that progress update from a final Slack delivery.
+    const timeline = await this.client.fetchAgentTimeline(agentId, {
+      direction: "tail",
+      projection: "canonical",
+      limit: 200,
+    });
+    let latestSeq = sinceSeq;
+    for (const entry of timeline.entries) {
+      if (entry.seqEnd < sinceSeq || entry.item.type !== "assistant_message") continue;
+      if (!isRelayableAssistantText(entry.item.text)) continue;
+      latestSeq = Math.max(latestSeq, entry.seqEnd);
+    }
+    return latestSeq;
   }
 
   private startBackgroundRelay(input: {
