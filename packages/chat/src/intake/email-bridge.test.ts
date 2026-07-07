@@ -340,6 +340,59 @@ describe("EmailIntakeBridge", () => {
     );
   });
 
+  it("routes reply-like Resend emails without References by conversation key", async () => {
+    const replyWithoutReferences: ResendReceivedEmail = {
+      id: "em_2",
+      from: "Jane Doe <jane@customer.com>",
+      to: ["support@affil.ai"],
+      subject: "Re: Cannot log in",
+      text: "Still broken, and my email client dropped the References header.",
+      headers: { "Message-ID": "<msg-2@customer.com>" },
+    };
+    const harness = await createHarness({ em_1: initialEmail, em_2: replyWithoutReferences });
+    const first = webhookBody("em_1");
+    await harness.bridge.handleResendWebhook(first, signedHeaders(first));
+
+    const second = webhookBody("em_2");
+    const result = await harness.bridge.handleResendWebhook(second, signedHeaders(second));
+
+    expect(result.body).toEqual({ accepted: true, continued: true });
+    expect(harness.createdSessions).toHaveLength(1);
+    expect(harness.sentMessages).toHaveLength(1);
+    expect(harness.sentMessages[0]?.message).toContain(
+      "email client dropped the References header",
+    );
+    await expect(harness.store.getEmailLink("message:msg-2@customer.com")).resolves.toBe(
+      "slack:C42:111.222",
+    );
+  });
+
+  it("announces forwarded Resend emails using the original sender identity", async () => {
+    const forwarded: ResendReceivedEmail = {
+      id: "em_forwarded",
+      from: "Support <support@affil.ai>",
+      to: ["inbound@resend.dev"],
+      subject: "Cannot log in",
+      text: "I cannot log in to my account.",
+      headers: {
+        "Message-ID": "<wrapped@affil.ai>",
+        "X-Original-From": "Jane Doe <jane@customer.com>",
+        "X-Original-Message-ID": "<msg-1@customer.com>",
+      },
+    };
+    const harness = await createHarness({ em_forwarded: forwarded });
+    const body = webhookBody("em_forwarded");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(result.body).toEqual({ accepted: true, created: true });
+    const announce = harness.channelPosts[0] as { markdown?: string };
+    expect(announce.markdown).toContain("New support email from jane@customer.com");
+    expect(harness.createdSessions[0]?.initialPrompt).toContain("Jane Doe");
+    await expect(harness.store.getEmailLink("message:msg-1@customer.com")).resolves.toBe(
+      "slack:C42:111.222",
+    );
+  });
+
   it("posts reply previews as code blocks with attachments", async () => {
     const replyWithImage: ResendReceivedEmail = {
       ...replyEmail,

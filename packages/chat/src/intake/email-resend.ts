@@ -16,9 +16,8 @@ export interface ResendReceivedEmailWebhook {
 }
 
 export interface ResendReceivedEmail {
-  readonly source?: "gmail" | "resend";
+  readonly source?: "resend";
   readonly id: string;
-  readonly gmailThreadId?: string | null;
   readonly to?: readonly string[];
   readonly from?: string;
   readonly created_at?: string;
@@ -240,6 +239,21 @@ function emailAddressesFromText(value: string | undefined): string[] {
   return [...addresses];
 }
 
+function emailHeaderValue(email: ResendReceivedEmail, name: string): string | undefined {
+  const headers = email.headers ?? {};
+  const header = Object.entries(headers).find(
+    ([headerName]) => headerName.toLowerCase() === name.toLowerCase(),
+  );
+  return header?.[1];
+}
+
+function emailHeaderValues(email: ResendReceivedEmail, names: readonly string[]): string[] {
+  return names.flatMap((name) => {
+    const value = emailHeaderValue(email, name)?.trim();
+    return value && value.length > 0 ? [value] : [];
+  });
+}
+
 function isSupportAddress(address: string, context: EmailIntakeContext): boolean {
   const supportAddress = context.supportAddress?.toLowerCase();
   return supportAddress !== undefined && address === supportAddress;
@@ -257,10 +271,43 @@ function isInternalEmailAddress(address: string, context: EmailIntakeContext): b
 }
 
 export function emailSenderIdentity(email: ResendReceivedEmail): SenderIdentity {
+  return emailSenderIdentityForContext(email);
+}
+
+export function emailSenderIdentityForContext(
+  email: ResendReceivedEmail,
+  context: EmailIntakeContext = {},
+): SenderIdentity {
   const from = email.from?.trim() ?? "";
-  const address = normalizeEmailAddress(from) ?? "unknown-sender";
+  const fromAddress = normalizeEmailAddress(from);
+  const originalSender = [
+    ...emailHeaderValues(email, [
+      "x-original-from",
+      "x-original-sender",
+      "x-forwarded-for",
+      "resent-from",
+      "reply-to",
+      "from",
+    ]),
+    ...(email.reply_to ?? []),
+  ].find((value) => {
+    const address = normalizeEmailAddress(value);
+    return (
+      address !== undefined &&
+      !isSupportAddress(address, context) &&
+      !isInternalEmailAddress(address, context)
+    );
+  });
+  const selected =
+    fromAddress !== undefined &&
+    (isSupportAddress(fromAddress, context) || isInternalEmailAddress(fromAddress, context)) &&
+    originalSender
+      ? originalSender
+      : from;
+  const address =
+    normalizeEmailAddress(selected) ?? normalizeEmailAddress(from) ?? "unknown-sender";
   const name =
-    from
+    selected
       .replace(/<[^>]*>/g, "")
       .replace(/["']/g, "")
       .trim() || address;
@@ -275,7 +322,18 @@ function externalParticipantAddresses(
 ): string[] {
   const values = [
     email.from,
+    ...(email.to ?? []),
+    ...(email.cc ?? []),
     ...(email.reply_to ?? []),
+    ...emailHeaderValues(email, [
+      "from",
+      "reply-to",
+      "x-original-from",
+      "x-original-sender",
+      "x-forwarded-for",
+      "resent-from",
+      "return-path",
+    ]),
     ...emailAddressesFromText(email.text ?? undefined),
     ...emailAddressesFromText(email.html ?? undefined),
   ];
@@ -308,6 +366,10 @@ export function isForwardLikeEmail(email: ResendReceivedEmail): boolean {
 
   const body = `${email.text ?? ""}\n${email.html ?? ""}`;
   return /forwarded message|begin forwarded message|original message/i.test(body);
+}
+
+function hasReplyLikeSubject(email: ResendReceivedEmail): boolean {
+  return /^\s*re\s*:/i.test(email.subject ?? "");
 }
 
 export function isFromInternalSender(
@@ -357,30 +419,23 @@ function messageIdsFromHeader(value: string | undefined): string[] {
   return [...ids];
 }
 
-function emailHeaderValue(email: ResendReceivedEmail, name: string): string | undefined {
-  const headers = email.headers ?? {};
-  const header = Object.entries(headers).find(
-    ([headerName]) => headerName.toLowerCase() === name.toLowerCase(),
-  );
-  return header?.[1];
-}
-
 function ownExternalIds(email: ResendReceivedEmail): string[] {
   const ids = new Set<string>();
-  const messageId = email.message_id ?? emailHeaderValue(email, "message-id");
-  if (messageId !== undefined) {
+  const messageIds = [
+    email.message_id ?? emailHeaderValue(email, "message-id"),
+    ...emailHeaderValues(email, [
+      "x-original-message-id",
+      "x-forwarded-message-id",
+      "resent-message-id",
+    ]),
+  ];
+  for (const messageId of messageIds) {
+    if (messageId === undefined) continue;
     for (const id of messageIdsFromHeader(messageId)) {
       ids.add(id);
     }
   }
-  if (email.source === "gmail") {
-    ids.add(`gmail:message:${email.id}`);
-    if (email.gmailThreadId?.trim()) {
-      ids.add(`gmail:thread:${email.gmailThreadId.trim()}`);
-    }
-  } else {
-    ids.add(`resend:${email.id}`);
-  }
+  ids.add(`resend:${email.id}`);
   return [...ids];
 }
 
@@ -409,18 +464,14 @@ export function supportEmailLookupExternalIds(
   email: ResendReceivedEmail,
   context: EmailIntakeContext,
 ): string[] {
-  const gmailThreadIds =
-    email.source === "gmail" && email.gmailThreadId?.trim()
-      ? [`gmail:thread:${email.gmailThreadId.trim()}`]
-      : [];
+  const shouldUseConversationFallback =
+    hasReplyLikeSubject(email) ||
+    (isFromInternalSender(email, context) && isForwardLikeEmail(email));
   return [
     ...new Set([
-      ...gmailThreadIds,
       ...supportEmailReferencedExternalIds(email),
       ...ownExternalIds(email),
-      ...(isFromInternalSender(email, context) && isForwardLikeEmail(email)
-        ? conversationExternalIds(email, context)
-        : []),
+      ...(shouldUseConversationFallback ? conversationExternalIds(email, context) : []),
     ]),
   ];
 }
@@ -502,8 +553,11 @@ export function supportEmailTitle(email: ResendReceivedEmail): string {
   return subject && subject.length > 0 ? `Support: ${subject}` : "Support email triage";
 }
 
-export function supportEmailSlackTitle(email: ResendReceivedEmail): string {
-  const sender = normalizeEmailAddress(email.from ?? "") ?? email.from?.trim() ?? "unknown sender";
+export function supportEmailSlackTitle(
+  email: ResendReceivedEmail,
+  context: EmailIntakeContext = {},
+): string {
+  const sender = emailSenderIdentityForContext(email, context).userId;
   return `New support email from ${sender}: ${email.subject ?? "(no subject)"}`;
 }
 

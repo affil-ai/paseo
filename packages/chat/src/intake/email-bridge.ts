@@ -18,7 +18,7 @@ import {
   decodeResendWebhook,
   type EmailAttachmentDownloader,
   emailBody,
-  emailSenderIdentity,
+  emailSenderIdentityForContext,
   fetchResendReceivedEmail,
   formatFollowupEmailForAgent,
   formatSupportEmailForAgent,
@@ -289,7 +289,7 @@ export class EmailIntakeBridge {
     const binding = await this.deps.store.getSession(input.existingThreadId);
     if (!binding) throw new Error("Email session disappeared while processing reply");
     const ownerAgentId = getBindingOwnerAgentId(binding);
-    const sender = emailSenderIdentity(input.email);
+    const sender = emailSenderIdentityForContext(input.email, this.context);
     const slackFiles = await emailSlackFiles(input.processed.attachments);
     const previewText = truncateText(
       stripQuotedEmailChain(emailBody(input.email)),
@@ -361,7 +361,7 @@ export class EmailIntakeBridge {
     });
     const slackFiles = await emailSlackFiles(input.processed.attachments);
     const sent = await channel.post({
-      markdown: `*${supportEmailSlackTitle(input.email)}*\n\n${markdownCodeBlock(preview)}`,
+      markdown: `*${supportEmailSlackTitle(input.email, this.context)}*\n\n${markdownCodeBlock(preview)}`,
       ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
     });
     const externalThreadId = threadIdFromPostedMessage(channel.id, sent);
@@ -379,7 +379,7 @@ export class EmailIntakeBridge {
             .join("\n\n"),
         }),
         initialPrompt: assembleInitialPrompt({
-          sender: emailSenderIdentity(input.email),
+          sender: emailSenderIdentityForContext(input.email, this.context),
           text: formatSupportEmailForAgent(input.email, input.processed.attachments, this.context),
           relayMode: this.deps.relayMode,
           sourceInstruction: incomingEmailInstruction(

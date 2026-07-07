@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assembleContextOnlySlackPrompt,
   assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
@@ -73,5 +74,16 @@ describe("Slack chat prompt delivery instructions", () => {
     );
     expect(followup).toContain("inbound support email");
     expect(followup).not.toContain("This message came from Slack.");
+  });
+
+  it("keeps context-only Slack instructions short", () => {
+    const prompt = assembleContextOnlySlackPrompt(sender, "aside - probably unrelated");
+
+    expect(prompt).toContain("This Slack message is context only.");
+    expect(prompt).toContain("Do not respond.");
+    expect(prompt).toContain("Continue what you were doing.");
+    expect(prompt).toContain("Jane Doe (@jane): aside - probably unrelated");
+    expect(prompt).not.toContain("adjust");
+    expect(prompt).not.toContain("internal work");
   });
 });

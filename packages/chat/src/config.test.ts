@@ -20,7 +20,7 @@ describe("resolveEmailConfig", () => {
   it("returns null without warning when nothing is configured", () => {
     const warnings: string[] = [];
     expect(
-      resolveEmailConfig(undefined, {}, {}, {}, (message: string) => warnings.push(message)),
+      resolveEmailConfig(undefined, {}, {}, (message: string) => warnings.push(message)),
     ).toBeNull();
     expect(warnings).toEqual([]);
   });
@@ -30,7 +30,6 @@ describe("resolveEmailConfig", () => {
     const resolved = resolveEmailConfig(
       undefined,
       { resendApiKey: "re_123" },
-      {},
       {},
       (message: string) => warnings.push(message),
     );
@@ -48,7 +47,6 @@ describe("resolveEmailConfig", () => {
         channel: "#Support-Emails",
         supportAddress: "Support@Affil.ai",
       },
-      {},
       { "support-emails": "C123456" },
     );
     expect(resolved).toEqual({
@@ -65,37 +63,21 @@ describe("resolveEmailConfig", () => {
       "resend",
       { resendApiKey: "re_123", resendWebhookSecret: "whsec_abc", channel: "C987654" },
       {},
-      {},
     );
     expect(resolved?.channelId).toBe("C987654");
     expect(resolved?.supportAddress).toBeUndefined();
   });
 
-  it("resolves Gmail env config with the persisted Slack channel", () => {
+  it("warns and disables unsupported legacy providers", () => {
+    const warnings: string[] = [];
     const resolved = resolveEmailConfig(
       "gmail",
-      { channel: "support-emails" },
-      {
-        inboxEmail: "hello@nextcard.com",
-        oauthClientId: "client",
-        oauthClientSecret: "secret",
-        refreshToken: "refresh",
-        pubsubTopic: "projects/p/topics/nextcard-hello-gmail",
-        webhookToken: "token",
-      },
+      { resendApiKey: "re_123", resendWebhookSecret: "whsec_abc", channel: "support-emails" },
       { "support-emails": "C42" },
+      (message: string) => warnings.push(message),
     );
-    expect(resolved).toEqual({
-      provider: "gmail",
-      channelId: "C42",
-      inboxEmail: "hello@nextcard.com",
-      oauthClientId: "client",
-      oauthClientSecret: "secret",
-      refreshToken: "refresh",
-      pubsubTopic: "projects/p/topics/nextcard-hello-gmail",
-      webhookToken: "token",
-      supportAddress: "hello@nextcard.com",
-    });
+    expect(resolved).toBeNull();
+    expect(warnings[0]).toContain('unsupported provider "gmail"');
   });
 });
 

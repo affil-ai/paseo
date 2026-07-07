@@ -122,13 +122,6 @@ const ChatAuditRecordSchema = z.object({
   errorCode: z.string().optional(),
 });
 
-const GmailWatchStateSchema = z.object({
-  inboxEmail: z.string(),
-  historyId: z.string(),
-  expiration: z.string().nullable().default(null),
-  updatedAt: z.string(),
-});
-
 const EmailClassificationSchema = z.object({
   isSupport: z.boolean(),
   confidence: z.number(),
@@ -157,7 +150,6 @@ const StoreSchema = z.object({
   // email external id (message id / conversation key) → externalThreadId of the
   // owning Slack announce-thread session
   emailLinks: z.record(z.string(), z.string()).default({}),
-  gmailWatches: z.record(z.string(), GmailWatchStateSchema).default({}),
   emailAuditRecords: z.array(EmailAuditRecordSchema).default([]),
 });
 
@@ -168,7 +160,6 @@ export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;
 export type ThreadSession = ChatBinding;
 export type PendingRequest = z.infer<typeof PendingRequestSchema>;
 export type ChatAuditRecord = z.infer<typeof ChatAuditRecordSchema>;
-export type GmailWatchState = z.infer<typeof GmailWatchStateSchema>;
 export type EmailAuditRecord = z.infer<typeof EmailAuditRecordSchema>;
 type StoreData = z.infer<typeof StoreSchema>;
 
@@ -181,7 +172,6 @@ function emptyStore(): StoreData {
     pendingRequests: {},
     auditRecords: [],
     emailLinks: {},
-    gmailWatches: {},
     emailAuditRecords: [],
   };
 }
@@ -299,20 +289,6 @@ export class ThreadSessionStore {
       for (const externalId of externalIds) {
         data.emailLinks[externalId] = externalThreadId;
       }
-    });
-  }
-
-  async getGmailWatch(inboxEmail: string): Promise<GmailWatchState | null> {
-    return (await this.load()).gmailWatches[inboxEmail.toLowerCase()] ?? null;
-  }
-
-  async putGmailWatch(watch: Omit<GmailWatchState, "updatedAt">): Promise<void> {
-    await this.store.update((data) => {
-      data.gmailWatches[watch.inboxEmail.toLowerCase()] = {
-        ...watch,
-        inboxEmail: watch.inboxEmail.toLowerCase(),
-        updatedAt: new Date().toISOString(),
-      };
     });
   }
 

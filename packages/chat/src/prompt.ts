@@ -104,3 +104,7 @@ export function assembleFollowupPrompt(
 ): string {
   return `${sourceInstruction ?? incomingSlackInstruction(relayMode)}\n\n${senderLine(sender)}: ${text}`;
 }
+
+export function assembleContextOnlySlackPrompt(sender: SenderIdentity, text: string): string {
+  return `This Slack message is context only. Do not respond. Continue what you were doing.\n\n${senderLine(sender)}: ${text}`;
+}

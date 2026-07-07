@@ -4,6 +4,7 @@ import {
   decodeResendWebhook,
   emailBody,
   emailSenderIdentity,
+  emailSenderIdentityForContext,
   formatSupportEmailForAgent,
   htmlToText,
   isForwardLikeEmail,
@@ -43,20 +44,7 @@ describe("external id derivation", () => {
     expect(ids).toContain("conversation:jane@customer.com:cannot log in");
   });
 
-  it("stores and looks up Gmail message and thread ids", () => {
-    const email = makeEmail({
-      source: "gmail",
-      id: "gmail-message-1",
-      gmailThreadId: "gmail-thread-1",
-    });
-    const ids = supportEmailStoredExternalIds(email, context);
-    expect(ids).toContain("gmail:message:gmail-message-1");
-    expect(ids).toContain("gmail:thread:gmail-thread-1");
-    expect(ids).not.toContain("resend:gmail-message-1");
-    expect(supportEmailLookupExternalIds(email, context)[0]).toBe("gmail:thread:gmail-thread-1");
-  });
-
-  it("looks up referenced ids for replies without conversation fallback for external senders", () => {
+  it("looks up referenced ids for replies before conversation fallback", () => {
     const reply = makeEmail({
       id: "em_2",
       subject: "Re: Cannot log in",
@@ -70,10 +58,13 @@ describe("external id derivation", () => {
     expect(lookup).toContain("message:msg-1@customer.com");
     expect(lookup).toContain("message:msg-0@customer.com");
     expect(lookup).toContain("message:msg-2@customer.com");
-    expect(lookup.some((id) => id.startsWith("conversation:"))).toBe(false);
+    expect(lookup).toContain("conversation:jane@customer.com:cannot log in");
     // referenced ids come before own ids so genuine replies match before redelivery ids
     expect(lookup.indexOf("message:msg-1@customer.com")).toBeLessThan(
       lookup.indexOf("message:msg-2@customer.com"),
+    );
+    expect(lookup.indexOf("message:msg-2@customer.com")).toBeLessThan(
+      lookup.indexOf("conversation:jane@customer.com:cannot log in"),
     );
   });
 
@@ -106,6 +97,39 @@ describe("external id derivation", () => {
     expect(
       supportEmailLookupExternalIds(external, context).some((id) => id.startsWith("conversation:")),
     ).toBe(false);
+  });
+
+  it("uses conversation fallback for reply-like subjects when message references are missing", () => {
+    const reply = makeEmail({
+      id: "em_2",
+      subject: "Re: Cannot log in",
+      headers: { "Message-ID": "<msg-2@customer.com>" },
+    });
+    const lookup = supportEmailLookupExternalIds(reply, context);
+    expect(lookup).toContain("message:msg-2@customer.com");
+    expect(lookup).toContain("conversation:jane@customer.com:cannot log in");
+  });
+
+  it("stores original forwarded message ids and original sender conversation keys", () => {
+    const forwarded = makeEmail({
+      id: "em_forwarded",
+      from: "Hello <hello@nextcard.com>",
+      to: ["inbound@resend.dev"],
+      headers: {
+        "Message-ID": "<wrapped@nextcard.com>",
+        "X-Original-Message-ID": "<msg-1@customer.com>",
+        "X-Original-From": "Jane Doe <jane@customer.com>",
+      },
+    });
+    const nextcardContext = { supportAddress: "hello@nextcard.com" };
+    const ids = supportEmailStoredExternalIds(forwarded, nextcardContext);
+    expect(ids).toContain("message:wrapped@nextcard.com");
+    expect(ids).toContain("message:msg-1@customer.com");
+    expect(ids).toContain("conversation:jane@customer.com:cannot log in");
+    expect(emailSenderIdentityForContext(forwarded, nextcardContext)).toEqual({
+      userId: "jane@customer.com",
+      name: "Jane Doe",
+    });
   });
 
   it("excludes the support address and internal domain from conversation participants", () => {

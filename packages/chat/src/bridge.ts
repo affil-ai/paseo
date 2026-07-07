@@ -26,6 +26,7 @@ import {
   titleFromText,
 } from "./intake/slack.js";
 import {
+  assembleContextOnlySlackPrompt,
   assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
@@ -268,7 +269,12 @@ export class ChatBridge {
     normalized: Awaited<ReturnType<typeof normalizeMessage>>,
     existing: ChatBinding | null,
   ): Promise<boolean> {
-    if (normalized.command === "aside") return true;
+    if (normalized.command === "aside") {
+      if (existing) {
+        await this.dispatchContextOnlyMessage({ normalized, session: existing });
+      }
+      return true;
+    }
     if (normalized.command === "mute" || normalized.command === "unmute") {
       if (existing?.kind === "inbound-session") {
         await this.store.updateSession(normalized.externalThreadId, (binding) => {
@@ -278,13 +284,7 @@ export class ChatBridge {
           }
         });
         if (normalized.command === "mute") {
-          await this.client.archiveAgent(getBindingOwnerAgentId(existing)).catch((error) => {
-            console.warn("Failed to archive muted chat agent", {
-              agentId: getBindingOwnerAgentId(existing),
-              externalThreadId: normalized.externalThreadId,
-              error,
-            });
-          });
+          await this.dispatchContextOnlyMessage({ normalized, session: existing });
         }
       }
       await this.reactToMuteCommand(thread, message, normalized.command);
@@ -345,7 +345,10 @@ export class ChatBridge {
     if (await this.store.hasEventReceipt(normalized.eventId)) return;
     await thread.subscribe();
     if (await this.handleCommand(thread, message, normalized, existing)) return;
-    if (existing?.kind === "inbound-session" && existing.muted && !message.isMention) return;
+    if (existing?.kind === "inbound-session" && existing.muted) {
+      await this.dispatchContextOnlyMessage({ normalized, session: existing });
+      return;
+    }
 
     try {
       const session = existing ?? (await this.startNewSession(thread, message, normalized));
@@ -360,6 +363,33 @@ export class ChatBridge {
         `I couldn't start a task from this message. Reason: ${reason}`,
       );
     }
+  }
+
+  private async dispatchContextOnlyMessage(input: {
+    normalized: Awaited<ReturnType<typeof normalizeMessage>>;
+    session: ChatBinding;
+  }): Promise<void> {
+    const ownerAgentId = getBindingOwnerAgentId(input.session);
+    await this.store.updateSession(input.normalized.externalThreadId, (current) => {
+      current.activeRelayId = null;
+    });
+    await this.client
+      .sendAgentMessage(
+        ownerAgentId,
+        assembleContextOnlySlackPrompt(input.normalized.sender, input.normalized.cleanedText),
+        {
+          images: input.normalized.images,
+          attachments: input.normalized.attachments,
+        },
+      )
+      .catch((error) => {
+        console.warn("Failed to send context-only Slack message to agent", {
+          agentId: ownerAgentId,
+          externalThreadId: input.normalized.externalThreadId,
+          error,
+        });
+      });
+    await this.store.markEventProcessed(input.normalized.eventId);
   }
 
   private async dispatchAgentTurn(input: {

@@ -519,7 +519,7 @@ describe("ChatBridge follow-up delivery", () => {
     }
   });
 
-  it("mutes and archives the inbound agent for natural stop commands", async () => {
+  it("mutes and sends the command to the agent as context only", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {
       const externalThreadId = "slack:C123:111.222";
@@ -536,12 +536,11 @@ describe("ChatBridge follow-up delivery", () => {
         updatedAt: new Date().toISOString(),
       });
 
-      const archived: string[] = [];
       const sendCalls: Array<{ agentId: string; text: string }> = [];
       const client = {
         fetchAgentTimeline: async () => ({ window: { nextSeq: 1 } }),
-        archiveAgent: async (agentId: string) => {
-          archived.push(agentId);
+        archiveAgent: async () => {
+          throw new Error("mute should not archive the agent");
         },
         sendAgentMessage: async (agentId: string, text: string) => {
           sendCalls.push({ agentId, text });
@@ -590,12 +589,106 @@ describe("ChatBridge follow-up delivery", () => {
 
       await bridge.handleMessage(thread as never, message as never, "mention");
 
-      expect(sendCalls).toHaveLength(0);
-      expect(archived).toEqual([rootAgentId]);
+      expect(sendCalls).toEqual([
+        {
+          agentId: rootAgentId,
+          text: expect.stringContaining("This Slack message is context only."),
+        },
+      ]);
+      expect(sendCalls[0]?.text).toContain("Do not respond.");
+      expect(sendCalls[0]?.text).toContain("Continue what you were doing.");
+      expect(sendCalls[0]?.text).toContain("John (@john): dude shut up mute stop");
       await expect(store.getSession(externalThreadId)).resolves.toMatchObject({
         muted: true,
         activeRelayId: null,
       });
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends aside messages to the agent as context only without starting relay", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const rootAgentId = "agent-1";
+      const store = new ThreadSessionStore(stateDir);
+      await store.upsertSession({
+        kind: "inbound-session",
+        externalThreadId,
+        rootAgentId,
+        muted: false,
+        activeRelayId: "relay-1",
+        title: "existing",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const sendCalls: Array<{ agentId: string; text: string }> = [];
+      const client = {
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 1 } }),
+        archiveAgent: async () => {
+          throw new Error("aside should not archive the agent");
+        },
+        sendAgentMessage: async (agentId: string, text: string) => {
+          sendCalls.push({ agentId, text });
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "auto",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openai-codex/gpt-5.5",
+          modeId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        createSentMessageFromMessage: () => ({
+          addReaction: async () => {},
+        }),
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "aside - probably unrelated",
+        raw: { text: "aside - probably unrelated", thread_ts: "111.222" },
+        author: {
+          userId: "U1",
+          userName: "john",
+          fullName: "John",
+          isBot: false,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: false,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "subscribed");
+
+      expect(sendCalls).toEqual([
+        {
+          agentId: rootAgentId,
+          text: expect.stringContaining("This Slack message is context only."),
+        },
+      ]);
+      expect(sendCalls[0]?.text).toContain("John (@john): aside - probably unrelated");
+      await expect(store.getSession(externalThreadId)).resolves.toMatchObject({
+        muted: false,
+        activeRelayId: null,
+      });
+      await expect(store.hasEventReceipt(`slack:${externalThreadId}:333.444`)).resolves.toBe(true);
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }

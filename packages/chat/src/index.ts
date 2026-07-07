@@ -10,7 +10,6 @@ import { ThreadSessionStore } from "./state/thread-session-store.js";
 import { startInboundHttpServer } from "./inbound-http.js";
 import { EmailIntakeBridge } from "./intake/email-bridge.js";
 import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
-import { GmailEmailIntake, GmailSupportEmailClient } from "./intake/email-gmail.js";
 import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
 
@@ -19,7 +18,6 @@ type InboundHttpServer = ReturnType<typeof startInboundHttpServer>;
 
 interface EmailIntakes {
   emailIntake: EmailIntakeBridge | null;
-  gmailIntake: GmailEmailIntake | null;
 }
 
 function startEmailIntakes(input: {
@@ -29,10 +27,6 @@ function startEmailIntakes(input: {
   state: ThreadSessionStore;
   bridge: ChatBridge;
 }): EmailIntakes {
-  const gmailClient =
-    input.config.email?.provider === "gmail"
-      ? new GmailSupportEmailClient(input.config.email)
-      : null;
   const emailIntake = input.config.email
     ? new EmailIntakeBridge({
         email: input.config.email,
@@ -41,45 +35,21 @@ function startEmailIntakes(input: {
         maxUploadBytes: input.config.maxUploadBytes,
         officePrompt: loadOfficePrompt(input.config),
         classifier: createDefaultEmailClassifier(),
-        ...(gmailClient ? { attachmentDownloader: gmailClient.downloadAttachment } : {}),
         chat: input.chat,
         client: input.client,
         store: input.state,
         bridge: input.bridge,
       })
     : null;
-  const gmailIntake =
-    input.config.email?.provider === "gmail" && gmailClient && emailIntake
-      ? new GmailEmailIntake({
-          config: input.config.email,
-          store: input.state,
-          client: gmailClient,
-          handleEmail: (email, eventId) => emailIntake.handleEmail(email, eventId),
-        })
-      : null;
-  return { emailIntake, gmailIntake };
-}
-
-function registerGmailWatch(gmailIntake: GmailEmailIntake | null, supportAddress?: string): void {
-  if (!gmailIntake) return;
-  void gmailIntake
-    .start()
-    .then(() => {
-      console.log(`  gmail watch: registered for ${supportAddress}`);
-      return undefined;
-    })
-    .catch((error) => {
-      console.error("Gmail watch registration failed", error);
-    });
+  return { emailIntake };
 }
 
 function startHttpBridge(input: {
   config: ResolvedChatBridgeConfig;
   chat: ChatRuntime;
   emailIntake: EmailIntakeBridge | null;
-  gmailIntake: GmailEmailIntake | null;
 }): InboundHttpServer | null {
-  if (input.config.slackMode !== "http" && !input.emailIntake && !input.gmailIntake) {
+  if (input.config.slackMode !== "http" && !input.emailIntake) {
     return null;
   }
   return startInboundHttpServer({
@@ -93,15 +63,6 @@ function startHttpBridge(input: {
             input.emailIntake!.handleResendWebhook(rawBody, headers),
         }
       : {}),
-    ...(input.gmailIntake
-      ? {
-          gmailWebhook: (
-            rawBody: string,
-            headers: Record<string, string | string[] | undefined>,
-            requestUrl: string | undefined,
-          ) => input.gmailIntake!.handleWebhook(rawBody, headers, requestUrl),
-        }
-      : {}),
   });
 }
 
@@ -110,7 +71,6 @@ function logReady(input: {
   client: PaseoDaemonClient;
   httpServer: InboundHttpServer | null;
   emailIntake: EmailIntakeBridge | null;
-  gmailIntake: GmailEmailIntake | null;
 }): void {
   const serverInfo = input.client.getLastServerInfoMessage();
   console.log("Office chat bridge v1 ready");
@@ -131,11 +91,6 @@ function logReady(input: {
   if (input.httpServer && input.emailIntake && input.config.email?.provider === "resend") {
     console.log(
       `  email intake: http://${input.config.httpHost}:${input.config.httpPort}/support-email/resend → #${input.config.email?.channelId}`,
-    );
-  }
-  if (input.httpServer && input.gmailIntake) {
-    console.log(
-      `  email intake: http://${input.config.httpHost}:${input.config.httpPort}/support-email/gmail → #${input.config.email?.channelId}`,
     );
   }
 }
@@ -209,14 +164,12 @@ export async function main(): Promise<void> {
     port: config.servicePort,
     tokenPath: config.serviceTokenPath,
   });
-  const { emailIntake, gmailIntake } = startEmailIntakes({ config, chat, client, state, bridge });
-  registerGmailWatch(gmailIntake, config.email?.supportAddress);
-  const httpServer = startHttpBridge({ config, chat, emailIntake, gmailIntake });
-  logReady({ config, client, httpServer, emailIntake, gmailIntake });
+  const { emailIntake } = startEmailIntakes({ config, chat, client, state, bridge });
+  const httpServer = startHttpBridge({ config, chat, emailIntake });
+  logReady({ config, client, httpServer, emailIntake });
 
   const shutdown = async () => {
     clearInterval(askExpiryInterval);
-    gmailIntake?.stop();
     serviceServer.close();
     httpServer?.close();
     await chat.shutdown().catch(() => {});

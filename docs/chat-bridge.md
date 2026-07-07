@@ -539,10 +539,10 @@ Paseo chat deep links point at the concrete workspace route with an agent-open i
 A thread can be silenced via `@bot mute` / `quiet` and re-enabled via `@bot unmute` /
 `resume replies`, with an `aside - <msg>` prefix to ignore a single message. Mute state is
 persisted per thread. The bridge acknowledges mute/unmute with a reaction on the command message
-(`:mute:` / `:sound:` with `:no_bell:` / `:bell:` fallbacks), not a chat reply. While muted,
-ambient/subscribed replies are ignored, but an explicit bot mention still gets through so users
-can wake or direct the agent without first unmuting. Cheap to implement and prevents the bot from
-being noisy in shared channels. Store the flag on the `ThreadSession`.
+(`:mute:` / `:sound:` with `:no_bell:` / `:bell:` fallbacks), not a chat reply. While muted, Slack
+messages are still sent to the office agent with a short context-only instruction: do not respond,
+continue what you were doing. The bridge does not start automatic relay for those context-only
+messages, so Slack stays quiet until the thread is unmuted. Store the flag on the `ThreadSession`.
 
 ### 3. PR-merged notification — **v2 (first feature needing public inbound HTTP)**
 
@@ -956,8 +956,9 @@ interface change as a small, contained fix.
    spawns a coding subagent mid-turn, the bridge does not track or relay that child; the office
    agent remains responsible for summarizing progress back to Slack.
 
-**Reply** (`bot.onSubscribedMessage`): dedup → look up `ThreadSession` (respect `muted`, except explicit bot mentions bypass mute) →
-`client.sendAgentMessage(rootAgentId, text)` → poll projected timeline → post first complete assistant text and final assistant text.
+**Reply** (`bot.onSubscribedMessage`): dedup → look up `ThreadSession` → if muted or prefixed
+`aside -`, send a context-only prompt and do not relay → otherwise `client.sendAgentMessage(rootAgentId, text)` →
+poll projected timeline → post first complete assistant text and final assistant text.
 
 **Permission mid-turn:** office-agent permission requests are posted as standalone buttons/cards;
 the click handler calls `respondToPermission` on the office agent, the agent continues, and the
