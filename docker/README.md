@@ -16,8 +16,10 @@ docker run -d --name paseo \
 
 Then open `http://localhost:6767`.
 
-The base image intentionally does not bundle agent CLIs. Extend it with the
-agents you use:
+The base image includes `npm`, `pnpm`, and `bun` so workspace setup commands can install
+dependencies before an agent starts.
+
+It intentionally does not bundle agent CLIs. Extend it with the agents you use:
 
 ```Dockerfile
 FROM ghcr.io/getpaseo/paseo:latest

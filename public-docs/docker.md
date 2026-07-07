@@ -37,6 +37,7 @@ The image:
 - serves the bundled web UI
 - listens on `0.0.0.0:6767` inside the container
 - stores daemon state under `/home/paseo/.paseo`
+- includes `npm`, `pnpm`, and `bun` for workspace setup commands
 - runs the daemon and launched agents as the non-root `paseo` user
 
 The image does not bundle agent CLIs such as Claude Code, Codex, OpenCode, Copilot, or Pi. Add the agents you use with a small child image.

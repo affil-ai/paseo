@@ -15,6 +15,8 @@ The official image:
 - listens on `0.0.0.0:6767` inside the container
 - enables the bundled daemon web UI with `PASEO_WEB_UI_ENABLED=true`
 - stores daemon state and agent credentials under `/home/paseo`
+- includes common JavaScript package managers (`npm`, `pnpm`, and `bun`) so
+  workspace setup commands can install dependencies without a child image
 - leaves agent CLIs out of the base image
 
 Open the container's HTTP origin, for example `http://localhost:6767`, to load
