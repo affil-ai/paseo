@@ -19,33 +19,40 @@ afterEach(async () => {
 describe("resolveEmailConfig", () => {
   it("returns null without warning when nothing is configured", () => {
     const warnings: string[] = [];
-    expect(resolveEmailConfig({}, {}, (message) => warnings.push(message))).toBeNull();
+    expect(
+      resolveEmailConfig(undefined, {}, {}, {}, (message: string) => warnings.push(message)),
+    ).toBeNull();
     expect(warnings).toEqual([]);
   });
 
   it("warns and disables when only some fields are set", () => {
     const warnings: string[] = [];
-    const resolved = resolveEmailConfig({ resendApiKey: "re_123" }, {}, (message) =>
-      warnings.push(message),
+    const resolved = resolveEmailConfig(
+      undefined,
+      { resendApiKey: "re_123" },
+      {},
+      {},
+      (message: string) => warnings.push(message),
     );
     expect(resolved).toBeNull();
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("resendWebhookSecret");
-    expect(warnings[0]).toContain("channel");
-    expect(warnings[0]).not.toContain("resendApiKey,");
+    expect(warnings[0]).toContain("chat.email.channel");
   });
 
   it("resolves a channel name through the channels map", () => {
     const resolved = resolveEmailConfig(
+      "resend",
       {
         resendApiKey: "re_123",
         resendWebhookSecret: "whsec_abc",
         channel: "#Support-Emails",
         supportAddress: "Support@Affil.ai",
       },
+      {},
       { "support-emails": "C123456" },
     );
     expect(resolved).toEqual({
+      provider: "resend",
       apiKey: "re_123",
       webhookSecret: "whsec_abc",
       channelId: "C123456",
@@ -55,11 +62,40 @@ describe("resolveEmailConfig", () => {
 
   it("passes through a raw channel id when no map entry exists", () => {
     const resolved = resolveEmailConfig(
+      "resend",
       { resendApiKey: "re_123", resendWebhookSecret: "whsec_abc", channel: "C987654" },
+      {},
       {},
     );
     expect(resolved?.channelId).toBe("C987654");
     expect(resolved?.supportAddress).toBeUndefined();
+  });
+
+  it("resolves Gmail env config with the persisted Slack channel", () => {
+    const resolved = resolveEmailConfig(
+      "gmail",
+      { channel: "support-emails" },
+      {
+        inboxEmail: "hello@nextcard.com",
+        oauthClientId: "client",
+        oauthClientSecret: "secret",
+        refreshToken: "refresh",
+        pubsubTopic: "projects/p/topics/nextcard-hello-gmail",
+        webhookToken: "token",
+      },
+      { "support-emails": "C42" },
+    );
+    expect(resolved).toEqual({
+      provider: "gmail",
+      channelId: "C42",
+      inboxEmail: "hello@nextcard.com",
+      oauthClientId: "client",
+      oauthClientSecret: "secret",
+      refreshToken: "refresh",
+      pubsubTopic: "projects/p/topics/nextcard-hello-gmail",
+      webhookToken: "token",
+      supportAddress: "hello@nextcard.com",
+    });
   });
 });
 
@@ -83,6 +119,7 @@ describe("loadConfig chat.email", () => {
       PASEO_CHAT_CHANNELS_JSON: JSON.stringify({ "support-emails": "C42" }),
     } as NodeJS.ProcessEnv);
     expect(config.email).toEqual({
+      provider: "resend",
       apiKey: "re_123",
       webhookSecret: "whsec_abc",
       channelId: "C42",

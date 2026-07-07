@@ -92,23 +92,6 @@ const PendingRequestSchema = z.object({
   updatedAt: z.string(),
 });
 
-const ManualReplyTurnSchema = z
-  .object({
-    turnId: z.string(),
-    agentId: z.string(),
-    startedSeq: z.number().int().nonnegative(),
-    reminderCount: z.number().int().nonnegative().optional(),
-    // COMPAT(manualReplyTurnsReminderAttempted): reads v0.1.104-beta.3 state written before 2026-07-07; remove after 2027-01-07.
-    reminderAttempted: z.boolean().optional(),
-    deliverySeq: z.number().int().nonnegative().nullable().default(null),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-  })
-  .transform(({ reminderAttempted, ...turn }) => ({
-    ...turn,
-    reminderCount: turn.reminderCount ?? (reminderAttempted ? 1 : 0),
-  }));
-
 const LegacyDeliveryReceiptSchema = z
   .string()
   .transform((status) => ({ status: status === "completed" ? "completed" : "started" }));
@@ -138,17 +121,43 @@ const ChatAuditRecordSchema = z.object({
   errorCode: z.string().optional(),
 });
 
+const GmailWatchStateSchema = z.object({
+  inboxEmail: z.string(),
+  historyId: z.string(),
+  expiration: z.string().nullable().default(null),
+  updatedAt: z.string(),
+});
+
+const EmailClassificationSchema = z.object({
+  isSupport: z.boolean(),
+  confidence: z.number(),
+  reason: z.string(),
+});
+
+const EmailAuditRecordSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  source: z.string(),
+  emailId: z.string(),
+  result: z.enum(["created", "continued", "duplicate", "ignored", "non_support", "failed_open"]),
+  subject: z.string().nullable().default(null),
+  from: z.string().nullable().default(null),
+  classification: EmailClassificationSchema.optional(),
+  reason: z.string().optional(),
+});
+
 const StoreSchema = z.object({
   sessions: z.record(z.string(), ChatBindingSchema).default({}),
   eventReceipts: z.record(z.string(), z.string()).default({}),
   deliveryReceipts: z.record(z.string(), DeliveryReceiptSchema).default({}),
   pendingQuestions: z.record(z.string(), PendingQuestionSchema).default({}),
   pendingRequests: z.record(z.string(), PendingRequestSchema).default({}),
-  manualReplyTurns: z.record(z.string(), ManualReplyTurnSchema).default({}),
   auditRecords: z.array(ChatAuditRecordSchema).default([]),
   // email external id (message id / conversation key) → externalThreadId of the
   // owning Slack announce-thread session
   emailLinks: z.record(z.string(), z.string()).default({}),
+  gmailWatches: z.record(z.string(), GmailWatchStateSchema).default({}),
+  emailAuditRecords: z.array(EmailAuditRecordSchema).default([]),
 });
 
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
@@ -157,8 +166,9 @@ export type OutboundConversationBinding = z.infer<typeof OutboundConversationBin
 export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;
 export type ThreadSession = ChatBinding;
 export type PendingRequest = z.infer<typeof PendingRequestSchema>;
-export type ManualReplyTurn = z.infer<typeof ManualReplyTurnSchema>;
 export type ChatAuditRecord = z.infer<typeof ChatAuditRecordSchema>;
+export type GmailWatchState = z.infer<typeof GmailWatchStateSchema>;
+export type EmailAuditRecord = z.infer<typeof EmailAuditRecordSchema>;
 type StoreData = z.infer<typeof StoreSchema>;
 
 function emptyStore(): StoreData {
@@ -168,9 +178,10 @@ function emptyStore(): StoreData {
     deliveryReceipts: {},
     pendingQuestions: {},
     pendingRequests: {},
-    manualReplyTurns: {},
     auditRecords: [],
     emailLinks: {},
+    gmailWatches: {},
+    emailAuditRecords: [],
   };
 }
 
@@ -260,7 +271,6 @@ export class ThreadSessionStore {
     await this.store.update((data) => {
       delete data.sessions[externalThreadId];
       delete data.pendingQuestions[externalThreadId];
-      delete data.manualReplyTurns[externalThreadId];
       for (const [externalId, threadId] of Object.entries(data.emailLinks)) {
         if (threadId === externalThreadId) {
           delete data.emailLinks[externalId];
@@ -287,6 +297,29 @@ export class ThreadSessionStore {
     await this.store.update((data) => {
       for (const externalId of externalIds) {
         data.emailLinks[externalId] = externalThreadId;
+      }
+    });
+  }
+
+  async getGmailWatch(inboxEmail: string): Promise<GmailWatchState | null> {
+    return (await this.load()).gmailWatches[inboxEmail.toLowerCase()] ?? null;
+  }
+
+  async putGmailWatch(watch: Omit<GmailWatchState, "updatedAt">): Promise<void> {
+    await this.store.update((data) => {
+      data.gmailWatches[watch.inboxEmail.toLowerCase()] = {
+        ...watch,
+        inboxEmail: watch.inboxEmail.toLowerCase(),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  async recordEmailAudit(record: Omit<EmailAuditRecord, "timestamp">): Promise<void> {
+    await this.store.update((data) => {
+      data.emailAuditRecords.push({ ...record, timestamp: new Date().toISOString() });
+      if (data.emailAuditRecords.length > 500) {
+        data.emailAuditRecords.splice(0, data.emailAuditRecords.length - 500);
       }
     });
   }
@@ -427,99 +460,6 @@ export class ThreadSessionStore {
       }
     });
     return updated;
-  }
-
-  async startManualReplyTurn(input: {
-    externalThreadId: string;
-    turnId: string;
-    agentId: string;
-    startedSeq: number;
-    reminderCount: number;
-  }): Promise<ManualReplyTurn> {
-    const timestamp = new Date().toISOString();
-    const turn: ManualReplyTurn = {
-      turnId: input.turnId,
-      agentId: input.agentId,
-      startedSeq: input.startedSeq,
-      reminderCount: input.reminderCount,
-      deliverySeq: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    await this.store.update((data) => {
-      if (!data.sessions[input.externalThreadId]) return;
-      data.manualReplyTurns[input.externalThreadId] = turn;
-    });
-    return turn;
-  }
-
-  async getManualReplyTurn(externalThreadId: string): Promise<ManualReplyTurn | null> {
-    return (await this.load()).manualReplyTurns[externalThreadId] ?? null;
-  }
-
-  async listManualReplyTurns(): Promise<Array<ManualReplyTurn & { externalThreadId: string }>> {
-    const data = await this.load();
-    const turns: Array<ManualReplyTurn & { externalThreadId: string }> = [];
-    for (const [externalThreadId, turn] of Object.entries(data.manualReplyTurns)) {
-      turns.push({
-        turnId: turn.turnId,
-        agentId: turn.agentId,
-        startedSeq: turn.startedSeq,
-        reminderCount: turn.reminderCount,
-        deliverySeq: turn.deliverySeq,
-        createdAt: turn.createdAt,
-        updatedAt: turn.updatedAt,
-        externalThreadId,
-      });
-    }
-    return turns;
-  }
-
-  async recordManualVisibleDelivery(input: {
-    externalThreadId: string;
-    agentId: string;
-    deliverySeq: number;
-  }): Promise<void> {
-    await this.store.update((data) => {
-      const turn = data.manualReplyTurns[input.externalThreadId];
-      if (!turn || turn.agentId !== input.agentId) return;
-      data.manualReplyTurns[input.externalThreadId] = {
-        ...turn,
-        deliverySeq: Math.max(turn.deliverySeq ?? 0, input.deliverySeq),
-        updatedAt: new Date().toISOString(),
-      };
-    });
-  }
-
-  async advanceManualReplyReminder(input: {
-    externalThreadId: string;
-    currentTurnId: string;
-    nextTurnId: string;
-    startedSeq: number;
-  }): Promise<ManualReplyTurn | null> {
-    let updated: ManualReplyTurn | null = null;
-    await this.store.update((data) => {
-      const turn = data.manualReplyTurns[input.externalThreadId];
-      if (!turn || turn.turnId !== input.currentTurnId) return;
-      updated = {
-        ...turn,
-        turnId: input.nextTurnId,
-        startedSeq: input.startedSeq,
-        reminderCount: turn.reminderCount + 1,
-        deliverySeq: null,
-        updatedAt: new Date().toISOString(),
-      };
-      data.manualReplyTurns[input.externalThreadId] = updated;
-    });
-    return updated;
-  }
-
-  async clearManualReplyTurn(externalThreadId: string, turnId: string): Promise<void> {
-    await this.store.update((data) => {
-      if (data.manualReplyTurns[externalThreadId]?.turnId === turnId) {
-        delete data.manualReplyTurns[externalThreadId];
-      }
-    });
   }
 
   async expirePendingRequests(now: Date): Promise<PendingRequest[]> {

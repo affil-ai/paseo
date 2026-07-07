@@ -43,6 +43,19 @@ describe("external id derivation", () => {
     expect(ids).toContain("conversation:jane@customer.com:cannot log in");
   });
 
+  it("stores and looks up Gmail message and thread ids", () => {
+    const email = makeEmail({
+      source: "gmail",
+      id: "gmail-message-1",
+      gmailThreadId: "gmail-thread-1",
+    });
+    const ids = supportEmailStoredExternalIds(email, context);
+    expect(ids).toContain("gmail:message:gmail-message-1");
+    expect(ids).toContain("gmail:thread:gmail-thread-1");
+    expect(ids).not.toContain("resend:gmail-message-1");
+    expect(supportEmailLookupExternalIds(email, context)[0]).toBe("gmail:thread:gmail-thread-1");
+  });
+
   it("looks up referenced ids for replies without conversation fallback for external senders", () => {
     const reply = makeEmail({
       id: "em_2",

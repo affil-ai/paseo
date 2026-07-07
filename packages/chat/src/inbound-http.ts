@@ -44,6 +44,12 @@ export function startInboundHttpServer(input: {
   emailWebhook?: (
     rawBody: string,
     headers: Record<string, string | string[] | undefined>,
+    requestUrl: string | undefined,
+  ) => Promise<{ status: number; body: unknown }>;
+  gmailWebhook?: (
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+    requestUrl: string | undefined,
   ) => Promise<{ status: number; body: unknown }>;
 }) {
   const slackWebhookEnabled = input.slackWebhookEnabled ?? true;
@@ -70,7 +76,20 @@ export function startInboundHttpServer(input: {
       ) {
         // The Svix signature covers the exact raw bytes, so pass them through untouched.
         const body = (await readBody(req)).toString("utf8");
-        const result = await input.emailWebhook(body, req.headers);
+        const result = await input.emailWebhook(body, req.headers, req.url);
+        res.statusCode = result.status;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(result.body));
+        return;
+      }
+
+      if (
+        input.gmailWebhook &&
+        req.method === "POST" &&
+        req.url?.startsWith("/support-email/gmail")
+      ) {
+        const body = (await readBody(req)).toString("utf8");
+        const result = await input.gmailWebhook(body, req.headers, req.url);
         res.statusCode = result.status;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(result.body));

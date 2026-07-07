@@ -62,14 +62,12 @@ Slack output must stay in the user's message thread:
 - If a Slack-bound chat tool message expands to multiple posts because it contains multiple tables, file uploads stay attached to the first emitted post.
 
 Manual relay mode keeps progress updates explicit: the office agent calls `chat.send` for
-Slack-visible text and/or files instead of relying on automatic final-message relay. To prevent
-silent endings, manual mode persists a final-reply watchdog for
-each inbound Slack turn. When the agent finishes without a Slack-visible delivery after the
-latest relayable assistant text, the bridge sends a reminder/follow-up to the same office agent
-requiring it to post the missing final reply. If a reminder turn also finishes without delivery,
-the bridge sends another reminder on the next agent-finish cycle instead of posting bridge-authored
-fallback text to Slack. The Slack thread should only receive agent-authored `chat.*` deliveries
-for this watchdog path.
+Slack-visible text and/or files instead of relying on automatic final-message relay. The bridge
+does not enforce missing final replies in manual mode: it does not post bridge-authored fallback
+text to Slack and does not send reminder/follow-up prompts back to the agent. The Slack thread
+receives only agent-authored `chat.*` deliveries on this path. The prompt still instructs the
+office agent to end each Slack turn with a final `chat.send`, except when the Slack user
+explicitly asks not to receive another message.
 
 Slack input should match the app's default send behavior:
 

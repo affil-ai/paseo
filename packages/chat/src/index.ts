@@ -1,6 +1,6 @@
-import { Chat } from "chat";
+import { Chat, type Chat as ChatRuntime } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
-import { loadConfig } from "./config.js";
+import { loadConfig, type ResolvedChatBridgeConfig } from "./config.js";
 import { connectToPaseoDaemon, resolveChatRepositoryPath } from "./paseo-client.js";
 import { ChatBridge } from "./bridge.js";
 import { FocusRelay } from "./focus.js";
@@ -9,8 +9,136 @@ import { FileChatStateAdapter } from "./state/chat-state-adapter.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
 import { startInboundHttpServer } from "./inbound-http.js";
 import { EmailIntakeBridge } from "./intake/email-bridge.js";
+import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
+import { GmailEmailIntake, GmailSupportEmailClient } from "./intake/email-gmail.js";
 import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
+
+type PaseoDaemonClient = Awaited<ReturnType<typeof connectToPaseoDaemon>>;
+type InboundHttpServer = ReturnType<typeof startInboundHttpServer>;
+
+interface EmailIntakes {
+  emailIntake: EmailIntakeBridge | null;
+  gmailIntake: GmailEmailIntake | null;
+}
+
+function startEmailIntakes(input: {
+  config: ResolvedChatBridgeConfig;
+  chat: ChatRuntime;
+  client: PaseoDaemonClient;
+  state: ThreadSessionStore;
+  bridge: ChatBridge;
+}): EmailIntakes {
+  const gmailClient =
+    input.config.email?.provider === "gmail"
+      ? new GmailSupportEmailClient(input.config.email)
+      : null;
+  const emailIntake = input.config.email
+    ? new EmailIntakeBridge({
+        email: input.config.email,
+        relayMode: input.config.relayMode,
+        stateDir: input.config.stateDir,
+        maxUploadBytes: input.config.maxUploadBytes,
+        officePrompt: loadOfficePrompt(input.config),
+        classifier: createDefaultEmailClassifier(),
+        ...(gmailClient ? { attachmentDownloader: gmailClient.downloadAttachment } : {}),
+        chat: input.chat,
+        client: input.client,
+        store: input.state,
+        bridge: input.bridge,
+      })
+    : null;
+  const gmailIntake =
+    input.config.email?.provider === "gmail" && gmailClient && emailIntake
+      ? new GmailEmailIntake({
+          config: input.config.email,
+          store: input.state,
+          client: gmailClient,
+          handleEmail: (email, eventId) => emailIntake.handleEmail(email, eventId),
+        })
+      : null;
+  return { emailIntake, gmailIntake };
+}
+
+function registerGmailWatch(gmailIntake: GmailEmailIntake | null, supportAddress?: string): void {
+  if (!gmailIntake) return;
+  void gmailIntake
+    .start()
+    .then(() => {
+      console.log(`  gmail watch: registered for ${supportAddress}`);
+      return undefined;
+    })
+    .catch((error) => {
+      console.error("Gmail watch registration failed", error);
+    });
+}
+
+function startHttpBridge(input: {
+  config: ResolvedChatBridgeConfig;
+  chat: ChatRuntime;
+  emailIntake: EmailIntakeBridge | null;
+  gmailIntake: GmailEmailIntake | null;
+}): InboundHttpServer | null {
+  if (input.config.slackMode !== "http" && !input.emailIntake && !input.gmailIntake) {
+    return null;
+  }
+  return startInboundHttpServer({
+    chat: input.chat,
+    host: input.config.httpHost,
+    port: input.config.httpPort,
+    slackWebhookEnabled: input.config.slackMode === "http",
+    ...(input.emailIntake && input.config.email?.provider === "resend"
+      ? {
+          emailWebhook: (rawBody: string, headers: Record<string, string | string[] | undefined>) =>
+            input.emailIntake!.handleResendWebhook(rawBody, headers),
+        }
+      : {}),
+    ...(input.gmailIntake
+      ? {
+          gmailWebhook: (
+            rawBody: string,
+            headers: Record<string, string | string[] | undefined>,
+            requestUrl: string | undefined,
+          ) => input.gmailIntake!.handleWebhook(rawBody, headers, requestUrl),
+        }
+      : {}),
+  });
+}
+
+function logReady(input: {
+  config: ResolvedChatBridgeConfig;
+  client: PaseoDaemonClient;
+  httpServer: InboundHttpServer | null;
+  emailIntake: EmailIntakeBridge | null;
+  gmailIntake: GmailEmailIntake | null;
+}): void {
+  const serverInfo = input.client.getLastServerInfoMessage();
+  console.log("Office chat bridge v1 ready");
+  console.log(`  daemon: ${input.config.daemonHost} (${serverInfo?.serverId ?? "connected"})`);
+  console.log(`  office repo: ${input.config.officeRepoPath}`);
+  console.log(
+    `  provider/model/mode: ${input.config.provider} / ${input.config.model} / ${input.config.modeId}`,
+  );
+  console.log(`  state: ${input.config.stateDir}`);
+  console.log(`  slack mode: ${input.config.slackMode}`);
+  console.log(`  relay mode: ${input.config.relayMode}`);
+  console.log(
+    `  chat service: http://${input.config.serviceHost}:${input.config.servicePort}/chat-bridge/rpc`,
+  );
+  if (input.httpServer && input.config.slackMode === "http") {
+    console.log(`  http: http://${input.config.httpHost}:${input.config.httpPort}/slack/events`);
+  }
+  if (input.httpServer && input.emailIntake && input.config.email?.provider === "resend") {
+    console.log(
+      `  email intake: http://${input.config.httpHost}:${input.config.httpPort}/support-email/resend → #${input.config.email?.channelId}`,
+    );
+  }
+  if (input.httpServer && input.gmailIntake) {
+    console.log(
+      `  email intake: http://${input.config.httpHost}:${input.config.httpPort}/support-email/gmail → #${input.config.email?.channelId}`,
+    );
+  }
+}
 
 export async function main(): Promise<void> {
   const baseConfig = loadConfig();
@@ -81,56 +209,14 @@ export async function main(): Promise<void> {
     port: config.servicePort,
     tokenPath: config.serviceTokenPath,
   });
-  const emailIntake = config.email
-    ? new EmailIntakeBridge({
-        email: config.email,
-        relayMode: config.relayMode,
-        stateDir: config.stateDir,
-        maxUploadBytes: config.maxUploadBytes,
-        officePrompt: loadOfficePrompt(config),
-        chat,
-        client,
-        store: state,
-        bridge,
-      })
-    : null;
-  const httpServer =
-    config.slackMode === "http" || emailIntake
-      ? startInboundHttpServer({
-          chat,
-          host: config.httpHost,
-          port: config.httpPort,
-          slackWebhookEnabled: config.slackMode === "http",
-          ...(emailIntake
-            ? {
-                emailWebhook: (
-                  rawBody: string,
-                  headers: Record<string, string | string[] | undefined>,
-                ) => emailIntake.handleResendWebhook(rawBody, headers),
-              }
-            : {}),
-        })
-      : null;
-  const serverInfo = client.getLastServerInfoMessage();
-  console.log("Office chat bridge v1 ready");
-  console.log(`  daemon: ${config.daemonHost} (${serverInfo?.serverId ?? "connected"})`);
-  console.log(`  office repo: ${config.officeRepoPath}`);
-  console.log(`  provider/model/mode: ${config.provider} / ${config.model} / ${config.modeId}`);
-  console.log(`  state: ${config.stateDir}`);
-  console.log(`  slack mode: ${config.slackMode}`);
-  console.log(`  relay mode: ${config.relayMode}`);
-  console.log(`  chat service: http://${config.serviceHost}:${config.servicePort}/chat-bridge/rpc`);
-  if (httpServer && config.slackMode === "http") {
-    console.log(`  http: http://${config.httpHost}:${config.httpPort}/slack/events`);
-  }
-  if (httpServer && emailIntake) {
-    console.log(
-      `  email intake: http://${config.httpHost}:${config.httpPort}/support-email/resend → #${config.email?.channelId}`,
-    );
-  }
+  const { emailIntake, gmailIntake } = startEmailIntakes({ config, chat, client, state, bridge });
+  registerGmailWatch(gmailIntake, config.email?.supportAddress);
+  const httpServer = startHttpBridge({ config, chat, emailIntake, gmailIntake });
+  logReady({ config, client, httpServer, emailIntake, gmailIntake });
 
   const shutdown = async () => {
     clearInterval(askExpiryInterval);
+    gmailIntake?.stop();
     serviceServer.close();
     httpServer?.close();
     await chat.shutdown().catch(() => {});

@@ -12,8 +12,10 @@ import {
 } from "../prompt.js";
 import { normalizeSlackChannelId, threadIdFromPostedMessage } from "../service.js";
 import { getBindingOwnerAgentId, type ThreadSessionStore } from "../state/thread-session-store.js";
+import type { EmailClassifier } from "./email-classifier.js";
 import {
   decodeResendWebhook,
+  type EmailAttachmentDownloader,
   emailBody,
   emailSenderIdentity,
   fetchResendReceivedEmail,
@@ -31,6 +33,7 @@ import {
   verifyResendWebhookSignature,
   type EmailIntakeContext,
   type ProcessedEmailAttachment,
+  type ResendReceivedEmail,
   type ResendReceivedEmailWebhook,
 } from "./email-resend.js";
 
@@ -96,6 +99,8 @@ export interface EmailIntakeBridgeDeps {
   stateDir: string;
   maxUploadBytes: number;
   officePrompt: Promise<string> | string;
+  classifier?: EmailClassifier | undefined;
+  attachmentDownloader?: EmailAttachmentDownloader | undefined;
   chat: EmailChatLike;
   client: EmailDaemonClient;
   store: ThreadSessionStore;
@@ -154,6 +159,10 @@ export class EmailIntakeBridge {
     rawBody: string,
     headers: Record<string, string | string[] | undefined>,
   ): Promise<EmailWebhookResult> {
+    if (this.deps.email.provider !== "resend") {
+      return { status: 404, body: { error: "Resend email intake is not enabled" } };
+    }
+
     try {
       verifyResendWebhookSignature({
         body: rawBody,
@@ -178,24 +187,33 @@ export class EmailIntakeBridge {
 
     const emailId = decoded.emailId;
     const eventId = `email:resend:${emailId}`;
-    if (this.inFlight.has(emailId) || (await this.deps.store.hasEventReceipt(eventId))) {
-      return { status: 200, body: { accepted: true, duplicate: true } };
-    }
-
-    this.inFlight.add(emailId);
     try {
-      return await this.processEmail(emailId, eventId);
+      const email = await fetchResendReceivedEmail({ emailId, apiKey: this.deps.email.apiKey });
+      return await this.handleEmail({ ...email, source: "resend" }, eventId);
     } catch (error) {
       // Leave the event receipt unmarked so Resend's retry reprocesses the email.
       console.warn("Email intake failed", error);
       return { status: 500, body: { error: errorSummary(error) } };
-    } finally {
-      this.inFlight.delete(emailId);
     }
   }
 
-  private async processEmail(emailId: string, eventId: string): Promise<EmailWebhookResult> {
-    const email = await fetchResendReceivedEmail({ emailId, apiKey: this.deps.email.apiKey });
+  async handleEmail(email: ResendReceivedEmail, eventId: string): Promise<EmailWebhookResult> {
+    if (this.inFlight.has(eventId) || (await this.deps.store.hasEventReceipt(eventId))) {
+      return { status: 200, body: { accepted: true, duplicate: true } };
+    }
+
+    this.inFlight.add(eventId);
+    try {
+      return await this.processEmail(email, eventId);
+    } finally {
+      this.inFlight.delete(eventId);
+    }
+  }
+
+  private async processEmail(
+    email: ResendReceivedEmail,
+    eventId: string,
+  ): Promise<EmailWebhookResult> {
     const duplicateIds = new Set(supportEmailDuplicateExternalIds(email));
     const storedIds = supportEmailStoredExternalIds(email, this.context);
 
@@ -216,9 +234,38 @@ export class EmailIntakeBridge {
       // Stale link (session retired via `done`): keep looking, else start fresh.
     }
 
+    if (!existingThreadId) {
+      const classification = await this.classifyNewEmail(email);
+      if (!classification.isSupport) {
+        await this.deps.store.recordEmailAudit({
+          id: eventId,
+          source: email.source ?? "resend",
+          emailId: email.id,
+          result: "non_support",
+          subject: email.subject ?? null,
+          from: email.from ?? null,
+          classification,
+        });
+        await this.deps.store.markEventProcessed(eventId);
+        return { status: 200, body: { accepted: true, ignored: true, reason: "non_support" } };
+      }
+      if (classification.confidence === 0 && classification.reason.includes("failed open")) {
+        await this.deps.store.recordEmailAudit({
+          id: `${eventId}:classification`,
+          source: email.source ?? "resend",
+          emailId: email.id,
+          result: "failed_open",
+          subject: email.subject ?? null,
+          from: email.from ?? null,
+          classification,
+        });
+      }
+    }
+
     const processed = await processEmailAttachments({
       email,
-      apiKey: this.deps.email.apiKey,
+      ...(this.deps.email.provider === "resend" ? { apiKey: this.deps.email.apiKey } : {}),
+      downloader: this.deps.attachmentDownloader,
       storageDir: join(this.deps.stateDir, "email-attachments"),
       maxUploadBytes: this.deps.maxUploadBytes,
     });
@@ -272,7 +319,7 @@ export class EmailIntakeBridge {
         sender,
         formatFollowupEmailForAgent(input.email, input.processed.attachments),
         this.deps.relayMode,
-        incomingEmailInstruction(this.deps.relayMode),
+        incomingEmailInstruction(this.deps.relayMode, this.context.supportAddress),
       ),
       { images: input.processed.images, attachments: input.processed.agentAttachments },
     );
@@ -286,6 +333,14 @@ export class EmailIntakeBridge {
     });
     await this.deps.store.putEmailLinks(input.storedIds, input.existingThreadId);
     await this.deps.store.markEventProcessed(input.eventId);
+    await this.deps.store.recordEmailAudit({
+      id: input.eventId,
+      source: input.email.source ?? "resend",
+      emailId: input.email.id,
+      result: "continued",
+      subject: input.email.subject ?? null,
+      from: input.email.from ?? null,
+    });
     return { status: 200, body: { accepted: true, continued: true } };
   }
 
@@ -321,7 +376,10 @@ export class EmailIntakeBridge {
           sender: emailSenderIdentity(input.email),
           text: formatSupportEmailForAgent(input.email, input.processed.attachments, this.context),
           relayMode: this.deps.relayMode,
-          sourceInstruction: incomingEmailInstruction(this.deps.relayMode),
+          sourceInstruction: incomingEmailInstruction(
+            this.deps.relayMode,
+            this.context.supportAddress,
+          ),
         }),
         images: input.processed.images,
         attachments: input.processed.agentAttachments,
@@ -337,6 +395,14 @@ export class EmailIntakeBridge {
         postFirstReply: false,
       });
       await this.deps.store.markEventProcessed(input.eventId);
+      await this.deps.store.recordEmailAudit({
+        id: input.eventId,
+        source: input.email.source ?? "resend",
+        emailId: input.email.id,
+        result: "created",
+        subject: input.email.subject ?? null,
+        from: input.email.from ?? null,
+      });
       return { status: 200, body: { accepted: true, created: true } };
     } catch (error) {
       // The announce thread already exists; surface the failure there and stop
@@ -348,6 +414,21 @@ export class EmailIntakeBridge {
         .catch(() => {});
       await this.deps.store.markEventProcessed(input.eventId);
       return { status: 200, body: { accepted: true, error: reason } };
+    }
+  }
+
+  private async classifyNewEmail(email: ResendReceivedEmail) {
+    if (!this.deps.classifier) {
+      return { isSupport: true, confidence: 0, reason: "classifier_not_configured; failed open" };
+    }
+    try {
+      return await this.deps.classifier(email);
+    } catch (error) {
+      return {
+        isSupport: true,
+        confidence: 0,
+        reason: `classifier_error:${errorSummary(error)}; failed open`,
+      };
     }
   }
 }

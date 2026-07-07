@@ -6,6 +6,7 @@ import { z } from "zod";
 const DEFAULT_DAEMON_HOST = "localhost:6767";
 
 export type ChatRelayMode = "auto" | "manual";
+export type ChatEmailProvider = "gmail" | "resend" | "none";
 
 function resolveHome(input: string): string {
   if (input === "~") return os.homedir();
@@ -44,6 +45,13 @@ const envSchema = z.object({
   PASEO_CHAT_HTTP_PORT: z.coerce.number().int().positive().default(8787),
   PASEO_CHAT_SERVICE_HOST: z.string().default("127.0.0.1"),
   PASEO_CHAT_SERVICE_PORT: z.coerce.number().int().positive().default(8788),
+  PASEO_CHAT_EMAIL_PROVIDER: z.enum(["gmail", "resend", "none"]).optional(),
+  PASEO_CHAT_EMAIL_INBOX: z.string().optional(),
+  GMAIL_OAUTH_CLIENT_ID: z.string().optional(),
+  GMAIL_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GMAIL_REFRESH_TOKEN: z.string().optional(),
+  GMAIL_PUBSUB_TOPIC: z.string().optional(),
+  GMAIL_WEBHOOK_TOKEN: z.string().optional(),
   PASEO_CHAT_PEOPLE_JSON: z.string().optional(),
   PASEO_CHAT_CHANNELS_JSON: z.string().optional(),
   PASEO_CHAT_MAX_UPLOAD_BYTES: z.coerce
@@ -108,11 +116,37 @@ function loadPersistedChatRepository(paseoHome: string) {
   }
 }
 
-export interface ChatEmailConfig {
-  apiKey: string;
-  webhookSecret: string;
+interface BaseChatEmailConfig {
+  provider: "gmail" | "resend";
   channelId: string;
   supportAddress?: string;
+}
+
+export interface ResendChatEmailConfig extends BaseChatEmailConfig {
+  provider: "resend";
+  apiKey: string;
+  webhookSecret: string;
+}
+
+export interface GmailChatEmailConfig extends BaseChatEmailConfig {
+  provider: "gmail";
+  inboxEmail: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  refreshToken: string;
+  pubsubTopic: string;
+  webhookToken: string;
+}
+
+export type ChatEmailConfig = ResendChatEmailConfig | GmailChatEmailConfig;
+
+interface GmailEmailEnv {
+  inboxEmail?: string | undefined;
+  oauthClientId?: string | undefined;
+  oauthClientSecret?: string | undefined;
+  refreshToken?: string | undefined;
+  pubsubTopic?: string | undefined;
+  webhookToken?: string | undefined;
 }
 
 export interface ChatRepositoryConfig {
@@ -121,31 +155,116 @@ export interface ChatRepositoryConfig {
   projectDisplayName?: string;
 }
 
-export function resolveEmailConfig(
-  email: z.infer<typeof chatEmailSchema>,
+function inferEmailProvider(input: {
+  provider?: ChatEmailProvider | undefined;
+  hasGmailConfig: boolean;
+  hasResendConfig: boolean;
+}): ChatEmailProvider {
+  if (input.provider) return input.provider;
+  if (input.hasGmailConfig) return "gmail";
+  if (input.hasResendConfig) return "resend";
+  return "none";
+}
+
+function resolveEmailChannelId(
+  channel: string | undefined,
   channels: Record<string, string>,
-  warn: (message: string) => void = (message) => console.warn(message),
-): ChatEmailConfig | null {
-  const { resendApiKey, resendWebhookSecret, channel } = email;
-  if (!resendApiKey && !resendWebhookSecret && !channel) return null;
-  if (!resendApiKey || !resendWebhookSecret || !channel) {
+  warn: (message: string) => void,
+): string | null {
+  if (!channel) {
+    warn("Email intake is disabled: chat.email.channel is not configured.");
+    return null;
+  }
+  const channelName = channel.replace(/^#/, "");
+  return channels[channelName.toLowerCase()] ?? channelName;
+}
+
+function resolveGmailEmailConfig(
+  env: GmailEmailEnv,
+  channelId: string,
+  warn: (message: string) => void,
+): GmailChatEmailConfig | null {
+  const required = {
+    inboxEmail: env.inboxEmail?.trim(),
+    oauthClientId: env.oauthClientId?.trim(),
+    oauthClientSecret: env.oauthClientSecret?.trim(),
+    refreshToken: env.refreshToken?.trim(),
+    pubsubTopic: env.pubsubTopic?.trim(),
+    webhookToken: env.webhookToken?.trim(),
+  };
+  const missing = Object.entries(required)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    warn(`Gmail email intake is disabled: missing ${missing.join(", ")}.`);
+    return null;
+  }
+  return {
+    provider: "gmail",
+    channelId,
+    inboxEmail: required.inboxEmail!,
+    oauthClientId: required.oauthClientId!,
+    oauthClientSecret: required.oauthClientSecret!,
+    refreshToken: required.refreshToken!,
+    pubsubTopic: required.pubsubTopic!,
+    webhookToken: required.webhookToken!,
+    supportAddress: required.inboxEmail!.toLowerCase(),
+  };
+}
+
+function resolveResendEmailConfig(
+  email: z.infer<typeof chatEmailSchema>,
+  channelId: string,
+  warn: (message: string) => void,
+): ResendChatEmailConfig | null {
+  const { resendApiKey, resendWebhookSecret } = email;
+  if (!resendApiKey || !resendWebhookSecret) {
     const missing = [
       ...(resendApiKey ? [] : ["resendApiKey"]),
       ...(resendWebhookSecret ? [] : ["resendWebhookSecret"]),
-      ...(channel ? [] : ["channel"]),
     ];
     warn(
       `Email intake is disabled: chat.email settings are incomplete (missing: ${missing.join(", ")})`,
     );
     return null;
   }
-  const channelName = channel.replace(/^#/, "");
   return {
+    provider: "resend",
     apiKey: resendApiKey,
     webhookSecret: resendWebhookSecret,
-    channelId: channels[channelName.toLowerCase()] ?? channelName,
+    channelId,
     ...(email.supportAddress ? { supportAddress: email.supportAddress.toLowerCase() } : {}),
   };
+}
+
+export function resolveEmailConfig(
+  provider: ChatEmailProvider | undefined,
+  email: z.infer<typeof chatEmailSchema>,
+  env: GmailEmailEnv,
+  channels: Record<string, string>,
+  warn: (message: string) => void = (message) => console.warn(message),
+): ChatEmailConfig | null {
+  const { resendApiKey, resendWebhookSecret, channel } = email;
+  const gmailValues = [
+    env.inboxEmail,
+    env.oauthClientId,
+    env.oauthClientSecret,
+    env.refreshToken,
+    env.pubsubTopic,
+    env.webhookToken,
+  ];
+  const hasGmailConfig = gmailValues.some((value) => value?.trim());
+  const hasResendConfig = Boolean(resendApiKey || resendWebhookSecret);
+  const resolvedProvider = inferEmailProvider({ provider, hasGmailConfig, hasResendConfig });
+  if (resolvedProvider === "none") return null;
+  const channelId = resolveEmailChannelId(channel, channels, warn);
+  if (!channelId) return null;
+
+  if (resolvedProvider === "gmail") {
+    return resolveGmailEmailConfig(env, channelId, warn);
+  }
+
+  return resolveResendEmailConfig(email, channelId, warn);
 }
 
 export function resolveRepositoryConfig(
@@ -201,7 +320,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     ),
     people: parseJsonMap(parsed.PASEO_CHAT_PEOPLE_JSON),
     channels,
-    email: resolveEmailConfig(persistedEmail, channels),
+    email: resolveEmailConfig(
+      parsed.PASEO_CHAT_EMAIL_PROVIDER,
+      persistedEmail,
+      {
+        inboxEmail: parsed.PASEO_CHAT_EMAIL_INBOX,
+        oauthClientId: parsed.GMAIL_OAUTH_CLIENT_ID,
+        oauthClientSecret: parsed.GMAIL_OAUTH_CLIENT_SECRET,
+        refreshToken: parsed.GMAIL_REFRESH_TOKEN,
+        pubsubTopic: parsed.GMAIL_PUBSUB_TOPIC,
+        webhookToken: parsed.GMAIL_WEBHOOK_TOKEN,
+      },
+      channels,
+    ),
     repository: resolveRepositoryConfig(persistedRepository),
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };

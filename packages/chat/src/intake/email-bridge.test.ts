@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadSessionStore } from "../state/thread-session-store.js";
 import { EmailIntakeBridge } from "./email-bridge.js";
+import type { EmailClassification, EmailClassifier } from "./email-classifier.js";
 import type { ResendReceivedEmail } from "./email-resend.js";
 
 const SECRET_RAW = Buffer.from("test-secret-material");
@@ -63,7 +64,10 @@ interface Harness {
   }>;
 }
 
-async function createHarness(emailsById: Record<string, ResendReceivedEmail>): Promise<Harness> {
+async function createHarness(
+  emailsById: Record<string, ResendReceivedEmail>,
+  harnessOptions: { classifier?: EmailClassifier } = {},
+): Promise<Harness> {
   const dir = await createTempDir();
   const store = new ThreadSessionStore(dir);
 
@@ -110,6 +114,7 @@ async function createHarness(emailsById: Record<string, ResendReceivedEmail>): P
   let agentCounter = 0;
   harness.bridge = new EmailIntakeBridge({
     email: {
+      provider: "resend",
       apiKey: "re_test",
       webhookSecret: SECRET,
       channelId: "C42",
@@ -119,6 +124,7 @@ async function createHarness(emailsById: Record<string, ResendReceivedEmail>): P
     stateDir: dir,
     maxUploadBytes: 1024 * 1024,
     officePrompt: "office custom prompt",
+    ...(harnessOptions.classifier ? { classifier: harnessOptions.classifier } : {}),
     chat: {
       channel: (channelId: string) => ({
         id: channelId,
@@ -137,8 +143,8 @@ async function createHarness(emailsById: Record<string, ResendReceivedEmail>): P
       }),
     },
     client: {
-      sendAgentMessage: async (agentId: string, message: string, options: unknown) => {
-        harness.sentMessages.push({ agentId, message, options });
+      sendAgentMessage: async (agentId: string, message: string, sendOptions: unknown) => {
+        harness.sentMessages.push({ agentId, message, options: sendOptions });
       },
       fetchAgentTimeline: async () => ({ window: { nextSeq: 7 } }),
     },
@@ -415,5 +421,42 @@ describe("EmailIntakeBridge", () => {
     expect(result.body).toEqual({ accepted: true, created: true });
     expect(harness.createdSessions).toHaveLength(2);
     expect(harness.sentMessages).toHaveLength(0);
+  });
+
+  it("does not create a Slack thread for classifier non-support results", async () => {
+    const nonSupport: EmailClassification = {
+      isSupport: false,
+      confidence: 0.94,
+      reason: "marketing newsletter",
+    };
+    const classifier = vi.fn(async () => nonSupport);
+    const harness = await createHarness({ em_1: initialEmail }, { classifier });
+    const body = webhookBody("em_1");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(result.body).toEqual({ accepted: true, ignored: true, reason: "non_support" });
+    expect(harness.channelPosts).toHaveLength(0);
+    expect(harness.createdSessions).toHaveLength(0);
+    expect(classifier).toHaveBeenCalledOnce();
+    const state = await harness.store.load();
+    expect(state.emailAuditRecords.at(-1)).toMatchObject({
+      result: "non_support",
+      classification: nonSupport,
+    });
+  });
+
+  it("fails open when the classifier throws", async () => {
+    const classifier = vi.fn(async () => {
+      throw new Error("model unavailable");
+    });
+    const harness = await createHarness({ em_1: initialEmail }, { classifier });
+    const body = webhookBody("em_1");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(result.body).toEqual({ accepted: true, created: true });
+    expect(harness.channelPosts).toHaveLength(1);
+    expect(harness.createdSessions).toHaveLength(1);
+    const state = await harness.store.load();
+    expect(state.emailAuditRecords.some((record) => record.result === "failed_open")).toBe(true);
   });
 });

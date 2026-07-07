@@ -16,7 +16,9 @@ export interface ResendReceivedEmailWebhook {
 }
 
 export interface ResendReceivedEmail {
+  readonly source?: "gmail" | "resend";
   readonly id: string;
+  readonly gmailThreadId?: string | null;
   readonly to?: readonly string[];
   readonly from?: string;
   readonly created_at?: string;
@@ -371,7 +373,14 @@ function ownExternalIds(email: ResendReceivedEmail): string[] {
       ids.add(id);
     }
   }
-  ids.add(`resend:${email.id}`);
+  if (email.source === "gmail") {
+    ids.add(`gmail:message:${email.id}`);
+    if (email.gmailThreadId?.trim()) {
+      ids.add(`gmail:thread:${email.gmailThreadId.trim()}`);
+    }
+  } else {
+    ids.add(`resend:${email.id}`);
+  }
   return [...ids];
 }
 
@@ -400,8 +409,13 @@ export function supportEmailLookupExternalIds(
   email: ResendReceivedEmail,
   context: EmailIntakeContext,
 ): string[] {
+  const gmailThreadIds =
+    email.source === "gmail" && email.gmailThreadId?.trim()
+      ? [`gmail:thread:${email.gmailThreadId.trim()}`]
+      : [];
   return [
     ...new Set([
+      ...gmailThreadIds,
       ...supportEmailReferencedExternalIds(email),
       ...ownExternalIds(email),
       ...(isFromInternalSender(email, context) && isForwardLikeEmail(email)
@@ -631,29 +645,60 @@ export interface ProcessedEmailAttachments {
   agentAttachments: AgentAttachment[];
 }
 
+export type EmailAttachmentDownloader = (input: {
+  readonly email: ResendReceivedEmail;
+  readonly attachment: NonNullable<ResendReceivedEmail["attachments"]>[number];
+  readonly attachmentId: string;
+  readonly fallbackName: string;
+  readonly fallbackMimeType: string | undefined;
+}) => Promise<{
+  readonly bytes: Buffer;
+  readonly filename?: string | undefined;
+  readonly contentType?: string | undefined;
+}>;
+
 async function downloadAndStoreAttachment(input: {
   readonly email: ResendReceivedEmail;
+  readonly attachment: NonNullable<ResendReceivedEmail["attachments"]>[number];
   readonly attachmentId: string;
   readonly fallbackName: string;
   readonly fallbackMimeType: string | undefined;
   readonly index: number;
-  readonly apiKey: string;
+  readonly apiKey?: string | undefined;
+  readonly downloader?: EmailAttachmentDownloader | undefined;
   readonly storageDir: string;
   readonly maxUploadBytes: number;
 }): Promise<{ stored: StoredEmailAttachment; bytes: Buffer }> {
-  const detail = await fetchResendReceivedEmailAttachment({
-    emailId: input.email.id,
-    attachmentId: input.attachmentId,
-    apiKey: input.apiKey,
-  });
-  const downloaded = await downloadAttachmentBytes(detail.download_url);
+  const detail = input.downloader
+    ? await input.downloader({
+        email: input.email,
+        attachment: input.attachment,
+        attachmentId: input.attachmentId,
+        fallbackName: input.fallbackName,
+        fallbackMimeType: input.fallbackMimeType,
+      })
+    : await (async () => {
+        if (!input.apiKey) throw new Error("missing Resend API key");
+        const resendDetail = await fetchResendReceivedEmailAttachment({
+          emailId: input.email.id,
+          attachmentId: input.attachmentId,
+          apiKey: input.apiKey,
+        });
+        const downloaded = await downloadAttachmentBytes(resendDetail.download_url);
+        return {
+          bytes: downloaded.bytes,
+          filename: resendDetail.filename?.trim() || undefined,
+          contentType:
+            resendDetail.content_type?.trim() || downloaded.contentType?.trim() || undefined,
+        };
+      })();
+  const downloaded = { bytes: detail.bytes, contentType: detail.contentType };
   if (downloaded.bytes.byteLength > input.maxUploadBytes) {
     throw new Error(
       `attachment is ${downloaded.bytes.byteLength} bytes (limit ${input.maxUploadBytes})`,
     );
   }
-  const mimeType =
-    detail.content_type?.trim() || downloaded.contentType?.trim() || input.fallbackMimeType;
+  const mimeType = detail.contentType?.trim() || input.fallbackMimeType;
   const storedName = detail.filename?.trim() || input.fallbackName;
   const emailDir = join(input.storageDir, safePathSegment(input.email.id, "email"));
   const localPath = join(
@@ -678,7 +723,8 @@ async function downloadAndStoreAttachment(input: {
 
 export async function processEmailAttachments(input: {
   readonly email: ResendReceivedEmail;
-  readonly apiKey: string;
+  readonly apiKey?: string | undefined;
+  readonly downloader?: EmailAttachmentDownloader | undefined;
   readonly storageDir: string;
   readonly maxUploadBytes: number;
 }): Promise<ProcessedEmailAttachments> {
@@ -697,11 +743,13 @@ export async function processEmailAttachments(input: {
     try {
       const { stored, bytes } = await downloadAndStoreAttachment({
         email: input.email,
+        attachment,
         attachmentId,
         fallbackName: name,
         fallbackMimeType,
         index,
         apiKey: input.apiKey,
+        downloader: input.downloader,
         storageDir: input.storageDir,
         maxUploadBytes: input.maxUploadBytes,
       });

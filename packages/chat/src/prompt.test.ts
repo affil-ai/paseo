@@ -23,8 +23,9 @@ describe("Slack chat prompt delivery instructions", () => {
     expect(prompt).toContain("This message came from Slack.");
     expect(prompt).toContain("immediately acknowledge this message with `chat.send`");
     expect(prompt).toContain("use `chat.send` again mid-turn");
-    expect(prompt).toContain("always send a final `chat.send`");
-    expect(prompt).toContain("Your final assistant message is not sent automatically");
+    expect(prompt).toContain("end the turn with a final `chat.send`");
+    expect(prompt).toContain("not visible in Slack");
+    expect(prompt).toContain("The only exception");
     expect(prompt).toContain("Jane Doe (@jane): Can you check this?");
   });
 

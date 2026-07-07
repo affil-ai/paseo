@@ -96,13 +96,6 @@ interface AssistantTextBlock {
   lastEntryIndex: number;
 }
 
-interface ManualFinalReplyWatchdogInput {
-  externalThreadId: string;
-  agentId: string;
-  turnId: string;
-  startedSeq: number;
-}
-
 function collectAssistantTextBlocksSince(
   entries: readonly AgentTimelineEntry[],
   sinceSeq: number,
@@ -163,14 +156,6 @@ export class ChatBridge {
           }),
         ),
       );
-      for (const turn of await this.store.listManualReplyTurns()) {
-        this.startManualFinalReplyWatchdog({
-          externalThreadId: turn.externalThreadId,
-          agentId: turn.agentId,
-          turnId: turn.turnId,
-          startedSeq: turn.startedSeq,
-        });
-      }
       return;
     }
 
@@ -366,7 +351,6 @@ export class ChatBridge {
       if (await this.handleChatAnswer(normalized, Boolean(existing))) return;
       await this.dispatchAgentTurn({ thread, message, source, normalized, existing, session });
     } catch (error) {
-      await this.store.clearManualReplyTurn(normalized.externalThreadId, message.id);
       const reason = error instanceof Error ? error.message : String(error);
       await this.postMessage(
         thread,
@@ -387,15 +371,6 @@ export class ChatBridge {
     const relayId = input.message.id;
     const ownerAgentId = getBindingOwnerAgentId(input.session);
     const sinceSeq = input.existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
-    if (this.config.relayMode === "manual") {
-      await this.store.startManualReplyTurn({
-        externalThreadId: input.normalized.externalThreadId,
-        turnId: relayId,
-        agentId: ownerAgentId,
-        startedSeq: sinceSeq,
-        reminderCount: 0,
-      });
-    }
     if (this.config.relayMode === "auto") {
       await this.store.updateSession(input.normalized.externalThreadId, (current) => {
         current.activeRelayId = relayId;
@@ -415,14 +390,6 @@ export class ChatBridge {
         },
       );
       await this.store.markEventProcessed(input.normalized.eventId);
-    }
-    if (this.config.relayMode === "manual") {
-      this.startManualFinalReplyWatchdog({
-        externalThreadId: input.normalized.externalThreadId,
-        agentId: ownerAgentId,
-        turnId: relayId,
-        startedSeq: sinceSeq,
-      });
     }
     if (this.config.relayMode === "auto") {
       this.startBackgroundRelay({
@@ -608,97 +575,6 @@ export class ChatBridge {
     await this.store.updateSession(externalThreadId, (current) => {
       if (current.activeRelayId === relayId) current.activeRelayId = null;
     });
-  }
-
-  private startManualFinalReplyWatchdog(input: ManualFinalReplyWatchdogInput): void {
-    if (this.config.relayMode !== "manual") return;
-    void this.enforceManualFinalReply(input).catch((error) => {
-      console.warn("Manual Slack final reply watchdog failed", {
-        externalThreadId: input.externalThreadId,
-        agentId: input.agentId,
-        turnId: input.turnId,
-        error,
-      });
-    });
-  }
-
-  private async enforceManualFinalReply(input: ManualFinalReplyWatchdogInput): Promise<void> {
-    await this.client.waitForFinish(input.agentId, 0);
-    const turn = await this.store.getManualReplyTurn(input.externalThreadId);
-    if (!turn || turn.turnId !== input.turnId || turn.agentId !== input.agentId) return;
-
-    const latestAssistantSeq = await this.getLatestRelayableAssistantSeq(
-      input.agentId,
-      turn.startedSeq,
-    );
-    const deliveredAfterLatestAssistant =
-      turn.deliverySeq !== null && turn.deliverySeq >= latestAssistantSeq;
-    if (deliveredAfterLatestAssistant) {
-      await this.store.clearManualReplyTurn(input.externalThreadId, input.turnId);
-      return;
-    }
-
-    const reminderCount = turn.reminderCount + 1;
-    const rootTurnId = input.turnId.replace(/(?::final-reply-reminder-\d+)+$/, "");
-    const reminderTurnId = `${rootTurnId}:final-reply-reminder-${reminderCount}`;
-    const reminderStartedSeq = await this.getTimelineNextSeq(input.agentId);
-    const reminderTurn = await this.store.advanceManualReplyReminder({
-      externalThreadId: input.externalThreadId,
-      currentTurnId: input.turnId,
-      nextTurnId: reminderTurnId,
-      startedSeq: reminderStartedSeq,
-    });
-    if (!reminderTurn) return;
-
-    try {
-      await this.client.sendAgentMessage(
-        input.agentId,
-        this.buildManualFinalReplyReminder(input.externalThreadId, reminderCount),
-      );
-    } catch (error) {
-      console.warn("Manual Slack final reply reminder failed", {
-        externalThreadId: input.externalThreadId,
-        agentId: input.agentId,
-        turnId: reminderTurnId,
-        reminderCount,
-        error,
-      });
-      return;
-    }
-    this.startManualFinalReplyWatchdog({
-      externalThreadId: input.externalThreadId,
-      agentId: input.agentId,
-      turnId: reminderTurnId,
-      startedSeq: reminderStartedSeq,
-    });
-  }
-
-  private buildManualFinalReplyReminder(externalThreadId: string, reminderCount: number): string {
-    return [
-      "You ended the Slack turn without sending a Slack-visible final response.",
-      `Reminder attempt ${reminderCount}: send the missing final response now using chat.send to the current Slack binding.`,
-      `If you pass a destination, use { kind: "conversation", conversationId: "${externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
-    ].join("\n");
-  }
-
-  private async getLatestRelayableAssistantSeq(agentId: string, sinceSeq: number): Promise<number> {
-    // Manual mode has no provider-level "this chat.send is the final one" marker.
-    // We treat a chat.* delivery as final when it happens after the latest relayable
-    // assistant text for the turn. A progress reply followed only by tool work can
-    // still satisfy the watchdog because the daemon timeline has no later assistant
-    // text to distinguish that progress update from a final Slack delivery.
-    const timeline = await this.client.fetchAgentTimeline(agentId, {
-      direction: "tail",
-      projection: "canonical",
-      limit: 200,
-    });
-    let latestSeq = sinceSeq;
-    for (const entry of timeline.entries) {
-      if (entry.seqEnd < sinceSeq || entry.item.type !== "assistant_message") continue;
-      if (!isRelayableAssistantText(entry.item.text)) continue;
-      latestSeq = Math.max(latestSeq, entry.seqEnd);
-    }
-    return latestSeq;
   }
 
   private startBackgroundRelay(input: {

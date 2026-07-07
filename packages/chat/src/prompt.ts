@@ -26,7 +26,8 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 - Assistant text is not automatically posted to Slack.
 - When a Slack turn starts, immediately acknowledge the request with chat.send before doing tool work.
 - Use chat.send again mid-turn whenever you have a meaningful progress update, blocker, decision point, or partial result the user should see.
-- Always send a final chat.send with the completed answer, result, file/image, or handoff summary before ending the turn; your final assistant message is not posted automatically.
+- End every Slack turn with a final chat.send to the current Slack thread containing the completed answer, result, file/image, handoff summary, or brief stopped/declined status; your final assistant message is not posted automatically and is not visible in Slack.
+- The only exception is when the Slack user explicitly tells you not to send another Slack message.
 - Use chat.send for text, files/images, current thread replies, and new person/channel/conversation destinations. Use chat.ask when you need a reply from a person, channel, conversation, or current thread.`;
   }
 
@@ -38,18 +39,21 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 
 function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
-    return "This message came from Slack. Manual Slack delivery is enabled: immediately acknowledge this message with `chat.send` before doing tool work; use `chat.send` again mid-turn for meaningful progress updates, blockers, decision points, partial results, or files/images; and always send a final `chat.send` with the completed answer before ending the turn. Your final assistant message is not sent automatically.";
+    return "This message came from Slack. Manual Slack delivery is enabled: immediately acknowledge this message with `chat.send` before doing tool work; use `chat.send` again mid-turn for meaningful progress updates, blockers, decision points, partial results, or files/images; and end the turn with a final `chat.send` to the current Slack thread containing the completed answer, result, file/image, handoff summary, or brief stopped/declined status. Your final assistant message is not sent automatically and is not visible in Slack. The only exception is when the Slack user explicitly tells you not to send another Slack message.";
   }
 
   return "This message came from Slack. Your final assistant message will be sent to Slack automatically; do not call `chat.send` for this thread unless you intentionally want to override the automatic reply.";
 }
 
-export function incomingEmailInstruction(relayMode: ChatRelayMode): string {
+export function incomingEmailInstruction(
+  relayMode: ChatRelayMode,
+  supportAddress = "hello@nextcard.com",
+): string {
   if (relayMode === "manual") {
-    return "This came from an inbound support email. You cannot email the sender back; your output reaches humans only through the linked Slack announcement thread. To post there, call `chat.send` with your Slack-visible response.";
+    return `This came from an inbound support email to ${supportAddress}. You cannot email the sender back in v1; your output reaches humans only through the linked Slack announcement thread. To post there, call \`chat.send\` with your Slack-visible response.`;
   }
 
-  return "This came from an inbound support email. You cannot email the sender back; your output reaches humans only through the linked Slack announcement thread, where your final assistant message is posted automatically. Humans follow up from that Slack thread or by email.";
+  return `This came from an inbound support email to ${supportAddress}. You cannot email the sender back in v1; your output reaches humans only through the linked Slack announcement thread, where your final assistant message is posted automatically. Humans follow up from that Slack thread or by email.`;
 }
 
 export const EMAIL_TRIAGE_INSTRUCTION = `Support email triage:
