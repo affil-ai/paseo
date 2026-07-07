@@ -23,12 +23,12 @@ Reply for Slack:
 function relayModePrompt(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
     return `Slack delivery mode: manual.
-- Assistant text is not automatically posted to Slack.
-- When a Slack turn starts, immediately acknowledge the request with chat.send before doing tool work.
-- Use chat.send again mid-turn whenever you have a meaningful progress update, blocker, decision point, or partial result the user should see.
-- End every Slack turn with a final chat.send to the current Slack thread containing the completed answer, result, file/image, handoff summary, or brief stopped/declined status; your final assistant message is not posted automatically and is not visible in Slack.
-- The only exception is when the Slack user explicitly tells you not to send another Slack message.
-- Use chat.send for Slack-visible text, files/images, and current-thread replies. Do not start separate chat conversations unless the user explicitly asks you to contact someone elsewhere.`;
+- Slack only sees messages sent with chat.send.
+- Send one brief chat.send acknowledgement before tool work.
+- Use mid-turn chat.send sparingly: only for important progress, blockers, decisions, partial results, or files/images the user needs now.
+- End with one final chat.send containing the answer/result, artifact, handoff, or stopped/declined status.
+- Skip Slack sends only if the user explicitly asks for no more Slack messages.
+- Reply in the current thread by default; start another conversation only when explicitly asked.`;
   }
 
   return `Slack delivery mode: automatic.
@@ -39,10 +39,10 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 
 function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
-    return "This message came from Slack. Manual Slack delivery is enabled; follow the Slack delivery mode instructions from your system prompt for this turn.";
+    return "This came from Slack. Manual delivery is on; use chat.send per the system Slack delivery rules.";
   }
 
-  return "This message came from Slack. Automatic Slack delivery is enabled; follow the Slack delivery mode instructions from your system prompt for this turn.";
+  return "This came from Slack. Automatic delivery is on; follow the system Slack delivery rules.";
 }
 
 export function incomingEmailInstruction(

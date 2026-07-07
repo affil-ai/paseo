@@ -22,9 +22,10 @@ describe("Slack chat prompt delivery instructions", () => {
     });
 
     expect(prompt).toContain("Slack delivery mode: manual.");
-    expect(prompt).toContain("End every Slack turn with a final chat.send");
-    expect(prompt).toContain("not visible in Slack");
-    expect(prompt).toContain("The only exception");
+    expect(prompt).toContain("Slack only sees messages sent with chat.send");
+    expect(prompt).toContain("Use mid-turn chat.send sparingly");
+    expect(prompt).toContain("End with one final chat.send");
+    expect(prompt).toContain("Skip Slack sends only if");
     expect(prompt).not.toContain("chat.ask");
     expect(prompt).toContain("custom office rules");
   });
@@ -36,8 +37,9 @@ describe("Slack chat prompt delivery instructions", () => {
       relayMode: "manual",
     });
 
-    expect(prompt).toContain("This message came from Slack.");
-    expect(prompt).toContain("follow the Slack delivery mode instructions from your system prompt");
+    expect(prompt).toContain("This came from Slack.");
+    expect(prompt).toContain("Manual delivery is on");
+    expect(prompt).toContain("use chat.send per the system Slack delivery rules");
     expect(prompt).not.toContain("End every Slack turn");
     expect(prompt).not.toContain("final `chat.send`");
     expect(prompt).toContain("Jane Doe (@jane): Can you check this?");
@@ -46,9 +48,9 @@ describe("Slack chat prompt delivery instructions", () => {
   it("adds the auto-mode no-duplicate-reply instruction to follow-up Slack messages", () => {
     const prompt = assembleFollowupPrompt(sender, "Thanks", "auto");
 
-    expect(prompt).toContain("This message came from Slack.");
-    expect(prompt).toContain("Automatic Slack delivery is enabled");
-    expect(prompt).toContain("follow the Slack delivery mode instructions from your system prompt");
+    expect(prompt).toContain("This came from Slack.");
+    expect(prompt).toContain("Automatic delivery is on");
+    expect(prompt).toContain("follow the system Slack delivery rules");
     expect(prompt).toContain("Jane Doe (@jane): Thanks");
   });
 
@@ -63,7 +65,7 @@ describe("Slack chat prompt delivery instructions", () => {
 
     expect(prompt).toContain("inbound support email");
     expect(prompt).toContain("cannot email the sender back");
-    expect(prompt).not.toContain("This message came from Slack.");
+    expect(prompt).not.toContain("This came from Slack.");
     expect(prompt).toContain("Jane Doe (jane@customer.com): Subject: Help");
 
     const followup = assembleFollowupPrompt(
@@ -73,7 +75,7 @@ describe("Slack chat prompt delivery instructions", () => {
       incomingEmailInstruction("auto"),
     );
     expect(followup).toContain("inbound support email");
-    expect(followup).not.toContain("This message came from Slack.");
+    expect(followup).not.toContain("This came from Slack.");
   });
 
   it("keeps context-only Slack instructions short", () => {
