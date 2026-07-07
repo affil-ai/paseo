@@ -4,18 +4,18 @@ import { extractChatToolMessage, isChatDeliveryToolName } from "./chat-tool-mess
 
 describe("chat-tool-message", () => {
   it("recognizes chat delivery tool name variants", () => {
-    expect(isChatDeliveryToolName("chat.reply")).toBe(true);
+    expect(isChatDeliveryToolName("chat.send")).toBe(true);
+    expect(isChatDeliveryToolName("paseo_chat.send")).toBe(true);
+    expect(isChatDeliveryToolName("paseo.chat.ask")).toBe(true);
     expect(isChatDeliveryToolName("paseo_chat.reply")).toBe(true);
-    expect(isChatDeliveryToolName("paseo_chat_sendFile")).toBe(true);
-    expect(isChatDeliveryToolName("paseo.chat.sendImage")).toBe(true);
     expect(isChatDeliveryToolName("bash")).toBe(false);
   });
 
   it("extracts the visible message from direct chat tool args", () => {
     expect(
       extractChatToolMessage({
-        toolName: "paseo_chat.reply",
-        args: { conversationId: "c1", message: "Done — shipped the PR." },
+        toolName: "paseo_chat.send",
+        args: { destination: { kind: "current" }, message: "Done — shipped the PR." },
       }),
     ).toBe("Done — shipped the PR.");
   });
@@ -23,10 +23,10 @@ describe("chat-tool-message", () => {
   it("extracts the visible message from MCP-style nested JSON args", () => {
     expect(
       extractChatToolMessage({
-        toolName: "paseo_chat.reply",
+        toolName: "paseo_chat.send",
         args: {
           server: "paseo",
-          tool: "paseo_chat.reply",
+          tool: "paseo_chat.send",
           args: JSON.stringify({ message: "Here is the final Slack reply." }),
         },
       }),
@@ -39,11 +39,20 @@ describe("chat-tool-message", () => {
         toolName: "mcp",
         args: {
           server: "paseo",
-          tool: "paseo_chat.reply",
+          tool: "paseo_chat.send",
           args: { message: "Wrapper call reply text." },
         },
       }),
     ).toBe("Wrapper call reply text.");
+  });
+
+  it("extracts the visible question from chat.ask args", () => {
+    expect(
+      extractChatToolMessage({
+        toolName: "paseo_chat.ask",
+        args: { question: "Can you confirm?" },
+      }),
+    ).toBe("Can you confirm?");
   });
 
   it("does not extract messages from non-chat tools", () => {

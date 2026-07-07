@@ -147,7 +147,7 @@ export async function prepareChatOutboundFile(input: {
   const filename = path.basename(input.filename?.trim() || absolutePath);
   const mimeType = inferMimeType(filename, input.mimeType);
   if (input.imageOnly && !mimeType.startsWith("image/")) {
-    throw new ChatToolError("unsupported_file", "chat.sendImage only accepts image MIME types.", {
+    throw new ChatToolError("unsupported_file", "This chat upload only accepts image MIME types.", {
       mimeType,
     });
   }
@@ -169,7 +169,7 @@ export class ChatServiceClient {
   constructor(private readonly options: ChatServiceClientOptions = {}) {}
 
   async call(
-    method: "startConversation" | "reply" | "sendFile" | "ask",
+    method: "send" | "startConversation" | "reply" | "sendFile" | "ask",
     input: unknown,
   ): Promise<ChatToolResult> {
     let token: string;

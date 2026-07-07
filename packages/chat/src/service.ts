@@ -39,6 +39,15 @@ export interface ReplyInput {
   idempotencyKey?: string;
 }
 
+export interface SendInput {
+  officeAgentId: string;
+  destination?: ChatDestination;
+  message?: string;
+  files?: ChatOutboundFile[];
+  subscribe?: boolean;
+  idempotencyKey?: string;
+}
+
 export interface SendFileInput {
   officeAgentId: string;
   conversationId?: string;
@@ -50,10 +59,10 @@ export interface SendFileInput {
 
 export interface AskInput {
   officeAgentId: string;
-  destination: ChatDestination;
+  destination?: ChatDestination;
   question: string;
   timeoutMinutes: number;
-  scope: "person" | "channel";
+  scope?: "person" | "channel";
   idempotencyKey?: string;
 }
 
@@ -128,6 +137,28 @@ function messagePreview(message: string | undefined): string {
   return (message ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
+function destinationKey(destination: ChatDestination): string {
+  switch (destination.kind) {
+    case "current":
+      return "current";
+    case "conversation":
+      return `conversation:${destination.conversationId}`;
+    case "person":
+      return `person:${destination.key.trim().toLowerCase()}`;
+    case "channel":
+      return [
+        "channel",
+        destination.id?.trim() ?? "",
+        destination.name?.trim().toLowerCase().replace(/^#/, "") ?? "",
+        destination.url?.trim() ?? "",
+      ].join(":");
+  }
+}
+
+function hasSendContent(input: { message?: string; files?: ChatOutboundFile[] }): boolean {
+  return Boolean(input.message?.trim() || input.files?.length);
+}
+
 export function normalizeSlackChannelId(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("slack:")) return trimmed;
@@ -173,7 +204,7 @@ function parseSlackUrl(url: string): { channelId: string; threadId?: string } | 
 }
 
 function auditMessage(
-  input: StartConversationInput | ReplyInput | SendFileInput | AskInput,
+  input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
 ): string | undefined {
   if ("message" in input) return input.message;
   if ("question" in input) return input.question;
@@ -181,7 +212,7 @@ function auditMessage(
 }
 
 function auditFiles(
-  input: StartConversationInput | ReplyInput | SendFileInput | AskInput,
+  input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
 ): ChatOutboundFile[] | undefined {
   if ("file" in input) return [input.file];
   if ("files" in input) return input.files;
@@ -232,6 +263,37 @@ export class ChatBridgeService {
     private readonly config: Pick<ChatBridgeConfig, "people" | "channels"> &
       Partial<Pick<ResolvedChatBridgeConfig, "officeRepoPath">>,
   ) {}
+
+  async send(input: SendInput): Promise<ChatPostResult> {
+    return this.withAudit("chat.send", input, async () => {
+      const cached = await this.getIdempotentResult(input.idempotencyKey);
+      if (cached) return cached;
+      if (!hasSendContent(input)) {
+        throw new ChatToolError("empty_chat_send", "chat.send requires either message or files.");
+      }
+
+      const destination = input.destination ?? ({ kind: "current" } satisfies ChatDestination);
+      const files = input.files ?? [];
+      const messages = withFilesOnFirstMessage(
+        slackPostableMessagesFromMarkdown(input.message ?? ""),
+        files.length > 0 ? files.map(toFileUpload) : undefined,
+      );
+      const binding = await this.postSendMessages({
+        officeAgentId: input.officeAgentId,
+        destination,
+        messages,
+        subscribe: input.subscribe ?? true,
+      });
+      await this.recordManualVisibleDelivery(binding.externalThreadId, input.officeAgentId);
+      await this.suppressActiveAutoRelay(binding.externalThreadId);
+      const result = {
+        ...this.resultFromBinding(binding),
+        ...(files[0] ? { fileId: files[0].filename } : {}),
+      };
+      await this.completeIdempotentResult(input.idempotencyKey, result);
+      return result;
+    });
+  }
 
   async startConversation(input: StartConversationInput): Promise<ChatPostResult> {
     return this.withAudit("chat.startConversation", input, async () => {
@@ -317,6 +379,69 @@ export class ChatBridgeService {
     });
   }
 
+  private async postSendMessages(input: {
+    officeAgentId: string;
+    destination: ChatDestination;
+    messages: AdapterPostableMessage[];
+    subscribe: boolean;
+  }): Promise<ChatBinding> {
+    if (input.destination.kind === "current") {
+      const binding = await this.resolveCurrentBinding(input.officeAgentId);
+      await this.postMessages(binding.externalThreadId, input.messages);
+      return binding;
+    }
+
+    if (input.destination.kind === "conversation") {
+      const binding = await this.resolveCurrentBinding(
+        input.officeAgentId,
+        input.destination.conversationId,
+      );
+      await this.postMessages(binding.externalThreadId, input.messages);
+      return binding;
+    }
+
+    const reusableBinding = await this.findReusableOutboundBinding(
+      input.officeAgentId,
+      input.destination,
+    );
+    if (reusableBinding) {
+      if (input.subscribe) await this.chat.thread(reusableBinding.externalThreadId).subscribe();
+      await this.postMessages(reusableBinding.externalThreadId, input.messages);
+      return reusableBinding;
+    }
+
+    const resolved = await this.resolveDestination(input.officeAgentId, input.destination, false);
+    const existingResolvedBinding = resolved.externalThreadId
+      ? await this.store.getBinding(resolved.externalThreadId)
+      : null;
+    this.assertBindingOwner(input.officeAgentId, existingResolvedBinding);
+
+    const firstMessage = input.messages[0] ?? { markdown: "" };
+    const sent = await resolved.target.post(firstMessage);
+    const externalThreadId = threadIdFromPostedMessage(resolved.target.id, sent);
+    const existingBinding =
+      existingResolvedBinding ?? (await this.store.getBinding(externalThreadId));
+    if (existingBinding) {
+      this.assertBindingOwner(input.officeAgentId, existingBinding);
+      if (input.subscribe) await this.chat.thread(existingBinding.externalThreadId).subscribe();
+      await this.postRemainingMessages(existingBinding.externalThreadId, input.messages);
+      return existingBinding;
+    }
+
+    await this.postRemainingMessages(externalThreadId, input.messages);
+    const conversationId = `conv_${randomUUID()}`;
+    const binding = this.createOutboundBinding({
+      conversationId,
+      externalThreadId,
+      officeAgentId: input.officeAgentId,
+      destination: resolved.destination,
+      subscribed: input.subscribe,
+    });
+    await this.store.upsertBinding(binding);
+    if (binding.subscribed) await this.chat.thread(externalThreadId).subscribe();
+    return binding;
+  }
+
   private async postMessages(
     externalThreadId: string,
     messages: AdapterPostableMessage[],
@@ -334,43 +459,39 @@ export class ChatBridgeService {
   }
 
   async ask(input: AskInput): Promise<ChatPostResult> {
-    return this.withAudit(
-      input.scope === "person" ? "chat.askPerson" : "chat.askChannel",
-      input,
-      async () => {
-        const cached = await this.getIdempotentResult(input.idempotencyKey);
-        if (cached) return cached;
-        const started = await this.startConversation({
-          officeAgentId: input.officeAgentId,
-          destination: input.destination,
-          message: input.question,
-          subscribe: true,
-          idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:post` : undefined,
-        });
-        const requestId = `ask_${randomUUID()}`;
-        const createdAt = nowIso();
-        const deadlineAt = new Date(
-          Date.now() + Math.max(1, input.timeoutMinutes) * 60_000,
-        ).toISOString();
-        const request: PendingRequest = {
-          requestId,
-          officeAgentId: input.officeAgentId,
-          conversationId: started.conversationId,
-          externalThreadId: started.externalThreadId,
-          question: input.question,
-          deadlineAt,
-          status: "pending",
-          answer: null,
-          answeredBy: null,
-          createdAt,
-          updatedAt: createdAt,
-        };
-        await this.store.createPendingRequest(request);
-        const result = { ...started, requestId, status: "pending" as const };
-        await this.completeIdempotentResult(input.idempotencyKey, result);
-        return result;
-      },
-    );
+    return this.withAudit("chat.ask", input, async () => {
+      const cached = await this.getIdempotentResult(input.idempotencyKey);
+      if (cached) return cached;
+      const started = await this.send({
+        officeAgentId: input.officeAgentId,
+        destination: input.destination,
+        message: input.question,
+        subscribe: true,
+        idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:post` : undefined,
+      });
+      const requestId = `ask_${randomUUID()}`;
+      const createdAt = nowIso();
+      const deadlineAt = new Date(
+        Date.now() + Math.max(1, input.timeoutMinutes) * 60_000,
+      ).toISOString();
+      const request: PendingRequest = {
+        requestId,
+        officeAgentId: input.officeAgentId,
+        conversationId: started.conversationId,
+        externalThreadId: started.externalThreadId,
+        question: input.question,
+        deadlineAt,
+        status: "pending",
+        answer: null,
+        answeredBy: null,
+        createdAt,
+        updatedAt: createdAt,
+      };
+      await this.store.createPendingRequest(request);
+      const result = { ...started, requestId, status: "pending" as const };
+      await this.completeIdempotentResult(input.idempotencyKey, result);
+      return result;
+    });
   }
 
   async notifyPendingRequestAnswer(input: {
@@ -438,6 +559,22 @@ export class ChatBridgeService {
     if (!binding)
       throw new ChatToolError("conversation_not_found", "created chat binding was not saved");
     return binding;
+  }
+
+  private async findReusableOutboundBinding(
+    officeAgentId: string,
+    destination: ChatDestination,
+  ): Promise<OutboundConversationBinding | null> {
+    const key = destinationKey(destination);
+    const bindings = Object.values((await this.store.load()).sessions);
+    return (
+      bindings.find(
+        (binding): binding is OutboundConversationBinding =>
+          binding.kind === "outbound-conversation" &&
+          binding.officeAgentId === officeAgentId &&
+          destinationKey(binding.destination) === key,
+      ) ?? null
+    );
   }
 
   private createOutboundBinding(input: {
@@ -563,7 +700,7 @@ export class ChatBridgeService {
     if (bindings.length === 0) {
       throw new ChatToolError(
         "no_current_binding",
-        "Call chat.startConversation first or pass conversationId.",
+        "Call chat.send with a destination first or pass a conversation destination.",
       );
     }
     if (bindings.length > 1) {
@@ -608,7 +745,7 @@ export class ChatBridgeService {
 
   private async withAudit<T extends ChatPostResult>(
     toolName: string,
-    input: StartConversationInput | ReplyInput | SendFileInput | AskInput,
+    input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
     run: () => Promise<T>,
   ): Promise<T> {
     try {
@@ -626,7 +763,7 @@ export class ChatBridgeService {
           conversationId: result.conversationId,
           message: auditMessage(input),
           files: auditFiles(input),
-          result: "file" in input ? "uploaded" : "posted",
+          result: auditFiles(input)?.length ? "uploaded" : "posted",
         }),
       );
       return result;
@@ -727,7 +864,7 @@ export async function startChatServiceServer(input: {
 }
 
 interface RpcBody {
-  method: "startConversation" | "reply" | "sendFile" | "ask";
+  method: "send" | "startConversation" | "reply" | "sendFile" | "ask";
   input: unknown;
 }
 
@@ -736,6 +873,7 @@ function readRpcBody(value: unknown): RpcBody {
     throw new ChatToolError("invalid_request", "RPC body must be an object.");
   const body = value as { method?: unknown; input?: unknown };
   if (
+    body.method !== "send" &&
     body.method !== "startConversation" &&
     body.method !== "reply" &&
     body.method !== "sendFile" &&
@@ -747,6 +885,7 @@ function readRpcBody(value: unknown): RpcBody {
 }
 
 async function callService(service: ChatBridgeService, body: RpcBody): Promise<ChatPostResult> {
+  if (body.method === "send") return service.send(body.input as SendInput);
   if (body.method === "startConversation")
     return service.startConversation(body.input as StartConversationInput);
   if (body.method === "reply") return service.reply(body.input as ReplyInput);

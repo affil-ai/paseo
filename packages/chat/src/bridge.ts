@@ -647,13 +647,13 @@ export class ChatBridge {
   private buildManualFinalReplyReminder(externalThreadId: string, reminderCount: number): string {
     return [
       "You ended the Slack turn without sending a Slack-visible final response.",
-      `Reminder attempt ${reminderCount}: send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.`,
-      `If you pass conversationId, use ${externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+      `Reminder attempt ${reminderCount}: send the missing final response now using chat.send to the current Slack binding.`,
+      `If you pass a destination, use { kind: "conversation", conversationId: "${externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
     ].join("\n");
   }
 
   private async getLatestRelayableAssistantSeq(agentId: string, sinceSeq: number): Promise<number> {
-    // Manual mode has no provider-level "this chat.reply is the final one" marker.
+    // Manual mode has no provider-level "this chat.send is the final one" marker.
     // We treat a chat.* delivery as final when it happens after the latest relayable
     // assistant text for the turn. A progress reply followed only by tool work can
     // still satisfy the watchdog because the daemon timeline has no later assistant

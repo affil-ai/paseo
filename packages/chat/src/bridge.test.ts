@@ -343,8 +343,8 @@ describe("ChatBridge manual final reply watchdog", () => {
           agentId: harness.rootAgentId,
           text: [
             "You ended the Slack turn without sending a Slack-visible final response.",
-            "Reminder attempt 1: send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
-            `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+            "Reminder attempt 1: send the missing final response now using chat.send to the current Slack binding.",
+            `If you pass a destination, use { kind: "conversation", conversationId: "${harness.externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
           ].join("\n"),
         },
       ]);
@@ -397,8 +397,8 @@ describe("ChatBridge manual final reply watchdog", () => {
           agentId: harness.rootAgentId,
           text: [
             "You ended the Slack turn without sending a Slack-visible final response.",
-            "Reminder attempt 2: send the missing final response now using chat.reply, chat.sendFile, or chat.sendImage to the current Slack binding.",
-            `If you pass conversationId, use ${harness.externalThreadId}. Do not do more background work before sending this final Slack reply.`,
+            "Reminder attempt 2: send the missing final response now using chat.send to the current Slack binding.",
+            `If you pass a destination, use { kind: "conversation", conversationId: "${harness.externalThreadId}" }. Do not do more background work before sending this final Slack reply.`,
           ].join("\n"),
         },
       ]);

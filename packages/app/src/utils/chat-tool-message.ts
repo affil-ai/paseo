@@ -1,5 +1,5 @@
 const CHAT_TOOL_NAME_PATTERN =
-  /(?:^|[._-])chat[._-](?:startconversation|reply|sendfile|sendimage)$/i;
+  /(?:^|[._-])chat[._-](?:send|ask|startconversation|reply|sendfile|sendimage|askperson|askchannel)$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -27,7 +27,7 @@ function readMessageFromArgs(args: unknown): string | undefined {
     return undefined;
   }
 
-  const directMessage = readString(args.message);
+  const directMessage = readString(args.message) ?? readString(args.question);
   if (directMessage) {
     return directMessage;
   }

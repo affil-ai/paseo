@@ -61,9 +61,9 @@ Slack output must stay in the user's message thread:
 - Slack-bound markdown converts valid GitHub/Markdown table blocks into native Slack table blocks; the Paseo UI keeps rendering the original markdown.
 - If a Slack-bound chat tool message expands to multiple posts because it contains multiple tables, file uploads stay attached to the first emitted post.
 
-Manual relay mode keeps progress updates explicit: the office agent calls `chat.reply` /
-`chat.sendFile` / `chat.sendImage` for Slack-visible updates instead of relying on automatic
-final-message relay. To prevent silent endings, manual mode persists a final-reply watchdog for
+Manual relay mode keeps progress updates explicit: the office agent calls `chat.send` for
+Slack-visible text and/or files instead of relying on automatic final-message relay. To prevent
+silent endings, manual mode persists a final-reply watchdog for
 each inbound Slack turn. When the agent finishes without a Slack-visible delivery after the
 latest relayable assistant text, the bridge sends a reminder/follow-up to the same office agent
 requiring it to post the missing final reply. If a reminder turn also finishes without delivery,
@@ -187,9 +187,9 @@ The office agent must not use raw Slack APIs or tokens. It should receive person
 through a Paseo-owned tool surface, for example:
 
 ```ts
-chat.startConversation({ destination: { kind: "person", key: "vivek" }, message: "..." });
-chat.askPerson({ destination: { kind: "person", key: "vivek" }, question: "..." });
-chat.reply({ conversationId: "...", message: "..." });
+chat.send({ destination: { kind: "person", key: "vivek" }, message: "..." });
+chat.send({ files: [{ path: "/tmp/chart.png" }] });
+chat.ask({ destination: { kind: "person", key: "vivek" }, question: "..." });
 ```
 
 Recommended implementation for Paseo's current architecture: expose these as **daemon-owned
@@ -209,14 +209,12 @@ office agent decides what to say externally.
    person; bridge creates or reuses a Slack DM/thread; replies route back to that same office agent
    via `client.sendAgentMessage(...)`. Use for quick async input, file requests, or permission
    confirmations. No new Paseo agent.
-2. **Ask-and-wait / office-agent blocking question.** `chat.askPerson(...)` posts a question and
-   stores a pending request. The tool call (or permission-like wait) resolves when the person
-   replies, with timeout/cancel semantics. Still the same office agent; the current task is waiting
-   for human input.
-3. **Artifact reply / explicit upload.** `chat.sendFile(...)` / `chat.sendImage(...)` uploads a
-   generated local artifact (CSV, PDF, screenshot, chart, etc.) to the current or selected chat
-   conversation through Chat SDK. Uploads are explicit tool calls; the bridge does not scrape
-   assistant text for file paths.
+2. **Ask-and-wait / office-agent blocking question.** `chat.ask(...)` posts a question and
+   stores a pending request. The reply is routed back to the same office agent, with timeout/cancel
+   semantics. Still the same office agent; the current task is waiting for human input.
+3. **Artifact reply / explicit upload.** `chat.send(...)` uploads generated local artifacts (CSV,
+   PDF, screenshot, chart, etc.) to the current or selected chat conversation through Chat SDK.
+   Uploads are explicit tool calls; the bridge does not scrape assistant text for file paths.
 4. **New agents stay behind the office agent.** If the office agent wants a new agent/workspace,
    it uses normal Paseo tools (`create_agent`, `create_worktree`, etc.). The bridge keeps talking
    only to the office agent. Chat tools never create agents.
@@ -226,7 +224,7 @@ office agent decides what to say externally.
 - Resolve `person: "vivek"` through bridge/daemon config: aliases, Slack user IDs, emails, and
   optionally `memory/people/*.md` metadata. The office agent sees people keys; raw Slack tokens and
   adapter user IDs stay behind the bridge.
-- Persist outbound bindings and pending `askPerson` requests under `$PASEO_HOME/chat-bridge/`
+- Persist outbound bindings and pending `chat.ask` requests under `$PASEO_HOME/chat-bridge/`
   with the same atomic JSON + Zod pattern as inbound sessions. On restart, reload bindings,
   subscriptions, pending request deadlines, and delivery receipts; expired asks resolve as
   timeout/canceled rather than hanging forever.
@@ -430,11 +428,10 @@ than Slack messages. v2 delivers:
 - **PR-merged notifications** — GitHub webhook → `:white_check_mark:` + "merged" message
   posted into the originating thread (Feature 3).
 - **Inbound email intake** (Resend) as a second channel feeding the same pipeline (Feature 4).
-- **Agent-initiated chat tools** — `chat.startConversation`, `chat.reply`, `chat.askPerson`, and
-  `chat.askChannel`, with executor-discovered channel destinations, durable outbound bindings,
-  pending asks, restart recovery, and audit records.
+- **Agent-initiated chat tools** — `chat.send` and `chat.ask`, with executor-discovered channel
+  destinations, durable outbound bindings, pending asks, restart recovery, and audit records.
 - **Bidirectional file attachments** — agent-produced files/images posted back to the thread via
-  explicit `chat.sendFile` / `chat.sendImage` tools and Chat SDK uploads.
+  explicit `chat.send` file uploads and Chat SDK uploads.
 - **Second chat adapter** (Discord or Telegram) to prove the platform-agnostic seam.
 - **Remote deployment mode** — bridge on a different host than the daemon, connecting over the
   Paseo relay with E2EE (the same path the mobile app uses), instead of `127.0.0.1`.
@@ -607,11 +604,10 @@ URLs.
 ### 6. Agent-initiated chat — **v2**
 
 The office agent can explicitly contact people or channels through `chat.*` tools without raw
-Slack APIs/tokens. This is v2 scope: `chat.startConversation` / `chat.reply` post through Chat SDK
-and persist an `outbound-conversation` binding so replies go back to the same office agent;
-`chat.askPerson` / `chat.askChannel` add pending waits with timeout/cancel/restart semantics. The
-office agent can use executor MCP to discover channels it can access, then pass those destinations
-to the chat tools.
+Slack APIs/tokens. This is v2 scope: `chat.send` posts text and/or files through Chat SDK and
+persists an `outbound-conversation` binding so replies go back to the same office agent;
+`chat.ask` adds pending waits with timeout/cancel/restart semantics. The office agent can use
+executor MCP to discover channels it can access, then pass those destinations to the chat tools.
 
 Chat tools intentionally do **not** create agents. If the office agent needs a new workspace/agent
 in a project, it uses the normal Paseo agent/workspace tools; the bridge keeps the same chat thread
@@ -701,8 +697,8 @@ thread UX. Relay behavior is selected by `PASEO_CHAT_RELAY_MODE`:
 
 - `auto` (default): the bridge polls the daemon timeline and automatically posts first/final
   assistant text to the bound Slack thread.
-- `manual`: the bridge never auto-posts assistant text; the office agent must call `chat.reply`,
-  `chat.sendFile`, or `chat.sendImage` to send Slack output.
+- `manual`: the bridge never auto-posts assistant text; the office agent must call `chat.send`
+  to send Slack-visible text and/or files.
 
 In `auto` mode, the bridge posts only two kinds of normal thread replies:
 
@@ -917,7 +913,7 @@ There are **two logical state stores, both file-backed:**
    persisted, so a restart never loses which threads the bot follows.
 
 2. **Our domain store** (`thread-session-store.ts`) — the bridge's own data:
-   `externalThreadId → ChatBinding`, pending `askPerson` waits, event-receipt dedup keys,
+   `externalThreadId → ChatBinding`, pending `chat.ask` waits, event-receipt dedup keys,
    outbound delivery receipts, audit records, and (v2) PR artifact links. Keep the logical tables
    t3code used (`external_thread_links`, `external_event_receipts`, `artifact_links`) as JSON
    collections, but make the domain shape explicit: inbound sessions have `rootAgentId`; outbound conversations have `officeAgentId`,
