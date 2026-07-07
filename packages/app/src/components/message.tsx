@@ -65,6 +65,7 @@ import type { TodoEntry, UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
+import { extractChatToolMessage } from "@/utils/chat-tool-message";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
@@ -1311,6 +1312,10 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
   chevronExpanded: {
     transform: [{ scale: 1.3 }, { rotate: "90deg" }],
   },
+  chatToolMessage: {
+    marginHorizontal: 13,
+    marginTop: theme.spacing[1],
+  },
   detailWrapper: {
     borderBottomLeftRadius: theme.borderRadius.lg,
     borderBottomRightRadius: theme.borderRadius.lg,
@@ -2375,6 +2380,7 @@ interface ExpandableBadgeProps {
   onOpenFile?: () => void;
   onDetailHoverChange?: (hovered: boolean) => void;
   renderDetails?: () => ReactNode;
+  footerContent?: ReactNode;
   isLoading?: boolean;
   isError?: boolean;
   isLastInSequence?: boolean;
@@ -2733,6 +2739,7 @@ const ExpandableBadge = memo(function ExpandableBadge({
   onOpenFile,
   onDetailHoverChange,
   renderDetails,
+  footerContent,
   isLoading = false,
   isError = false,
   isLastInSequence = false,
@@ -3022,6 +3029,9 @@ const ExpandableBadge = memo(function ExpandableBadge({
           />
         </View>
       </Pressable>
+      {footerContent ? (
+        <View style={expandableBadgeStylesheet.chatToolMessage}>{footerContent}</View>
+      ) : null}
       {detailContent ? (
         <Pressable
           ref={detailWrapperRef}
@@ -3051,6 +3061,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
   if (previous.onOpenFile !== next.onOpenFile) return false;
   if (previous.onDetailHoverChange !== next.onDetailHoverChange) return false;
   if (previous.renderDetails !== next.renderDetails) return false;
+  if (previous.footerContent !== next.footerContent) return false;
   return true;
 }
 
@@ -3116,6 +3127,19 @@ export const ToolCall = memo(function ToolCall({
         resolveIcon: resolveToolCallIcon,
       }),
     [toolName, status, error, effectiveDetail, metadata, cwd],
+  );
+  const chatToolMessage = useMemo(
+    () =>
+      extractChatToolMessage({
+        toolName,
+        args: args ?? (effectiveDetail?.type === "unknown" ? effectiveDetail.input : undefined),
+      }),
+    [toolName, args, effectiveDetail],
+  );
+  const chatToolMessageContent = useMemo(
+    () =>
+      chatToolMessage ? <MarkdownRenderer text={chatToolMessage} enableHtmlish={false} /> : null,
+    [chatToolMessage],
   );
   const handleOpenFile = useMemo(() => {
     const openFilePath = presentation.openFilePath;
@@ -3209,6 +3233,7 @@ export const ToolCall = memo(function ToolCall({
       onToggle={presentation.canOpenDetails ? handleToggle : undefined}
       onOpenFile={handleOpenFile}
       renderDetails={presentation.canOpenDetails && !isMobile ? renderDetails : undefined}
+      footerContent={chatToolMessageContent}
       isLoading={status === "running" || status === "executing"}
       isError={status === "failed"}
       isLastInSequence={isLastInSequence}
