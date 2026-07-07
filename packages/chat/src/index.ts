@@ -27,6 +27,12 @@ function startEmailIntakes(input: {
   state: ThreadSessionStore;
   bridge: ChatBridge;
 }): EmailIntakes {
+  const classifier = input.config.emailClassifier
+    ? createDefaultEmailClassifier({
+        ...input.config.emailClassifier,
+        cwd: input.config.officeRepoPath,
+      })
+    : undefined;
   const emailIntake = input.config.email
     ? new EmailIntakeBridge({
         email: input.config.email,
@@ -34,7 +40,7 @@ function startEmailIntakes(input: {
         stateDir: input.config.stateDir,
         maxUploadBytes: input.config.maxUploadBytes,
         officePrompt: loadOfficePrompt(input.config),
-        classifier: createDefaultEmailClassifier(),
+        ...(classifier ? { classifier } : {}),
         chat: input.chat,
         client: input.client,
         store: input.state,
@@ -92,6 +98,13 @@ function logReady(input: {
     console.log(
       `  email intake: http://${input.config.httpHost}:${input.config.httpPort}/support-email/resend → #${input.config.email?.channelId}`,
     );
+    if (input.config.emailClassifier) {
+      console.log(
+        `  email classifier: ${input.config.emailClassifier.provider} / ${input.config.emailClassifier.model} / ${input.config.emailClassifier.thinkingOptionId}`,
+      );
+    } else {
+      console.log("  email classifier: disabled");
+    }
   }
 }
 

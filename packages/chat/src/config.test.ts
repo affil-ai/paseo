@@ -164,6 +164,50 @@ describe("loadConfig chat.defaults", () => {
   });
 });
 
+describe("loadConfig chat.email classifier", () => {
+  it("defaults to Pi with OpenRouter Sonnet 5", async () => {
+    const home = await createTempHome();
+    await writeFile(join(home, "config.json"), JSON.stringify({ chat: {} }));
+
+    const config = loadConfig({ PASEO_HOME: home } as NodeJS.ProcessEnv);
+
+    expect(config.emailClassifier).toEqual({
+      provider: "pi",
+      model: "openrouter/anthropic/claude-sonnet-5",
+      thinkingOptionId: "off",
+      timeoutMs: 60_000,
+    });
+  });
+
+  it("can disable or override the classifier through env", async () => {
+    const home = await createTempHome();
+    await writeFile(join(home, "config.json"), JSON.stringify({ chat: {} }));
+
+    expect(
+      loadConfig({
+        PASEO_HOME: home,
+        PASEO_CHAT_EMAIL_CLASSIFIER_PROVIDER: "none",
+      } as NodeJS.ProcessEnv).emailClassifier,
+    ).toBeNull();
+
+    expect(
+      loadConfig({
+        PASEO_HOME: home,
+        PASEO_CHAT_EMAIL_CLASSIFIER_MODEL: "openrouter/anthropic/claude-sonnet-5",
+        PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID: "minimal",
+        PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS: "45000",
+        PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND: "/usr/local/bin/pi",
+      } as NodeJS.ProcessEnv).emailClassifier,
+    ).toEqual({
+      provider: "pi",
+      model: "openrouter/anthropic/claude-sonnet-5",
+      thinkingOptionId: "minimal",
+      timeoutMs: 45_000,
+      command: "/usr/local/bin/pi",
+    });
+  });
+});
+
 describe("resolveRepositoryConfig", () => {
   it("returns null when no project root is configured", () => {
     expect(resolveRepositoryConfig({ projectId: "paseo" })).toBeNull();
