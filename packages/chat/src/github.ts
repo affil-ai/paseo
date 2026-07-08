@@ -186,10 +186,10 @@ export class GithubMergeNotifier {
             `GitHub PR merged: ${pr.title}`,
             `${pr.url}`,
             "",
-            `This PR was linked to Slack conversation ${link.conversationId ?? link.externalThreadId}.`,
-            "Please review the merged PR and the original Slack request. If you believe the work is complete, reply in that Slack thread and use the chat.addReaction tool to add a checkmark reaction to the initial Slack message. If the work is not complete, reply in Slack with what remains instead.",
+            `Linked Slack conversation: ${link.conversationId ?? link.externalThreadId}.`,
+            "If you think the user's request has been fully resolved, react to the Slack thread's initial message with a white checkmark using chat.addReaction.",
             link.conversationId
-              ? `When calling chat.send or chat.addReaction for this thread, pass conversationId: ${link.conversationId}.`
+              ? `Use conversationId ${link.conversationId} when calling chat.addReaction or chat.send for this thread.`
               : undefined,
           ]
             .filter(Boolean)

@@ -95,8 +95,9 @@ describe("GitHub PR tracking", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ agentId: "agent-office" });
     expect(sent[0]?.message).toContain("GitHub PR merged: Office agent fix");
-    expect(sent[0]?.message).toContain("chat.addReaction");
-    expect(sent[0]?.message).toContain("conversationId: conv_1");
+    expect(sent[0]?.message).toContain("white checkmark using chat.addReaction");
+    expect(sent[0]?.message).toContain("Use conversationId conv_1");
+    expect(sent[0]?.message).not.toContain("review the merged PR");
   });
 
   it("rejects invalid signatures", async () => {
