@@ -316,20 +316,22 @@ describe("selectSubagentsForParent", () => {
 describe("selectSubagentsForWorkspace", () => {
   const WORKSPACE_ID = "ws-1";
 
-  it("returns subagents belonging to the workspace across multiple parents", () => {
+  it("lists children whose parent lives in the workspace, even when they run in their own worktree", () => {
+    // Primary office-agent case: the parent belongs to WORKSPACE_ID, each child
+    // runs in its own fresh worktree (a different workspaceId). The children
+    // must surface in the PARENT's workspace Subagents tab.
     setAgents([
-      makeAgent({ id: "parent-a", workspaceId: WORKSPACE_ID }),
-      makeAgent({ id: "parent-b", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "office-agent", workspaceId: WORKSPACE_ID }),
       makeAgent({
         id: "child-a",
-        parentAgentId: "parent-a",
-        workspaceId: WORKSPACE_ID,
+        parentAgentId: "office-agent",
+        workspaceId: "ws-worktree-a",
         createdAt: new Date("2026-03-08T10:01:00.000Z"),
       }),
       makeAgent({
         id: "child-b",
-        parentAgentId: "parent-b",
-        workspaceId: WORKSPACE_ID,
+        parentAgentId: "office-agent",
+        workspaceId: "ws-worktree-b",
         createdAt: new Date("2026-03-08T10:02:00.000Z"),
       }),
     ]);
@@ -343,11 +345,22 @@ describe("selectSubagentsForWorkspace", () => {
     expect(rows.map((row) => row.id)).toEqual(["child-a", "child-b"]);
   });
 
-  it("excludes root agents and subagents in other workspaces", () => {
+  it("lists children across multiple parents that live in the workspace", () => {
     setAgents([
-      makeAgent({ id: "root", workspaceId: WORKSPACE_ID }),
-      makeAgent({ id: "child-here", parentAgentId: "root", workspaceId: WORKSPACE_ID }),
-      makeAgent({ id: "child-elsewhere", parentAgentId: "root", workspaceId: "ws-other" }),
+      makeAgent({ id: "parent-a", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "parent-b", workspaceId: WORKSPACE_ID }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "parent-a",
+        workspaceId: "ws-worktree-a",
+        createdAt: new Date("2026-03-08T10:01:00.000Z"),
+      }),
+      makeAgent({
+        id: "child-b",
+        parentAgentId: "parent-b",
+        workspaceId: "ws-worktree-b",
+        createdAt: new Date("2026-03-08T10:02:00.000Z"),
+      }),
     ]);
 
     const rows = selectSubagentsForWorkspace(
@@ -356,7 +369,82 @@ describe("selectSubagentsForWorkspace", () => {
       EMPTY_PENDING_ARCHIVE_IDS,
     );
 
+    expect(rows.map((row) => row.id)).toEqual(["child-a", "child-b"]);
+  });
+
+  it("also lists a locally-run subagent whose own workspaceId matches (union)", () => {
+    // The child's parent lives elsewhere, but the child itself runs in this
+    // workspace. Kept via the workspaceId union so the child's own worktree
+    // still lists it and nothing regresses.
+    setAgents([
+      makeAgent({ id: "remote-parent", workspaceId: "ws-other" }),
+      makeAgent({ id: "local-child", parentAgentId: "remote-parent", workspaceId: WORKSPACE_ID }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["local-child"]);
+  });
+
+  it("excludes root agents and children whose parent and self are both elsewhere", () => {
+    setAgents([
+      makeAgent({ id: "root", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "child-here", parentAgentId: "root", workspaceId: "ws-worktree" }),
+      makeAgent({ id: "remote-parent", workspaceId: "ws-other" }),
+      makeAgent({
+        id: "child-elsewhere",
+        parentAgentId: "remote-parent",
+        workspaceId: "ws-other",
+      }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    // child-here: parent (root) is in WORKSPACE_ID -> included.
+    // child-elsewhere: parent and self both in ws-other -> excluded.
+    // root: no parentAgentId -> excluded.
     expect(rows.map((row) => row.id)).toEqual(["child-here"]);
+  });
+
+  it("matches direct parent only for multi-level delegation", () => {
+    // grandchild's direct parent (child) lives in ws-worktree, not WORKSPACE_ID,
+    // so it does NOT surface here even though the top-level ancestor does.
+    setAgents([
+      makeAgent({ id: "office-agent", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "child", parentAgentId: "office-agent", workspaceId: "ws-worktree" }),
+      makeAgent({ id: "grandchild", parentAgentId: "child", workspaceId: "ws-worktree" }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    // Only the direct child of the in-workspace parent surfaces here.
+    expect(rows.map((row) => row.id)).toEqual(["child"]);
+  });
+
+  it("skips a child whose parent is not loaded and whose own workspace differs", () => {
+    setAgents([
+      makeAgent({ id: "orphan-child", parentAgentId: "missing-parent", workspaceId: "ws-other" }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows).toEqual([]);
   });
 
   it("excludes archived and pending-archive subagents", () => {
