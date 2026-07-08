@@ -4,6 +4,7 @@ export {
   selectSubagentsForWorkspace,
   selectSubagentPrTabsForWorkspace,
   selectWorkspaceOwnPrIdentity,
+  resolveWorkspacePrCwdForIdentity,
   useSubagentsForParent,
   useSubagentsForWorkspace,
   useSubagentPrTabsForWorkspace,

@@ -25,6 +25,7 @@ function makePanelState(overrides: Partial<PanelCoreState> = {}): PanelCoreState
     explorerTab: "changes",
     explorerTabByCheckout: {},
     explorerPrCwd: null,
+    explorerPrByCheckout: {},
     ...overrides,
   };
 }
@@ -131,6 +132,32 @@ describe("panel-store migration", () => {
     const state = migratePanelState({}, 10, { isWeb: false });
 
     expect(state.explorerShowHiddenFiles).toBe(true);
+  });
+
+  it("defaults explorerPrByCheckout to an empty map for old persisted state", () => {
+    const state = migratePanelState({}, 11, { isWeb: false });
+
+    expect(state.explorerPrByCheckout).toEqual({});
+  });
+
+  it("keeps valid PR identity entries and drops malformed ones", () => {
+    const state = migratePanelState(
+      {
+        explorerPrByCheckout: {
+          "server-1::/repo/a": "acme/app#1942",
+          "server-1::/repo/b": null,
+          "server-1::/repo/c": 42,
+          "server-1::/repo/d": "",
+        },
+      },
+      12,
+      { isWeb: false },
+    );
+
+    expect(state.explorerPrByCheckout).toEqual({
+      "server-1::/repo/a": "acme/app#1942",
+      "server-1::/repo/b": null,
+    });
   });
 });
 

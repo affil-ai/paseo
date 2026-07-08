@@ -9,6 +9,11 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
 import type { WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
+import { useSessionStore } from "@/stores/session-store";
+import { usePanelStore } from "@/stores/panel-store";
+import { resolveWorkspacePrCwdForIdentity } from "@/subagents";
+import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 import { useWorkspaceLayoutStoreHydrated } from "@/stores/workspace-layout-store";
 import {
@@ -70,6 +75,79 @@ function stripOpenSearchParamFromBrowserUrl() {
   replaceBrowserRouteWithCanonicalHostWorkspaceRoute(`${url.pathname}${url.search}${url.hash}`);
 }
 
+function stripPrSearchParamFromBrowserUrl() {
+  if (!isWeb || typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("pr")) {
+    return;
+  }
+  url.searchParams.delete("pr");
+  replaceBrowserRouteWithCanonicalHostWorkspaceRoute(`${url.pathname}${url.search}${url.hash}`);
+}
+
+function clearConsumedPrIntent(input: {
+  navigation: { setParams: (params: { pr?: string | undefined }) => void };
+}) {
+  input.navigation.setParams({ pr: undefined });
+  if (isWeb) {
+    stripPrSearchParamFromBrowserUrl();
+  }
+}
+
+// Resolve the `?pr=` deep-link identity against the live store and, if it maps
+// to a PR (the workspace's own or a subagent's), open the explorer PR pane at
+// it. Returns true once the intent has been handled (resolved or definitively
+// absent after hydration) so the caller can consume it.
+function applyWorkspacePrDeepLink(input: {
+  serverId: string;
+  workspaceId: string;
+  prIdentityKey: string;
+  isCompact: boolean;
+}): boolean {
+  const state = useSessionStore.getState();
+  const workspaces = state.sessions[input.serverId]?.workspaces;
+  const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+    workspaces,
+    workspaceId: input.workspaceId,
+  });
+  const descriptor = workspaceKey ? workspaces?.get(workspaceKey) : null;
+  const cwd = descriptor?.workspaceDirectory;
+  if (!descriptor || !cwd) {
+    // Workspace not hydrated yet — let the caller retry.
+    return false;
+  }
+  const resolved = resolveWorkspacePrCwdForIdentity(
+    state,
+    {
+      serverId: input.serverId,
+      workspaceId: input.workspaceId,
+      prIdentityKey: input.prIdentityKey,
+    },
+    new Set(),
+  );
+  if (!resolved) {
+    // PR not in the live set (not yet loaded, or genuinely gone). Consume
+    // silently and leave the default PR pane behavior.
+    return true;
+  }
+  const isGit = descriptor.projectKind === "git";
+  const panel = usePanelStore.getState();
+  panel.openFileExplorerForCheckout({
+    checkout: { serverId: input.serverId, cwd, isGit },
+    isCompact: input.isCompact,
+  });
+  panel.selectExplorerPr({
+    serverId: input.serverId,
+    cwd,
+    isGit,
+    prCwd: resolved.prCwd,
+    prIdentityKey: input.prIdentityKey,
+  });
+  return true;
+}
+
 function clearConsumedOpenIntent(input: {
   navigation: { setParams: (params: { open?: string | undefined }) => void };
 }) {
@@ -91,7 +169,9 @@ function HostWorkspaceRouteContent() {
   const navigation = useNavigation();
   const rootNavigationState = useRootNavigationState();
   const hasHydratedWorkspaceLayoutStore = useWorkspaceLayoutStoreHydrated();
+  const isCompact = useIsCompactFormFactor();
   const consumedIntentRef = useRef<string | null>(null);
+  const consumedPrIntentRef = useRef<string | null>(null);
   const [intentConsumed, setIntentConsumed] = useState(false);
   const params = useLocalSearchParams<{
     serverId?: string | string[];
@@ -99,6 +179,7 @@ function HostWorkspaceRouteContent() {
   }>();
   const globalParams = useGlobalSearchParams<{
     open?: string | string[];
+    pr?: string | string[];
   }>();
   const serverId = getParamValue(params.serverId);
   const workspaceValue = getParamValue(params.workspaceId);
@@ -106,6 +187,8 @@ function HostWorkspaceRouteContent() {
     ? (decodeWorkspaceIdFromPathSegment(workspaceValue) ?? "")
     : "";
   const openValue = getParamValue(globalParams.open);
+  const prValue = getParamValue(globalParams.pr);
+  const hasHydratedWorkspaces = useHasHydratedWorkspaces(serverId || null);
   useEffect(() => {
     if (!serverId || !workspaceId) {
       return;
@@ -160,6 +243,46 @@ function HostWorkspaceRouteContent() {
     hasHydratedWorkspaceLayoutStore,
     navigation,
     openValue,
+    rootNavigationState?.key,
+    serverId,
+    workspaceId,
+  ]);
+
+  // Deep-link: open a specific PR in the explorer once workspaces hydrate.
+  // Consume-once guarded by serverId+workspaceId+pr; clears the param after.
+  useEffect(() => {
+    if (!prValue || !serverId || !workspaceId) {
+      return;
+    }
+    if (!rootNavigationState?.key || !hasHydratedWorkspaceLayoutStore || !hasHydratedWorkspaces) {
+      return;
+    }
+    const consumptionKey = `${serverId}:${workspaceId}:${prValue}`;
+    if (consumedPrIntentRef.current === consumptionKey) {
+      return;
+    }
+    const handled = applyWorkspacePrDeepLink({
+      serverId,
+      workspaceId,
+      prIdentityKey: prValue,
+      isCompact,
+    });
+    if (!handled) {
+      // Workspace descriptor not hydrated yet; retry on the next store update.
+      return;
+    }
+    consumedPrIntentRef.current = consumptionKey;
+    clearConsumedPrIntent({
+      navigation: navigation as unknown as {
+        setParams: (params: { pr?: string | undefined }) => void;
+      },
+    });
+  }, [
+    hasHydratedWorkspaceLayoutStore,
+    hasHydratedWorkspaces,
+    isCompact,
+    navigation,
+    prValue,
     rootNavigationState?.key,
     serverId,
     workspaceId,

@@ -7,6 +7,7 @@ import {
   resolveExplorerTabForCheckout,
   type ExplorerTab,
 } from "../explorer-tab-memory";
+import { type ExplorerPrByCheckout } from "../explorer-pr-memory";
 import { type ExplorerCheckoutContext } from "../explorer-checkout-context";
 import {
   buildOpenFileExplorerPatch,
@@ -71,8 +72,12 @@ export interface PanelState {
   explorerTab: ExplorerTab;
   explorerTabByCheckout: Record<string, ExplorerTab>;
   // Which checkout the PR pane points at while `explorerTab === "pr"`. `null`
-  // means the workspace's own PR; otherwise a subagent's cwd. Ephemeral.
+  // means the workspace's own PR; otherwise a subagent's cwd. In-memory active
+  // value; hydrated from `explorerPrByCheckout` on load.
   explorerPrCwd: string | null;
+  // Per-checkout persisted PR selection keyed by stable PR identity. See
+  // `explorer-pr-memory.ts`.
+  explorerPrByCheckout: ExplorerPrByCheckout;
   expandedPathsByWorkspace: Record<string, string[]>;
   diffExpandedPathsByWorkspace: Record<string, string[]>;
   sidebarWidth: number;
@@ -100,8 +105,16 @@ export interface PanelState {
   setExplorerTab: (tab: ExplorerTab) => void;
   setExplorerTabForCheckout: (params: ExplorerCheckoutContext & { tab: ExplorerTab }) => void;
   // Select which PR the explorer PR pane shows: pass a subagent cwd, or `null`
-  // for the workspace's own PR. Also switches the active tab to "pr".
-  selectExplorerPr: (params: ExplorerCheckoutContext & { prCwd: string | null }) => void;
+  // for the workspace's own PR. Also switches the active tab to "pr" and
+  // persists the selection by stable PR identity (`prIdentityKey`, `null` for
+  // the workspace's own PR) so it survives a reload.
+  selectExplorerPr: (
+    params: ExplorerCheckoutContext & { prCwd: string | null; prIdentityKey: string | null },
+  ) => void;
+  // Hydrate the in-memory active PR selection for a checkout after reconciling
+  // the persisted identity against the live PR set. `prCwd` is the resolved cwd
+  // (a subagent cwd or the workspace cwd for its own PR).
+  hydrateExplorerPrForCheckout: (params: { prCwd: string | null }) => void;
   setExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   setDiffExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   activateExplorerTabForCheckout: (checkout: ExplorerCheckoutContext) => void;
@@ -131,6 +144,7 @@ export const usePanelStore = create<PanelState>()(
       explorerTab: "changes",
       explorerTabByCheckout: {},
       explorerPrCwd: null,
+      explorerPrByCheckout: {},
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
@@ -251,21 +265,31 @@ export const usePanelStore = create<PanelState>()(
           }
           return nextState;
         }),
-      selectExplorerPr: ({ serverId, cwd, isGit, prCwd }) =>
+      selectExplorerPr: ({ serverId, cwd, isGit, prCwd, prIdentityKey }) =>
         set((state) => {
           const key = buildExplorerCheckoutKey(serverId, cwd);
           const nextState: Partial<PanelState> = {
             explorerTab: "pr",
             explorerPrCwd: prCwd,
           };
-          if (key && state.explorerTabByCheckout[key] !== "pr") {
-            nextState.explorerTabByCheckout = {
-              ...state.explorerTabByCheckout,
-              [key]: coerceExplorerTabForCheckout("pr", isGit),
-            };
+          if (key) {
+            if (state.explorerTabByCheckout[key] !== "pr") {
+              nextState.explorerTabByCheckout = {
+                ...state.explorerTabByCheckout,
+                [key]: coerceExplorerTabForCheckout("pr", isGit),
+              };
+            }
+            if (state.explorerPrByCheckout[key] !== prIdentityKey) {
+              nextState.explorerPrByCheckout = {
+                ...state.explorerPrByCheckout,
+                [key]: prIdentityKey,
+              };
+            }
           }
           return nextState;
         }),
+      hydrateExplorerPrForCheckout: ({ prCwd }) =>
+        set((state) => (state.explorerPrCwd === prCwd ? state : { explorerPrCwd: prCwd })),
       setExpandedPathsForWorkspace: (workspaceKey, paths) =>
         set((state) => ({
           expandedPathsByWorkspace: { ...state.expandedPathsByWorkspace, [workspaceKey]: paths },
@@ -300,7 +324,7 @@ export const usePanelStore = create<PanelState>()(
     }),
     {
       name: "panel-state",
-      version: 11,
+      version: 12,
       storage: createJSONStorage(() => AsyncStorage),
       migrate: (persistedState, version) =>
         migratePanelState(persistedState, version, { isWeb }) as unknown as PanelState,
@@ -309,6 +333,7 @@ export const usePanelStore = create<PanelState>()(
         desktop: state.desktop,
         explorerTab: state.explorerTab,
         explorerTabByCheckout: state.explorerTabByCheckout,
+        explorerPrByCheckout: state.explorerPrByCheckout,
         expandedPathsByWorkspace: state.expandedPathsByWorkspace,
         diffExpandedPathsByWorkspace: state.diffExpandedPathsByWorkspace,
         sidebarWidth: state.sidebarWidth,
