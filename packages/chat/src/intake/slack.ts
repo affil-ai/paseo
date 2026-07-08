@@ -10,7 +10,7 @@ export interface SenderIdentity {
   handle?: string;
 }
 
-export type ThreadCommand = "mute" | "unmute" | "done" | "escape" | "aside" | null;
+export type ThreadCommand = "mute" | "unmute" | "archive" | "escape" | "aside" | null;
 
 export interface NormalizedMessage {
   externalThreadId: string;
@@ -85,7 +85,7 @@ export function parseCommand(text: string): ThreadCommand {
   if (/^(mute|quiet|stop|shut up|silence)\b/.test(cleaned)) return "mute";
   if (/\b(mute|shut up|stop replying|be quiet)\b/.test(cleaned)) return "mute";
   if (/^(unmute|resume replies)\b/.test(cleaned)) return "unmute";
-  if (/^(done|archive)\b/.test(cleaned)) return "done";
+  if (cleaned === "/archive") return "archive";
   if (/^↑\s*$/.test(cleaned) || /^up\s*$/.test(cleaned)) return "escape";
   if (/^aside\s*-/.test(cleaned)) return "aside";
   return null;

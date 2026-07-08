@@ -23,6 +23,19 @@ describe("parseCommand", () => {
     expect(parseCommand("dude shut up mute stop")).toBe("mute");
     expect(parseCommand("please mute this thread")).toBe("mute");
   });
+
+  it("only treats exact /archive as the archive command", () => {
+    expect(parseCommand("/archive")).toBe("archive");
+    expect(parseCommand(" /archive ")).toBe("archive");
+    expect(parseCommand("/ARCHIVE")).toBe("archive");
+
+    expect(parseCommand("done")).toBeNull();
+    expect(parseCommand("done?")).toBeNull();
+    expect(parseCommand("archive")).toBeNull();
+    expect(parseCommand("archive this")).toBeNull();
+    expect(parseCommand("/archive now")).toBeNull();
+    expect(parseCommand("/archive?")).toBeNull();
+  });
 });
 
 function mockThread(): Thread {

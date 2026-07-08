@@ -299,13 +299,13 @@ export class ChatBridge {
       );
       return true;
     }
-    if (normalized.command === "done" && existing) {
+    if (normalized.command === "archive" && existing) {
       await this.client.archiveAgent(getBindingOwnerAgentId(existing));
       await this.store.deleteSession(normalized.externalThreadId);
       await this.postMessage(
         thread,
         normalized.externalThreadId,
-        "Done — archived the office agent for this thread.",
+        "Archived the office agent for this thread.",
       );
       return true;
     }
