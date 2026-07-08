@@ -613,6 +613,89 @@ describe("ChatBridge follow-up delivery", () => {
     }
   });
 
+  it("archives only on /archive and reacts to the root Slack message", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+    try {
+      const externalThreadId = "slack:C123:111.222";
+      const rootAgentId = "agent-1";
+      const store = new ThreadSessionStore(stateDir);
+      await store.upsertSession({
+        kind: "inbound-session",
+        externalThreadId,
+        rootAgentId,
+        muted: false,
+        activeRelayId: "relay-1",
+        title: "existing",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const archivedAgents: string[] = [];
+      const postedMessages: unknown[] = [];
+      const reactions: Array<{ messageId: string; emoji: string }> = [];
+      const client = {
+        archiveAgent: async (agentId: string) => {
+          archivedAgents.push(agentId);
+        },
+      };
+      const bridge = new ChatBridge(
+        {
+          stateDir,
+          relayMode: "manual",
+          officeRepoPath: "/tmp/office",
+          provider: "pi",
+          model: "openrouter/anthropic/claude-fable-5",
+          modeId: "",
+          thinkingOptionId: "high",
+          deepLinkBaseUrl: "https://paseo.example",
+        } as never,
+        client as never,
+        store,
+        { answerPendingQuestion: async () => false } as never,
+        {} as never,
+      );
+
+      const thread = {
+        id: externalThreadId,
+        isDM: false,
+        subscribe: async () => {},
+        post: async (message: unknown) => {
+          postedMessages.push(message);
+        },
+        createSentMessageFromMessage: (message: { id: string }) => ({
+          addReaction: async (emoji: string) => {
+            reactions.push({ messageId: message.id, emoji });
+          },
+        }),
+        adapter: {},
+      };
+      const message = {
+        id: "333.444",
+        text: "/archive",
+        raw: { text: "/archive", thread_ts: "111.222" },
+        author: {
+          userId: "U1",
+          userName: "john",
+          fullName: "John",
+          isBot: false,
+          isMe: false,
+        },
+        attachments: [],
+        links: [],
+        isMention: false,
+      };
+
+      await bridge.handleMessage(thread as never, message as never, "subscribed");
+
+      expect(archivedAgents).toEqual([rootAgentId]);
+      await expect(store.getSession(externalThreadId)).resolves.toBeNull();
+      expect(reactions).toEqual([{ messageId: "111.222", emoji: "wastebasket" }]);
+      expect(postedMessages).toEqual(["Archived the office agent for this thread."]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("sends aside messages to the agent as context only without starting relay", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {

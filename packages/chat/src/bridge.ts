@@ -80,6 +80,12 @@ function encodeWorkspaceIdForPathSegment(workspaceId: string): string {
   return `b64_${toBase64UrlNoPad(id)}`;
 }
 
+function getSlackThreadRootMessageId(message: Message): string {
+  const raw = message.raw as { thread_ts?: unknown } | undefined;
+  const threadTs = typeof raw?.thread_ts === "string" && raw.thread_ts ? raw.thread_ts : null;
+  return threadTs ?? message.id;
+}
+
 export function buildStartedCardUrl(input: {
   baseUrl: string;
   serverId: string;
@@ -303,6 +309,7 @@ export class ChatBridge {
     if (normalized.command === "archive" && existing) {
       await this.client.archiveAgent(getBindingOwnerAgentId(existing));
       await this.store.deleteSession(normalized.externalThreadId);
+      await this.reactToArchiveCommand(thread, message);
       await this.postMessage(
         thread,
         normalized.externalThreadId,
@@ -580,6 +587,20 @@ export class ChatBridge {
     for (const reaction of reactionNames) {
       try {
         await thread.createSentMessageFromMessage(message).addReaction(reaction);
+        return;
+      } catch {
+        // Try the next likely Slack emoji name; workspaces can differ on aliases.
+      }
+    }
+  }
+
+  private async reactToArchiveCommand(thread: Thread, message: Message): Promise<void> {
+    const targetMessageId = getSlackThreadRootMessageId(message);
+    const targetMessage =
+      targetMessageId === message.id ? message : ({ ...message, id: targetMessageId } as Message);
+    for (const reaction of ["wastebasket", "trash"]) {
+      try {
+        await thread.createSentMessageFromMessage(targetMessage).addReaction(reaction);
         return;
       } catch {
         // Try the next likely Slack emoji name; workspaces can differ on aliases.
