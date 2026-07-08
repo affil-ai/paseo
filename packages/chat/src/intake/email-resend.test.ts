@@ -202,6 +202,28 @@ describe("body handling and formatting", () => {
     expect(stripQuotedEmailChain(body)).toBe("Thanks, that fixed it!");
   });
 
+  it("preserves human context before nested forwarded receipt content", () => {
+    const body = [
+      "---------- Forwarded message ---------",
+      "From: Chia Yang <chia@example.com>",
+      "Date: Wed, Jul 8, 2026 at 10:04 AM",
+      "Subject: Fw: Your receipt from NOK'S KITCHEN",
+      "To: <hello@nextcard.com>",
+      "",
+      "I ordered online yesterday and the restaurant was closed. Can you help?",
+      "",
+      "Begin forwarded message:",
+      "",
+      "NOK'S KITCHEN",
+      "$13.11",
+    ].join("\n");
+
+    expect(stripQuotedEmailChain(body)).toContain(
+      "I ordered online yesterday and the restaurant was closed. Can you help?",
+    );
+    expect(stripQuotedEmailChain(body)).not.toContain("NOK'S KITCHEN\n$13.11");
+  });
+
   it("formats the agent prompt with identity headers and keeps paths out of the Slack preview", () => {
     const email = makeEmail({
       headers: {

@@ -10,6 +10,25 @@ const email: ResendReceivedEmail = {
   text: "I signed up yesterday but my card is not showing in the app.",
 };
 
+const forwardedReceiptEmail: ResendReceivedEmail = {
+  id: "em_forwarded_receipt",
+  from: "hello@nextcard.com",
+  to: ["nextcard-help@example.resend.app"],
+  subject: "Fwd: Fw: Your receipt from NOK'S KITCHEN",
+  text: [
+    "---------- Forwarded message ---------",
+    "From: Chia Yang <chia@example.com>",
+    "Subject: Fw: Your receipt from NOK'S KITCHEN",
+    "To: <hello@nextcard.com>",
+    "",
+    "I ordered online yesterday and the restaurant was closed. Can you help?",
+    "",
+    "Begin forwarded message:",
+    "NOK'S KITCHEN",
+    "$13.11",
+  ].join("\n"),
+};
+
 function classifierConfig() {
   return {
     provider: "pi" as const,
@@ -43,6 +62,30 @@ describe("createPiEmailClassifier", () => {
       timeoutMs: 12_345,
     });
     expect(calls[0]?.prompt).toContain("Card not showing up");
+  });
+
+  it("instructs the model not to ignore forwarded receipts with human help requests", async () => {
+    const calls: PiPromptInput[] = [];
+    const runner = vi.fn(async (input: PiPromptInput) => {
+      calls.push(input);
+      return '{"isSupport":true,"confidence":0.91,"reason":"forwarded receipt includes a customer help request"}';
+    });
+    const classifier = createPiEmailClassifier(classifierConfig(), runner);
+
+    await expect(classifier(forwardedReceiptEmail)).resolves.toEqual({
+      isSupport: true,
+      confidence: 0.91,
+      reason: "forwarded receipt includes a customer help request",
+    });
+    expect(calls[0]?.prompt).toContain(
+      "Do not classify an email as non-support solely because it is forwarded",
+    );
+    expect(calls[0]?.prompt).toContain(
+      "forwarded receipts, order confirmations, or automated messages with a human help request",
+    );
+    expect(calls[0]?.prompt).toContain(
+      "I ordered online yesterday and the restaurant was closed. Can you help?",
+    );
   });
 
   it("parses fenced JSON but still asks the model for raw JSON only", async () => {

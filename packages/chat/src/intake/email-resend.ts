@@ -193,6 +193,14 @@ function shouldCutAtForwardHeader(lines: readonly string[], index: number): bool
   return /\n(?:sent|date|to|subject):\s+/i.test(window);
 }
 
+function isStandaloneChainMarker(line: string): boolean {
+  return (
+    /^[-_ ]*original message[-_ ]*$/i.test(line) ||
+    /^[-_ ]*forwarded message[-_ ]*$/i.test(line) ||
+    /^begin forwarded message:?$/i.test(line)
+  );
+}
+
 export function stripQuotedEmailChain(body: string): string {
   const lines = body.split(/\r?\n/);
   let lastMeaningfulLine = -1;
@@ -213,7 +221,7 @@ export function stripQuotedEmailChain(body: string): string {
       return lines.slice(0, index).join("\n").trim();
     }
 
-    if (trimmed.length > 0 && !trimmed.startsWith(">")) {
+    if (trimmed.length > 0 && !trimmed.startsWith(">") && !isStandaloneChainMarker(trimmed)) {
       lastMeaningfulLine = index;
     }
   }
