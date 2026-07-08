@@ -118,8 +118,21 @@ const ChatAuditRecordSchema = z.object({
   files: z
     .array(z.object({ filename: z.string(), mimeType: z.string(), size: z.number() }))
     .optional(),
-  result: z.enum(["posted", "uploaded", "blocked", "failed", "timeout", "canceled"]),
+  result: z.enum(["posted", "uploaded", "reacted", "blocked", "failed", "timeout", "canceled"]),
   errorCode: z.string().optional(),
+});
+
+const GithubPrLinkSchema = z.object({
+  key: z.string(),
+  owner: z.string(),
+  repo: z.string(),
+  number: z.number().int().positive(),
+  url: z.string(),
+  officeAgentId: z.string(),
+  externalThreadId: z.string(),
+  conversationId: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const EmailClassificationSchema = z.object({
@@ -151,6 +164,7 @@ const StoreSchema = z.object({
   // owning Slack announce-thread session
   emailLinks: z.record(z.string(), z.string()).default({}),
   emailAuditRecords: z.array(EmailAuditRecordSchema).default([]),
+  githubPrLinks: z.record(z.string(), z.array(GithubPrLinkSchema)).default({}),
 });
 
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
@@ -161,6 +175,7 @@ export type ThreadSession = ChatBinding;
 export type PendingRequest = z.infer<typeof PendingRequestSchema>;
 export type ChatAuditRecord = z.infer<typeof ChatAuditRecordSchema>;
 export type EmailAuditRecord = z.infer<typeof EmailAuditRecordSchema>;
+export type GithubPrLink = z.infer<typeof GithubPrLinkSchema>;
 type StoreData = z.infer<typeof StoreSchema>;
 
 function emptyStore(): StoreData {
@@ -173,6 +188,7 @@ function emptyStore(): StoreData {
     auditRecords: [],
     emailLinks: {},
     emailAuditRecords: [],
+    githubPrLinks: {},
   };
 }
 
@@ -266,6 +282,12 @@ export class ThreadSessionStore {
         if (threadId === externalThreadId) {
           delete data.emailLinks[externalId];
         }
+      }
+      for (const [key, links] of Object.entries(data.githubPrLinks)) {
+        data.githubPrLinks[key] = links.filter(
+          (link) => link.externalThreadId !== externalThreadId,
+        );
+        if (data.githubPrLinks[key].length === 0) delete data.githubPrLinks[key];
       }
       for (const [requestId, request] of Object.entries(data.pendingRequests)) {
         if (request.externalThreadId === externalThreadId && request.status === "pending") {
@@ -461,6 +483,45 @@ export class ThreadSessionStore {
       }
     });
     return expired;
+  }
+
+  async recordGithubPrLinks(
+    prs: Array<{ key: string; owner: string; repo: string; number: number; url: string }>,
+    owner: { officeAgentId: string; externalThreadId: string; conversationId?: string },
+  ): Promise<void> {
+    if (prs.length === 0) return;
+    await this.store.update((data) => {
+      const now = new Date().toISOString();
+      for (const pr of prs) {
+        const links = data.githubPrLinks[pr.key] ?? [];
+        const existingIndex = links.findIndex(
+          (link) =>
+            link.officeAgentId === owner.officeAgentId &&
+            link.externalThreadId === owner.externalThreadId,
+        );
+        const existing = existingIndex >= 0 ? links[existingIndex] : null;
+        const next: GithubPrLink = {
+          ...pr,
+          officeAgentId: owner.officeAgentId,
+          externalThreadId: owner.externalThreadId,
+          ...(owner.conversationId ? { conversationId: owner.conversationId } : {}),
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        if (existingIndex >= 0) {
+          links[existingIndex] = next;
+        } else {
+          links.push(next);
+        }
+        data.githubPrLinks[pr.key] = links;
+      }
+    });
+  }
+
+  async findGithubPrLinks(key: string): Promise<GithubPrLink[]> {
+    return [...((await this.load()).githubPrLinks[key] ?? [])].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
   }
 
   async appendAuditRecord(record: ChatAuditRecord): Promise<void> {

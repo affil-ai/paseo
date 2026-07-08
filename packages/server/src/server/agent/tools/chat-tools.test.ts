@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { registerChatTools } from "./chat-tools.js";
 
 describe("registerChatTools", () => {
-  it("exposes only the simplified chat.send and chat.ask tools", () => {
+  it("exposes the simplified chat tools", () => {
     const toolNames: string[] = [];
 
     registerChatTools(
@@ -13,6 +13,6 @@ describe("registerChatTools", () => {
       { callerAgentId: "agent-office" },
     );
 
-    expect(toolNames).toEqual(["chat.send", "chat.ask"]);
+    expect(toolNames).toEqual(["chat.send", "chat.ask", "chat.addReaction"]);
   });
 });

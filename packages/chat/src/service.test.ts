@@ -24,13 +24,29 @@ interface PostedMessage {
   message: AdapterPostableMessage;
 }
 
+interface ReactionCall {
+  threadId: string;
+  messageId: string;
+  emoji: unknown;
+}
+
 class FakeTarget {
   readonly subscribed: string[] = [];
+  readonly adapter: {
+    addReaction: (threadId: string, messageId: string, emoji: unknown) => Promise<void>;
+  };
 
   constructor(
     readonly id: string,
     private readonly posted: PostedMessage[],
-  ) {}
+    reactions: ReactionCall[],
+  ) {
+    this.adapter = {
+      addReaction: async (threadId, messageId, emoji) => {
+        reactions.push({ threadId, messageId, emoji });
+      },
+    };
+  }
 
   async post(message: AdapterPostableMessage): Promise<SentMessage> {
     this.posted.push({ targetId: this.id, message });
@@ -45,6 +61,7 @@ class FakeTarget {
 
 class FakeChat {
   readonly posted: PostedMessage[] = [];
+  readonly reactions: ReactionCall[] = [];
   readonly targets = new Map<string, FakeTarget>();
 
   async openDM(userId: string): Promise<Thread> {
@@ -62,7 +79,7 @@ class FakeChat {
   private getTarget(id: string): FakeTarget {
     const existing = this.targets.get(id);
     if (existing) return existing;
-    const target = new FakeTarget(id, this.posted);
+    const target = new FakeTarget(id, this.posted, this.reactions);
     this.targets.set(id, target);
     return target;
   }
@@ -477,5 +494,86 @@ describe("ChatBridgeService", () => {
     expect(result.status).toBe("pending");
     const binding = await store.getConversation(result.conversationId);
     expect(binding).toMatchObject({ pendingRequestId: result.requestId });
+  });
+
+  it("adds a check reaction to the initial Slack message for a binding", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    const result = await service.addReaction({ officeAgentId: "agent-office" });
+
+    expect(result.reactionName).toBe("check");
+    expect(chat.reactions).toMatchObject([{ threadId: "slack:C1:111.222", messageId: "111.222" }]);
+  });
+
+  it("normalizes Slack checkmark aliases for reactions", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "outbound-conversation",
+      conversationId: "conv_1",
+      externalThreadId: "slack:C1:111.222",
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C1" },
+      subscribed: true,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const chat = new FakeChat();
+    const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    const result = await service.addReaction({
+      officeAgentId: "agent-office",
+      conversationId: "conv_1",
+      name: "white_check_mark",
+    });
+
+    expect(result.reactionName).toBe("check");
+    expect(chat.reactions[0]?.messageId).toBe("111.222");
+  });
+
+  it("records GitHub PR links from Slack-visible sends", async () => {
+    const store = new ThreadSessionStore(await createTempDir());
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    const result = await service.send({
+      officeAgentId: "agent-office",
+      destination: { kind: "channel", id: "C123" },
+      message: "Opened https://github.com/Affil-AI/paseo/pull/123 for review.",
+    });
+
+    await expect(store.findGithubPrLinks("affil-ai/paseo#123")).resolves.toMatchObject([
+      {
+        officeAgentId: "agent-office",
+        externalThreadId: result.externalThreadId,
+        conversationId: result.conversationId,
+        url: "https://github.com/Affil-AI/paseo/pull/123",
+      },
+    ]);
   });
 });

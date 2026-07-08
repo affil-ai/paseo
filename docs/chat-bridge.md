@@ -62,7 +62,10 @@ Slack output must stay in the user's message thread:
 - If a Slack-bound chat tool message expands to multiple posts because it contains multiple tables, file uploads stay attached to the first emitted post.
 
 Manual relay mode keeps progress updates explicit: the office agent calls `chat.send` for
-Slack-visible text and/or files instead of relying on automatic final-message relay. The bridge
+Slack-visible text and/or files instead of relying on automatic final-message relay. Office agents
+can also call `chat.addReaction` to react to the initial/root Slack message in their current or
+selected conversation; this is how they mark Slack-originated work complete with a checkmark.
+The bridge
 does not enforce missing final replies in manual mode: it does not post bridge-authored fallback
 text to Slack and does not send reminder/follow-up prompts back to the agent. The Slack thread
 receives only agent-authored `chat.*` deliveries on this path. The prompt still instructs the
@@ -94,6 +97,13 @@ Everything we need is native to Chat SDK:
 | Send files (agent → Slack) | `thread.post({ markdown, files: [{ data, filename }] })`             |
 | Read inbound attachments   | `attachment.fetchData()` on the message attachment handle            |
 | Signature verification     | handled inside `@chat-adapter/slack` (Socket Mode / signing secret)  |
+
+GitHub PR merge notifications use the same bridge state: Slack-visible office-agent messages are
+scanned for `https://github.com/<owner>/<repo>/pull/<number>` links and recorded against the owning
+chat binding. When `PASEO_CHAT_GITHUB_WEBHOOK_SECRET` is set, the inbound HTTP server accepts
+GitHub `pull_request` webhooks at `/github/webhook`, verifies `x-hub-signature-256`, dedupes
+`x-github-delivery`, and tells the owning office agent(s) that the PR merged. The bridge does not
+react automatically; the office agent decides whether to reply and call `chat.addReaction`.
 
 > **t3code cautionary note.** t3code reached around Chat SDK to the raw Slack Web API in a
 > few places — `files.getUploadURLExternal` / `files.completeUploadExternal` (upload),

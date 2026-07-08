@@ -2,8 +2,15 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AdapterPostableMessage, FileUpload, SentMessage, Thread } from "chat";
+import {
+  emoji,
+  type AdapterPostableMessage,
+  type FileUpload,
+  type SentMessage,
+  type Thread,
+} from "chat";
 import type { ChatBridgeConfig, ResolvedChatBridgeConfig } from "./config.js";
+import { extractGithubPrLinks } from "./github.js";
 import { slackPostableMessagesFromMarkdown } from "./render.js";
 import {
   ChatDestinationSchema,
@@ -66,12 +73,20 @@ export interface AskInput {
   idempotencyKey?: string;
 }
 
+export interface AddReactionInput {
+  officeAgentId: string;
+  conversationId?: string;
+  name?: string;
+  idempotencyKey?: string;
+}
+
 export interface ChatPostResult {
   conversationId: string;
   externalThreadId: string;
   requestId?: string;
   status?: "pending";
   fileId?: string;
+  reactionName?: string;
 }
 
 interface PostableTarget {
@@ -159,6 +174,42 @@ function hasSendContent(input: { message?: string; files?: ChatOutboundFile[] })
   return Boolean(input.message?.trim() || input.files?.length);
 }
 
+function normalizeReactionName(name: string | undefined): string {
+  const trimmed = (name ?? "check")
+    .trim()
+    .replace(/^:+|:+$/g, "")
+    .toLowerCase();
+  if (
+    !trimmed ||
+    trimmed === "✅" ||
+    trimmed === "white_check_mark" ||
+    trimmed === "heavy_check_mark" ||
+    trimmed === "checkmark"
+  ) {
+    return "check";
+  }
+  if (!/^[a-z0-9_+-]{1,80}$/.test(trimmed)) {
+    throw new ChatToolError(
+      "invalid_reaction",
+      "Reaction names must be emoji names like check or thumbs_up.",
+      { name },
+    );
+  }
+  return trimmed;
+}
+
+function rootMessageIdFromExternalThreadId(externalThreadId: string): string {
+  const messageId = externalThreadId.split(":").at(-1)?.trim();
+  if (!messageId) {
+    throw new ChatToolError(
+      "invalid_conversation",
+      "Could not determine the initial Slack message id for this conversation.",
+      { externalThreadId },
+    );
+  }
+  return messageId;
+}
+
 export function normalizeSlackChannelId(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("slack:")) return trimmed;
@@ -204,7 +255,13 @@ function parseSlackUrl(url: string): { channelId: string; threadId?: string } | 
 }
 
 function auditMessage(
-  input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
+  input:
+    | StartConversationInput
+    | ReplyInput
+    | SendInput
+    | SendFileInput
+    | AskInput
+    | AddReactionInput,
 ): string | undefined {
   if ("message" in input) return input.message;
   if ("question" in input) return input.question;
@@ -212,7 +269,13 @@ function auditMessage(
 }
 
 function auditFiles(
-  input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
+  input:
+    | StartConversationInput
+    | ReplyInput
+    | SendInput
+    | SendFileInput
+    | AskInput
+    | AddReactionInput,
 ): ChatOutboundFile[] | undefined {
   if ("file" in input) return [input.file];
   if ("files" in input) return input.files;
@@ -289,6 +352,7 @@ export class ChatBridgeService {
         ...this.resultFromBinding(binding),
         ...(files[0] ? { fileId: files[0].filename } : {}),
       };
+      await this.recordGithubPrLinksFromText(input.officeAgentId, binding, input.message);
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
@@ -315,6 +379,7 @@ export class ChatBridgeService {
         await this.postRemainingMessages(existingBinding.externalThreadId, messages);
         await this.suppressActiveAutoRelay(existingBinding.externalThreadId);
         const result = this.resultFromBinding(existingBinding);
+        await this.recordGithubPrLinksFromText(input.officeAgentId, existingBinding, input.message);
         await this.completeIdempotentResult(input.idempotencyKey, result);
         return result;
       }
@@ -330,6 +395,7 @@ export class ChatBridgeService {
       await this.store.upsertBinding(binding);
       if (binding.subscribed) await this.chat.thread(externalThreadId).subscribe();
       const result = { conversationId, externalThreadId };
+      await this.recordGithubPrLinksFromText(input.officeAgentId, binding, input.message);
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
@@ -348,6 +414,7 @@ export class ChatBridgeService {
       await this.postMessages(binding.externalThreadId, messages);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = this.resultFromBinding(binding);
+      await this.recordGithubPrLinksFromText(input.officeAgentId, binding, input.message);
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
@@ -367,6 +434,7 @@ export class ChatBridgeService {
       await this.postMessages(binding.externalThreadId, messages);
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = { ...this.resultFromBinding(binding), fileId: input.file.filename };
+      await this.recordGithubPrLinksFromText(input.officeAgentId, binding, input.message);
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
@@ -486,6 +554,31 @@ export class ChatBridgeService {
       await this.completeIdempotentResult(input.idempotencyKey, result);
       return result;
     });
+  }
+
+  async addReaction(input: AddReactionInput): Promise<ChatPostResult> {
+    return this.withAudit(
+      "chat.addReaction",
+      input,
+      async () => {
+        const cached = await this.getIdempotentResult(input.idempotencyKey);
+        if (cached) return cached;
+        const binding = await this.resolveCurrentBinding(input.officeAgentId, input.conversationId);
+        const reactionName = normalizeReactionName(input.name);
+        const rootMessageId = rootMessageIdFromExternalThreadId(binding.externalThreadId);
+        await this.chat
+          .thread(binding.externalThreadId)
+          .adapter.addReaction(
+            binding.externalThreadId,
+            rootMessageId,
+            reactionName === "check" ? emoji.check : reactionName,
+          );
+        const result = { ...this.resultFromBinding(binding), reactionName };
+        await this.completeIdempotentResult(input.idempotencyKey, result);
+        return result;
+      },
+      "reacted",
+    );
   }
 
   async notifyPendingRequestAnswer(input: {
@@ -700,6 +793,20 @@ export class ChatBridgeService {
     return bindings[0];
   }
 
+  private async recordGithubPrLinksFromText(
+    officeAgentId: string,
+    binding: ChatBinding,
+    text: string | undefined,
+  ): Promise<void> {
+    await this.store.recordGithubPrLinks(extractGithubPrLinks(text), {
+      officeAgentId,
+      externalThreadId: binding.externalThreadId,
+      ...(binding.kind === "outbound-conversation"
+        ? { conversationId: binding.conversationId }
+        : {}),
+    });
+  }
+
   private resultFromBinding(binding: ChatBinding): ChatPostResult {
     return {
       conversationId:
@@ -725,8 +832,15 @@ export class ChatBridgeService {
 
   private async withAudit<T extends ChatPostResult>(
     toolName: string,
-    input: StartConversationInput | ReplyInput | SendInput | SendFileInput | AskInput,
+    input:
+      | StartConversationInput
+      | ReplyInput
+      | SendInput
+      | SendFileInput
+      | AskInput
+      | AddReactionInput,
     run: () => Promise<T>,
+    successResult?: ChatAuditRecord["result"],
   ): Promise<T> {
     try {
       if (input.idempotencyKey && !(await this.store.markDeliveryStarted(input.idempotencyKey))) {
@@ -743,7 +857,7 @@ export class ChatBridgeService {
           conversationId: result.conversationId,
           message: auditMessage(input),
           files: auditFiles(input),
-          result: auditFiles(input)?.length ? "uploaded" : "posted",
+          result: successResult ?? (auditFiles(input)?.length ? "uploaded" : "posted"),
         }),
       );
       return result;
@@ -844,7 +958,7 @@ export async function startChatServiceServer(input: {
 }
 
 interface RpcBody {
-  method: "send" | "startConversation" | "reply" | "sendFile" | "ask";
+  method: "send" | "startConversation" | "reply" | "sendFile" | "ask" | "addReaction";
   input: unknown;
 }
 
@@ -857,7 +971,8 @@ function readRpcBody(value: unknown): RpcBody {
     body.method !== "startConversation" &&
     body.method !== "reply" &&
     body.method !== "sendFile" &&
-    body.method !== "ask"
+    body.method !== "ask" &&
+    body.method !== "addReaction"
   ) {
     throw new ChatToolError("invalid_method", "Unknown chat bridge service method.");
   }
@@ -870,5 +985,6 @@ async function callService(service: ChatBridgeService, body: RpcBody): Promise<C
     return service.startConversation(body.input as StartConversationInput);
   if (body.method === "reply") return service.reply(body.input as ReplyInput);
   if (body.method === "sendFile") return service.sendFile(body.input as SendFileInput);
-  return service.ask(body.input as AskInput);
+  if (body.method === "ask") return service.ask(body.input as AskInput);
+  return service.addReaction(body.input as AddReactionInput);
 }

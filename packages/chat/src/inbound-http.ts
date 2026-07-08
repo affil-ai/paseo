@@ -46,6 +46,10 @@ export function startInboundHttpServer(input: {
     headers: Record<string, string | string[] | undefined>,
     requestUrl: string | undefined,
   ) => Promise<{ status: number; body: unknown }>;
+  githubWebhook?: (
+    rawBody: Buffer,
+    headers: Record<string, string | string[] | undefined>,
+  ) => Promise<{ status: number; body: unknown }>;
 }) {
   const slackWebhookEnabled = input.slackWebhookEnabled ?? true;
   const server = createServer(async (req, res) => {
@@ -61,6 +65,15 @@ export function startInboundHttpServer(input: {
         const request = await nodeRequestToFetchRequest(req, body);
         const response = await input.chat.webhooks.slack(request);
         await writeFetchResponse(res, response);
+        return;
+      }
+
+      if (input.githubWebhook && req.method === "POST" && req.url?.startsWith("/github/webhook")) {
+        const body = await readBody(req);
+        const result = await input.githubWebhook(body, req.headers);
+        res.statusCode = result.status;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(result.body));
         return;
       }
 

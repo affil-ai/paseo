@@ -22,6 +22,7 @@ export const ChatToolResultSchema = z.object({
   requestId: z.string().optional(),
   status: z.literal("pending").optional(),
   fileId: z.string().optional(),
+  reactionName: z.string().optional(),
 });
 
 export const ChatToolOutputSchema = z.object({
@@ -30,6 +31,7 @@ export const ChatToolOutputSchema = z.object({
   requestId: z.string().optional(),
   status: z.literal("pending").optional(),
   fileId: z.string().optional(),
+  reactionName: z.string().optional(),
   error: z
     .object({
       code: z.string(),
@@ -169,7 +171,7 @@ export class ChatServiceClient {
   constructor(private readonly options: ChatServiceClientOptions = {}) {}
 
   async call(
-    method: "send" | "startConversation" | "reply" | "sendFile" | "ask",
+    method: "send" | "startConversation" | "reply" | "sendFile" | "ask" | "addReaction",
     input: unknown,
   ): Promise<ChatToolResult> {
     let token: string;
