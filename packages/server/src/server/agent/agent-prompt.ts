@@ -242,6 +242,16 @@ export interface SetupFinishNotificationParams {
   childAgentId: string;
   callerAgentId: string;
   logger: Logger;
+  scheduleErroredNotification?: FinishNotificationScheduler;
+}
+
+export type FinishNotificationScheduler = (callback: () => void, delayMs: number) => () => void;
+
+export const ERRORED_FINISH_NOTIFICATION_GRACE_MS = 10_000;
+
+function scheduleErroredFinishNotification(callback: () => void, delayMs: number): () => void {
+  const handle = setTimeout(callback, delayMs);
+  return () => clearTimeout(handle);
 }
 
 interface FinishNotificationBodyInput {
@@ -261,15 +271,39 @@ function formatFinishNotificationBody(params: FinishNotificationBodyInput): stri
 }
 
 export function setupFinishNotification(params: SetupFinishNotificationParams): void {
-  const { agentManager, agentStorage, childAgentId, callerAgentId, logger } = params;
+  const {
+    agentManager,
+    agentStorage,
+    childAgentId,
+    callerAgentId,
+    logger,
+    scheduleErroredNotification = scheduleErroredFinishNotification,
+  } = params;
   let hasSeenRunning = false;
   let fired = false;
   let unsubscribe: (() => void) | null = null;
+  let cancelPendingErroredNotification: (() => void) | null = null;
+
+  function clearPendingErroredNotification(): void {
+    cancelPendingErroredNotification?.();
+    cancelPendingErroredNotification = null;
+  }
+
+  function armErroredNotification(): void {
+    if (fired || cancelPendingErroredNotification) {
+      return;
+    }
+    cancelPendingErroredNotification = scheduleErroredNotification(() => {
+      cancelPendingErroredNotification = null;
+      void notify("errored");
+    }, ERRORED_FINISH_NOTIFICATION_GRACE_MS);
+  }
 
   async function notify(reason: "finished" | "errored" | "needs permission"): Promise<void> {
     if (fired) {
       return;
     }
+    clearPendingErroredNotification();
     fired = true;
     unsubscribe?.();
 
@@ -306,11 +340,12 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
 
       if (event.type === "agent_state") {
         if (event.agent.lifecycle === "running") {
+          clearPendingErroredNotification();
           hasSeenRunning = true;
           return;
         }
         if (event.agent.lifecycle === "error") {
-          void notify("errored");
+          armErroredNotification();
           return;
         }
         if (event.agent.lifecycle === "idle" && hasSeenRunning) {
@@ -318,7 +353,12 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
           return;
         }
         if (event.agent.lifecycle === "closed") {
+          if (cancelPendingErroredNotification) {
+            void notify("errored");
+            return;
+          }
           fired = true;
+          clearPendingErroredNotification();
           unsubscribe?.();
           return;
         }
@@ -345,6 +385,6 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   if (childSnapshot.lifecycle === "running") {
     hasSeenRunning = true;
   } else if (childSnapshot.lifecycle === "error") {
-    void notify("errored");
+    armErroredNotification();
   }
 }
