@@ -17,6 +17,8 @@ The official image:
 - stores daemon state and agent credentials under `/home/paseo`
 - includes common JavaScript package managers (`npm`, `pnpm`, and `bun`) so
   workspace setup commands can install dependencies without a child image
+- configures runtime `npm install -g ...` commands to install under
+  `/home/paseo/.local/bin`, which is already on `PATH`
 - leaves agent CLIs out of the base image
 
 Open the container's HTTP origin, for example `http://localhost:6767`, to load

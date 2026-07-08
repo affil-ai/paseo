@@ -119,6 +119,9 @@ RUN set -eux; \
       node -e "const fs=require('node:fs');const path=process.argv[1];const listen=process.argv[2];const marker='<script>window.__PASEO_INITIAL_DAEMON_CONNECTION__={listen:'+JSON.stringify(listen)+',useTls:true};</script>';let html=fs.readFileSync(path,'utf8');if(!html.includes('__PASEO_INITIAL_DAEMON_CONNECTION__')){html=html.replace('</head>',marker+'\\n</head>');fs.writeFileSync(path,html)}" "$web_ui_index" "$PASEO_INITIAL_DAEMON_CONNECTION"; \
     fi
 
+ENV NPM_CONFIG_PREFIX=/home/paseo/.local \
+    PATH=/home/paseo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 RUN set -eux; \
     existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
     if [ -n "$existing_group" ] && [ "$existing_group" != "paseo" ]; then \
@@ -134,6 +137,8 @@ RUN set -eux; \
     fi; \
     mkdir -p \
       /workspace \
+      "$NPM_CONFIG_PREFIX" \
+      "$NPM_CONFIG_PREFIX/bin" \
       "$PASEO_HOME" \
       "$CLAUDE_CONFIG_DIR" \
       "$CODEX_HOME" \

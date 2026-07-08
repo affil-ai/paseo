@@ -18,6 +18,8 @@ Then open `http://localhost:6767`.
 
 The base image includes `npm`, `pnpm`, and `bun` so workspace setup commands can install
 dependencies before an agent starts.
+Runtime `npm install -g ...` commands run as the non-root `paseo` user and install into
+`/home/paseo/.local/bin`, which is already on `PATH`.
 
 It intentionally does not bundle agent CLIs. Extend it with the agents you use:
 

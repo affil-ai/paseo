@@ -74,6 +74,9 @@ RUN set -eux; \
     printf '%s\n' "$server_entry" > /etc/paseo-server-entry; \
     node --check "$server_entry"
 
+ENV NPM_CONFIG_PREFIX=/home/paseo/.local \
+    PATH=/home/paseo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 RUN set -eux; \
     existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
     if [ -n "$existing_group" ] && [ "$existing_group" != "paseo" ]; then \
@@ -89,6 +92,8 @@ RUN set -eux; \
     fi; \
     mkdir -p \
       /workspace \
+      "$NPM_CONFIG_PREFIX" \
+      "$NPM_CONFIG_PREFIX/bin" \
       "$PASEO_HOME" \
       "$CLAUDE_CONFIG_DIR" \
       "$CODEX_HOME" \
