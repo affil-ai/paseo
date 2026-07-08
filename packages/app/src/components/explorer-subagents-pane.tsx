@@ -1,15 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { ChevronLeft, GitPullRequest, Link2 } from "lucide-react-native";
+import { ChevronLeft, GitPullRequest } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { getProviderIcon } from "@/components/provider-icons";
 import { WorkspaceTabIcon } from "@/screens/workspace/workspace-tab-presentation";
-import { useToast } from "@/contexts/toast-context";
-import { copyToClipboard } from "@/utils/copy-to-clipboard";
-import { buildHostWorkspacePrShareUrl } from "@/utils/host-routes";
-import { prIdentityKey } from "@/git/explorer-pr-tabs";
-import { isWeb } from "@/constants/platform";
 import {
   createPaneFocusContextValue,
   PaneFocusProvider,
@@ -30,15 +25,12 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
-const ThemedLink2 = withUnistyles(Link2);
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-// PR affordance shown on a subagent row: opens that subagent's PR review pane
-// and offers a copy-link (deep-link) affordance keyed by stable PR identity.
+// PR affordance shown on a subagent row: opens that subagent's PR review pane.
 interface SubagentRowPr {
   cwd: string;
   prNumber: number;
-  prIdentityKey: string;
 }
 
 interface ExplorerSubagentsPaneProps {
@@ -77,11 +69,7 @@ export function ExplorerSubagentsPane({
   const prBySubagentId = useMemo(() => {
     const map = new Map<string, SubagentRowPr>();
     for (const input of prTabInputs) {
-      map.set(input.subagentId, {
-        cwd: input.cwd,
-        prNumber: input.prNumber,
-        prIdentityKey: prIdentityKey(input, input.cwd),
-      });
+      map.set(input.subagentId, { cwd: input.cwd, prNumber: input.prNumber });
     }
     return map;
   }, [prTabInputs]);
@@ -141,8 +129,6 @@ export function ExplorerSubagentsPane({
           key={row.id}
           row={row}
           pr={prBySubagentId.get(row.id) ?? null}
-          serverId={serverId}
-          workspaceId={workspaceId ?? null}
           onSelect={setSelectedAgentId}
           onSelectPr={onSelectSubagentPr}
         />
@@ -154,15 +140,11 @@ export function ExplorerSubagentsPane({
 function ExplorerSubagentRow({
   row,
   pr,
-  serverId,
-  workspaceId,
   onSelect,
   onSelectPr,
 }: {
   row: SubagentRow;
   pr: SubagentRowPr | null;
-  serverId: string;
-  workspaceId: string | null;
   onSelect: (id: string) => void;
   onSelectPr?: (prCwd: string) => void;
 }) {
@@ -192,14 +174,6 @@ function ExplorerSubagentRow({
             {pr && onSelectPr ? (
               <SubagentRowPrBadge prNumber={pr.prNumber} cwd={pr.cwd} onSelectPr={onSelectPr} />
             ) : null}
-            {pr && workspaceId ? (
-              <SubagentPrCopyLinkButton
-                serverId={serverId}
-                workspaceId={workspaceId}
-                prNumber={pr.prNumber}
-                prIdentityKey={pr.prIdentityKey}
-              />
-            ) : null}
           </View>
         )}
       </Pressable>
@@ -209,53 +183,6 @@ function ExplorerSubagentRow({
 
 function prBadgeStyle({ hovered, pressed }: { hovered?: boolean; pressed?: boolean }) {
   return [styles.prBadge, (hovered || pressed) && styles.prBadgeActive];
-}
-
-function copyLinkButtonStyle({ hovered, pressed }: { hovered?: boolean; pressed?: boolean }) {
-  return [styles.prBadge, (hovered || pressed) && styles.prBadgeActive];
-}
-
-// Copy a shareable deep-link URL (?pr=<identity>) for a subagent PR to the
-// clipboard. On web the URL is origin-qualified; elsewhere it is the app route.
-function SubagentPrCopyLinkButton({
-  serverId,
-  workspaceId,
-  prNumber,
-  prIdentityKey: identityKey,
-}: {
-  serverId: string;
-  workspaceId: string;
-  prNumber: number;
-  prIdentityKey: string;
-}) {
-  const { t } = useTranslation();
-  const toast = useToast();
-  const handlePress = useCallback(() => {
-    const origin =
-      isWeb && typeof window !== "undefined" && window.location ? window.location.origin : null;
-    const url = buildHostWorkspacePrShareUrl({
-      serverId,
-      workspaceId,
-      prIdentityKey: identityKey,
-      origin,
-    });
-    void copyToClipboard(url).then(
-      () => toast.copied(t("workspace.tabs.explorer.copyPrLinkLabel")),
-      () => toast.error(t("workspace.tabs.explorer.copyPrLinkFailed")),
-    );
-  }, [identityKey, serverId, t, toast, workspaceId]);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={t("workspace.tabs.explorer.copyPrLink", { number: prNumber })}
-      testID={`explorer-subagents-pr-copy-${prNumber}`}
-      onPress={handlePress}
-      hitSlop={6}
-      style={copyLinkButtonStyle}
-    >
-      <ThemedLink2 size={12} uniProps={mutedColorMapping} />
-    </Pressable>
-  );
 }
 
 function SubagentRowPrBadge({

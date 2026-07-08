@@ -509,9 +509,6 @@ export const ru: TranslationResources = {
         subagents: "Субагенты",
         subagentsEmpty: "В этом рабочем пространстве нет субагентов",
         openSubagentPr: "Открыть пул-реквест #{{number}}",
-        copyPrLink: "Копировать ссылку на пул-реквест #{{number}}",
-        copyPrLinkLabel: "Ссылка на PR",
-        copyPrLinkFailed: "Не удалось скопировать ссылку на PR",
       },
       toasts: {
         copyFailed: "Не удалось скопировать",

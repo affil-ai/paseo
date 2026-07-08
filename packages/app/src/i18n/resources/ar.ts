@@ -505,9 +505,6 @@ export const ar: TranslationResources = {
         subagents: "الوكلاء الفرعيون",
         subagentsEmpty: "لا يوجد وكلاء فرعيون في مساحة العمل هذه",
         openSubagentPr: "فتح طلب السحب #{{number}}",
-        copyPrLink: "نسخ رابط طلب السحب #{{number}}",
-        copyPrLinkLabel: "رابط الـ PR",
-        copyPrLinkFailed: "تعذر نسخ رابط الـ PR",
       },
       toasts: {
         copyFailed: "فشل النسخ",

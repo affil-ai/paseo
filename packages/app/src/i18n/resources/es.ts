@@ -510,9 +510,6 @@ export const es: TranslationResources = {
         subagents: "Subagentes",
         subagentsEmpty: "No hay subagentes en este workspace",
         openSubagentPr: "Abrir pull request n.º {{number}}",
-        copyPrLink: "Copiar enlace al pull request n.º {{number}}",
-        copyPrLinkLabel: "Enlace del PR",
-        copyPrLinkFailed: "No se pudo copiar el enlace del PR",
       },
       toasts: {
         copyFailed: "Copia fallida",

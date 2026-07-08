@@ -3,10 +3,7 @@ import {
   buildHostAgentDetailRoute,
   buildHostRootRoute,
   buildHostWorkspaceOpenRoute,
-  buildHostWorkspacePrRoute,
-  buildHostWorkspacePrShareUrl,
   buildHostWorkspaceRoute,
-  parseWorkspacePrIntent,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   resolveKnownHostRoute,
@@ -128,44 +125,6 @@ describe("workspace route parsing", () => {
     expect(buildHostWorkspaceOpenRoute("local", "164", "draft:new")).toBe(
       "/h/local/workspace/164?open=draft%3Anew",
     );
-  });
-
-  it("builds a workspace PR deep-link route with an encoded PR identity", () => {
-    expect(buildHostWorkspacePrRoute("local", "164", "acme/app#1942")).toBe(
-      "/h/local/workspace/164?pr=acme%2Fapp%231942",
-    );
-  });
-
-  it("returns the base route when the PR identity is blank", () => {
-    expect(buildHostWorkspacePrRoute("local", "164", "  ")).toBe("/h/local/workspace/164");
-  });
-
-  it("builds an origin-qualified PR share URL on web", () => {
-    expect(
-      buildHostWorkspacePrShareUrl({
-        serverId: "local",
-        workspaceId: "164",
-        prIdentityKey: "acme/app#1942",
-        origin: "https://paseo.example.com/",
-      }),
-    ).toBe("https://paseo.example.com/h/local/workspace/164?pr=acme%2Fapp%231942");
-  });
-
-  it("falls back to the app-relative route when no origin is given", () => {
-    expect(
-      buildHostWorkspacePrShareUrl({
-        serverId: "local",
-        workspaceId: "164",
-        prIdentityKey: "acme/app#1942",
-        origin: null,
-      }),
-    ).toBe("/h/local/workspace/164?pr=acme%2Fapp%231942");
-  });
-
-  it("parses the pr deep-link intent, trimming blanks to null", () => {
-    expect(parseWorkspacePrIntent("acme/app#1942")).toBe("acme/app#1942");
-    expect(parseWorkspacePrIntent("  ")).toBeNull();
-    expect(parseWorkspacePrIntent(undefined)).toBeNull();
   });
 
   it("strips route params repeated as workspace route search params", () => {

@@ -505,9 +505,6 @@ export const en = {
         subagents: "Subagents",
         subagentsEmpty: "No subagents in this workspace",
         openSubagentPr: "Open pull request #{{number}}",
-        copyPrLink: "Copy link to pull request #{{number}}",
-        copyPrLinkLabel: "PR link",
-        copyPrLinkFailed: "Couldn't copy PR link",
       },
       toasts: {
         copyFailed: "Copy failed",

@@ -509,9 +509,6 @@ export const ptBR: TranslationResources = {
         subagents: "Subagentes",
         subagentsEmpty: "Nenhum subagente neste workspace",
         openSubagentPr: "Abrir pull request #{{number}}",
-        copyPrLink: "Copiar link do pull request #{{number}}",
-        copyPrLinkLabel: "Link do PR",
-        copyPrLinkFailed: "Não foi possível copiar o link do PR",
       },
       toasts: {
         copyFailed: "Falha ao copiar",

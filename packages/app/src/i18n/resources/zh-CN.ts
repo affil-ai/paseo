@@ -505,9 +505,6 @@ export const zhCN: TranslationResources = {
         subagents: "子代理",
         subagentsEmpty: "此工作区没有子代理",
         openSubagentPr: "打开拉取请求 #{{number}}",
-        copyPrLink: "复制拉取请求 #{{number}} 的链接",
-        copyPrLinkLabel: "PR 链接",
-        copyPrLinkFailed: "无法复制 PR 链接",
       },
       toasts: {
         copyFailed: "复制失败",
