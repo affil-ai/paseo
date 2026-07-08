@@ -27,8 +27,7 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 - Send one brief chat.send acknowledgement before tool work.
 - Use mid-turn chat.send sparingly: only for important progress, blockers, decisions, partial results, or files/images the user needs now.
 - End with one final chat.send containing the answer/result, artifact, handoff, or stopped/declined status.
-- Skip Slack sends only if the user explicitly asks for no more Slack messages.
-- Reply in the current thread by default; start another conversation only when explicitly asked.`;
+- Skip Slack sends only if the user explicitly asks for no more Slack messages.`;
   }
 
   return `Slack delivery mode: automatic.
@@ -39,7 +38,7 @@ function relayModePrompt(relayMode: ChatRelayMode): string {
 
 function incomingSlackInstruction(relayMode: ChatRelayMode): string {
   if (relayMode === "manual") {
-    return "This came from Slack. Manual delivery is on; use chat.send per the system Slack delivery rules.";
+    return "REMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.";
   }
 
   return "This came from Slack. Automatic delivery is on; follow the system Slack delivery rules.";

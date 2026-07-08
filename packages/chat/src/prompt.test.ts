@@ -30,16 +30,19 @@ describe("Slack chat prompt delivery instructions", () => {
     expect(prompt).toContain("custom office rules");
   });
 
-  it("keeps manual-mode Slack delivery rules out of the initial user prompt", () => {
+  it("adds an explicit manual-mode Slack delivery reminder to the initial user prompt", () => {
     const prompt = assembleInitialPrompt({
       sender,
       text: "Can you check this?",
       relayMode: "manual",
     });
 
+    expect(prompt).toContain("REMINDER");
     expect(prompt).toContain("This came from Slack.");
     expect(prompt).toContain("Manual delivery is on");
-    expect(prompt).toContain("use chat.send per the system Slack delivery rules");
+    expect(prompt).toContain("Slack will not see your final assistant message");
+    expect(prompt).toContain("Always end this turn with one final chat.send");
+    expect(prompt).toContain("Use mid-turn chat.send sparingly");
     expect(prompt).not.toContain("End every Slack turn");
     expect(prompt).not.toContain("final `chat.send`");
     expect(prompt).toContain("Jane Doe (@jane): Can you check this?");
