@@ -16,9 +16,19 @@ daemon_port="${PASEO_LISTEN##*:}"
 export PASEO_CHAT_DAEMON_HOST
 export PASEO_CHAT_HTTP_HOST
 
-entry="$(npm root -g)/@getpaseo/chat/dist/index.js"
-if [[ ! -f "$entry" ]]; then
-  echo "[paseo] FATAL: chat bridge entrypoint is missing: $entry" >&2
+entry=""
+for candidate in \
+  "$(npm root -g)/@getpaseo/chat/dist/index.js" \
+  "/usr/local/lib/node_modules/@getpaseo/chat/dist/index.js" \
+  "/home/paseo/.local/lib/node_modules/@getpaseo/chat/dist/index.js"; do
+  if [[ -f "$candidate" ]]; then
+    entry="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$entry" ]]; then
+  echo "[paseo] FATAL: chat bridge entrypoint is missing." >&2
   exit 1
 fi
 
