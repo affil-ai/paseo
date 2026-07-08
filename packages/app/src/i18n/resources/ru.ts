@@ -506,6 +506,8 @@ export const ru: TranslationResources = {
         toggle: "Переключить проводник",
         changes: "Изменения",
         files: "Файлы",
+        subagents: "Субагенты",
+        subagentsEmpty: "В этом рабочем пространстве нет субагентов",
       },
       toasts: {
         copyFailed: "Не удалось скопировать",

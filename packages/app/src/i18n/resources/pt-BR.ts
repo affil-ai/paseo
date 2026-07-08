@@ -506,6 +506,8 @@ export const ptBR: TranslationResources = {
         toggle: "Alternar explorador",
         changes: "Alterações",
         files: "Arquivos",
+        subagents: "Subagentes",
+        subagentsEmpty: "Nenhum subagente neste workspace",
       },
       toasts: {
         copyFailed: "Falha ao copiar",

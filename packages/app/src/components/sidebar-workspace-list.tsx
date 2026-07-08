@@ -36,7 +36,6 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
-import { DiffStat } from "@/components/diff-stat";
 import {
   Archive,
   CircleAlert,
@@ -90,7 +89,9 @@ import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reor
 import {
   DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
   getVisibleWorkspacesForProject,
+  getWorkspaceRecencyTimestamp,
 } from "@/utils/sidebar-recency";
+import { formatCompactTimeAgo } from "@/utils/time";
 import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
@@ -688,7 +689,14 @@ function WorkspaceRowRightGroup({
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
   const showActions = Boolean(onArchive && (isHovered || isTouchPlatform));
   const showActionsInSlot = showActions && !showShortcut;
-  const shouldRenderActionSlot = Boolean(onArchive || workspace.diffStat);
+  const recencyMs = getWorkspaceRecencyTimestamp({
+    activityAt: workspace.activityAt,
+    statusEnteredAt: workspace.statusEnteredAt?.toISOString() ?? null,
+  });
+  const recencyLabel = Number.isFinite(recencyMs)
+    ? formatCompactTimeAgo(new Date(recencyMs))
+    : null;
+  const shouldRenderActionSlot = Boolean(onArchive || recencyLabel);
 
   return (
     <>
@@ -698,13 +706,12 @@ function WorkspaceRowRightGroup({
       {shouldRenderActionSlot ? (
         <SidebarWorkspaceTrailingActionSlot>
           <SidebarWorkspaceTrailingActionBase
-            visible={Boolean(workspace.diffStat && !showActionsInSlot && !showShortcut)}
+            visible={Boolean(recencyLabel && !showActionsInSlot && !showShortcut)}
           >
-            {workspace.diffStat ? (
-              <DiffStat
-                additions={workspace.diffStat.additions}
-                deletions={workspace.diffStat.deletions}
-              />
+            {recencyLabel ? (
+              <Text style={styles.workspaceRecencyLabel} numberOfLines={1}>
+                {recencyLabel}
+              </Text>
             ) : null}
           </SidebarWorkspaceTrailingActionBase>
           <SidebarWorkspaceTrailingActionOverlay visible={showActionsInSlot}>
@@ -3015,6 +3022,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[2],
   },
   workspaceCreatingText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    flexShrink: 0,
+  },
+  workspaceRecencyLabel: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
     flexShrink: 0,

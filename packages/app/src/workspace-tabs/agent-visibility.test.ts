@@ -86,6 +86,111 @@ describe("workspace agent visibility", () => {
     expect(result.knownAgentIds).toEqual(new Set(["parent-agent", "child-agent"]));
   });
 
+  it("auto-opens the only subagent when its parent lives in another workspace", () => {
+    // Office-agent scenario: the parent (root) agent lives in a different
+    // workspace and delegates a subagent into this fresh worktree.
+    const officeParent = makeAgent({
+      id: "office-agent",
+      cwd: "/repo/office",
+      workspaceId: "ws-office",
+    });
+    const child = makeAgent({
+      id: "child-agent",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+      parentAgentId: "office-agent",
+    });
+
+    const result = deriveWorkspaceAgentVisibility({
+      sessionAgents: new Map<string, Agent>([
+        [officeParent.id, officeParent],
+        [child.id, child],
+      ]),
+      workspaceId: WORKSPACE_ID,
+    });
+
+    expect(result.activeAgentIds).toEqual(new Set(["child-agent"]));
+    expect(result.autoOpenAgentIds).toEqual(new Set(["child-agent"]));
+    expect(result.knownAgentIds).toEqual(new Set(["child-agent"]));
+  });
+
+  it("auto-opens the most recently active orphaned subagent when several exist", () => {
+    const officeParent = makeAgent({
+      id: "office-agent",
+      cwd: "/repo/office",
+      workspaceId: "ws-office",
+    });
+    const older = makeAgent({
+      id: "older-child",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+      parentAgentId: "office-agent",
+      lastActivityAt: new Date("2026-03-04T00:00:00.000Z"),
+    });
+    const newer = makeAgent({
+      id: "newer-child",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+      parentAgentId: "office-agent",
+      lastActivityAt: new Date("2026-03-04T01:00:00.000Z"),
+    });
+
+    const result = deriveWorkspaceAgentVisibility({
+      sessionAgents: new Map<string, Agent>([
+        [officeParent.id, officeParent],
+        [older.id, older],
+        [newer.id, newer],
+      ]),
+      workspaceId: WORKSPACE_ID,
+    });
+
+    expect(result.activeAgentIds).toEqual(new Set(["older-child", "newer-child"]));
+    expect(result.autoOpenAgentIds).toEqual(new Set(["newer-child"]));
+  });
+
+  it("holds off auto-opening a subagent whose parent has not loaded yet", () => {
+    // A child snapshot may arrive before its parent that belongs here; assume
+    // the parent is coming and do not open the child as a root tab.
+    const child = makeAgent({
+      id: "child-agent",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+      parentAgentId: "pending-parent",
+    });
+
+    const result = deriveWorkspaceAgentVisibility({
+      sessionAgents: new Map<string, Agent>([[child.id, child]]),
+      workspaceId: WORKSPACE_ID,
+    });
+
+    expect(result.activeAgentIds).toEqual(new Set(["child-agent"]));
+    expect(result.autoOpenAgentIds).toEqual(new Set<string>());
+  });
+
+  it("does not fall back to a subagent when a root agent is present", () => {
+    const parent = makeAgent({
+      id: "parent-agent",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+    });
+    const child = makeAgent({
+      id: "child-agent",
+      cwd: "/repo/worktree",
+      workspaceId: WORKSPACE_ID,
+      parentAgentId: "parent-agent",
+    });
+
+    const result = deriveWorkspaceAgentVisibility({
+      sessionAgents: new Map<string, Agent>([
+        [parent.id, parent],
+        [child.id, child],
+      ]),
+      workspaceId: WORKSPACE_ID,
+    });
+
+    expect(result.autoOpenAgentIds).toEqual(new Set(["parent-agent"]));
+  });
+
   it("keeps archived subagents known but excludes them from active and auto-open", () => {
     const archivedChild = makeAgent({
       id: "archived-child",

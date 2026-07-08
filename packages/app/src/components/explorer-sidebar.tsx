@@ -36,6 +36,7 @@ import { canCloseRightSidebarGesture } from "@/utils/sidebar-animation-state";
 import { HEADER_INNER_HEIGHT } from "@/constants/layout";
 import { GitDiffPane } from "@/git/diff-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
+import { ExplorerSubagentsPane } from "./explorer-subagents-pane";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
@@ -443,6 +444,25 @@ interface SidebarContentProps {
   onOpenFile?: (filePath: string) => void;
 }
 
+// Resolve which explorer tab actually renders given the checkout's capabilities.
+// A non-git checkout has no Changes/PR tabs; the PR tab disappears once there is
+// no pull request to show. Falls back to the checkout's default tab.
+function resolveVisibleExplorerTab(input: {
+  activeTab: ExplorerTab;
+  isGit: boolean;
+  showPrTab: boolean;
+}): ExplorerTab {
+  const { activeTab, isGit, showPrTab } = input;
+  const defaultTab: ExplorerTab = isGit ? "changes" : "files";
+  if (!isGit && (activeTab === "changes" || activeTab === "pr")) {
+    return "files";
+  }
+  if (activeTab === "pr" && !showPrTab) {
+    return defaultTab;
+  }
+  return activeTab;
+}
+
 export function ExplorerSidebarContent({
   activeTab,
   onTabPress,
@@ -468,9 +488,7 @@ export function ExplorerSidebarContent({
   });
   const hasPullRequest = prPane.prNumber !== null;
   const showPrTab = hasPullRequest || (activeTab === "pr" && prPane.isLoading);
-  const requestedTab: ExplorerTab =
-    !isGit && (activeTab === "changes" || activeTab === "pr") ? "files" : activeTab;
-  const resolvedTab: ExplorerTab = requestedTab === "pr" && !showPrTab ? "changes" : requestedTab;
+  const resolvedTab = resolveVisibleExplorerTab({ activeTab, isGit, showPrTab });
   const prTabLabel = formatPrTabLabel(prPane.prNumber);
   const refreshGitActions = useCheckoutGitActionsStore((s) => s.refresh);
   const handlePrRetry = useCallback(() => {
@@ -509,6 +527,13 @@ export function ExplorerSidebarContent({
             label={t("workspace.tabs.explorer.files")}
             onTabPress={onTabPress}
             testID="explorer-tab-files"
+          />
+          <ExplorerTabButton
+            tab="subagents"
+            active={resolvedTab === "subagents"}
+            label={t("workspace.tabs.explorer.subagents")}
+            onTabPress={onTabPress}
+            testID="explorer-tab-subagents"
           />
           {isGit && showPrTab && (
             <ExplorerTabButton
@@ -551,6 +576,13 @@ export function ExplorerSidebarContent({
             serverId={serverId}
             workspaceId={workspaceId}
             workspaceRoot={workspaceRoot}
+            onOpenFile={onOpenFile}
+          />
+        )}
+        {resolvedTab === "subagents" && (
+          <ExplorerSubagentsPane
+            serverId={serverId}
+            workspaceId={workspaceId}
             onOpenFile={onOpenFile}
           />
         )}

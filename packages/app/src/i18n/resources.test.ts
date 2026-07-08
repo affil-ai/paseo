@@ -435,6 +435,7 @@ describe("translation resources", () => {
     expect(en.message.attachments.imagePreviewLoadFailed).toBe("Unable to load image preview.");
     expect(en.workspace.tabs.explorer.changes).toBe("Changes");
     expect(en.workspace.tabs.explorer.files).toBe("Files");
+    expect(en.workspace.tabs.explorer.subagents).toBe("Subagents");
     expect(en.branchSwitcher.uncommittedTitle).toBe("Uncommitted changes");
     expect(en.branchSwitcher.uncommittedMessage).toBe(
       "You have uncommitted changes. Stash them before switching branches?",

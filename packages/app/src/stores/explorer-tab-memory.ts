@@ -1,7 +1,7 @@
-export type ExplorerTab = "changes" | "files" | "pr";
+export type ExplorerTab = "changes" | "files" | "pr" | "subagents";
 
 export function isExplorerTab(value: unknown): value is ExplorerTab {
-  return value === "changes" || value === "files" || value === "pr";
+  return value === "changes" || value === "files" || value === "pr" || value === "subagents";
 }
 
 export function buildExplorerCheckoutKey(serverId: string, cwd: string): string | null {
@@ -14,6 +14,8 @@ export function buildExplorerCheckoutKey(serverId: string, cwd: string): string 
 }
 
 export function coerceExplorerTabForCheckout(tab: ExplorerTab, isGit: boolean): ExplorerTab {
+  // A non-git checkout has no Changes tab; only that tab needs coercing.
+  // `subagents` is reachable regardless of git status.
   if (!isGit && tab === "changes") {
     return "files";
   }

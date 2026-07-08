@@ -1,6 +1,6 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { selectSubagentsForParent } from "./select";
+import { selectSubagentsForParent, selectSubagentsForWorkspace } from "./select";
 import { useSessionStore, type Agent } from "@/stores/session-store";
 
 const SERVER_ID = "server-1";
@@ -310,5 +310,74 @@ describe("selectSubagentsForParent", () => {
         EMPTY_PENDING_ARCHIVE_IDS,
       ),
     );
+  });
+});
+
+describe("selectSubagentsForWorkspace", () => {
+  const WORKSPACE_ID = "ws-1";
+
+  it("returns subagents belonging to the workspace across multiple parents", () => {
+    setAgents([
+      makeAgent({ id: "parent-a", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "parent-b", workspaceId: WORKSPACE_ID }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "parent-a",
+        workspaceId: WORKSPACE_ID,
+        createdAt: new Date("2026-03-08T10:01:00.000Z"),
+      }),
+      makeAgent({
+        id: "child-b",
+        parentAgentId: "parent-b",
+        workspaceId: WORKSPACE_ID,
+        createdAt: new Date("2026-03-08T10:02:00.000Z"),
+      }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["child-a", "child-b"]);
+  });
+
+  it("excludes root agents and subagents in other workspaces", () => {
+    setAgents([
+      makeAgent({ id: "root", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "child-here", parentAgentId: "root", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "child-elsewhere", parentAgentId: "root", workspaceId: "ws-other" }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["child-here"]);
+  });
+
+  it("excludes archived and pending-archive subagents", () => {
+    setAgents([
+      makeAgent({ id: "parent", workspaceId: WORKSPACE_ID }),
+      makeAgent({ id: "child-active", parentAgentId: "parent", workspaceId: WORKSPACE_ID }),
+      makeAgent({
+        id: "child-archived",
+        parentAgentId: "parent",
+        workspaceId: WORKSPACE_ID,
+        archivedAt: new Date("2026-03-08T12:00:00.000Z"),
+      }),
+      makeAgent({ id: "child-pending", parentAgentId: "parent", workspaceId: WORKSPACE_ID }),
+    ]);
+
+    const rows = selectSubagentsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: WORKSPACE_ID },
+      new Set(["child-pending"]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["child-active"]);
   });
 });

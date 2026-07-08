@@ -502,6 +502,8 @@ export const ar: TranslationResources = {
         toggle: "تبديل المستكشف",
         changes: "التغييرات",
         files: "ملفات",
+        subagents: "الوكلاء الفرعيون",
+        subagentsEmpty: "لا يوجد وكلاء فرعيون في مساحة العمل هذه",
       },
       toasts: {
         copyFailed: "فشل النسخ",

@@ -1,5 +1,52 @@
 import { describe, it, expect } from "vitest";
-import { formatDuration, formatMessageTimestamp } from "./time";
+import { formatCompactTimeAgo, formatDuration, formatMessageTimestamp } from "./time";
+
+describe("formatCompactTimeAgo", () => {
+  const now = new Date("2026-06-01T12:00:00.000Z");
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  const SECOND = 1000;
+  const MINUTE = 60 * SECOND;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  it("renders 'now' for sub-minute deltas", () => {
+    expect(formatCompactTimeAgo(ago(0), now)).toBe("now");
+    expect(formatCompactTimeAgo(ago(59 * SECOND), now)).toBe("now");
+  });
+
+  it("renders minutes below one hour", () => {
+    expect(formatCompactTimeAgo(ago(MINUTE), now)).toBe("1m");
+    expect(formatCompactTimeAgo(ago(3 * MINUTE), now)).toBe("3m");
+    expect(formatCompactTimeAgo(ago(59 * MINUTE), now)).toBe("59m");
+  });
+
+  it("renders hours below one day", () => {
+    expect(formatCompactTimeAgo(ago(HOUR), now)).toBe("1h");
+    expect(formatCompactTimeAgo(ago(17 * HOUR), now)).toBe("17h");
+    expect(formatCompactTimeAgo(ago(23 * HOUR), now)).toBe("23h");
+  });
+
+  it("renders days below one week", () => {
+    expect(formatCompactTimeAgo(ago(DAY), now)).toBe("1d");
+    expect(formatCompactTimeAgo(ago(2 * DAY), now)).toBe("2d");
+    expect(formatCompactTimeAgo(ago(6 * DAY), now)).toBe("6d");
+  });
+
+  it("renders weeks below ~5 weeks", () => {
+    expect(formatCompactTimeAgo(ago(7 * DAY), now)).toBe("1w");
+    expect(formatCompactTimeAgo(ago(28 * DAY), now)).toBe("4w");
+  });
+
+  it("renders months once past ~5 weeks", () => {
+    expect(formatCompactTimeAgo(ago(35 * DAY), now)).toBe("1mo");
+    expect(formatCompactTimeAgo(ago(90 * DAY), now)).toBe("3mo");
+  });
+
+  it("renders years once past 12 months", () => {
+    expect(formatCompactTimeAgo(ago(365 * DAY), now)).toBe("1y");
+    expect(formatCompactTimeAgo(ago(2 * 365 * DAY), now)).toBe("2y");
+  });
+});
 
 describe("formatDuration", () => {
   it("renders sub-minute durations as whole seconds", () => {

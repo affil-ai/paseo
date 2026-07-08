@@ -36,6 +36,47 @@ export function formatTimeAgo(date: Date): string {
   return `${month} ${day}`;
 }
 
+/**
+ * Format a timestamp as a compact "time since" label for dense UI (sidebar
+ * rows). No "ago" suffix; the shortest unit that fits:
+ * - under 1 minute -> "now"
+ * - minutes -> "3m"
+ * - hours -> "17h"
+ * - days -> "2d"
+ * - weeks (under ~5) -> "4w"
+ * - months -> "1mo"
+ * - years (>= 12 months) -> "1y"
+ */
+export function formatCompactTimeAgo(date: Date, now: Date = new Date()): string {
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) {
+    return "now";
+  }
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) {
+    return `${diffMin}m`;
+  }
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) {
+    return `${diffHour}h`;
+  }
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) {
+    return `${diffDay}d`;
+  }
+  const diffWeek = Math.floor(diffDay / 7);
+  if (diffWeek < 5) {
+    return `${diffWeek}w`;
+  }
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) {
+    return `${diffMonth}mo`;
+  }
+  const diffYear = Math.floor(diffDay / 365);
+  return `${diffYear}y`;
+}
+
 function isSameLocalDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&

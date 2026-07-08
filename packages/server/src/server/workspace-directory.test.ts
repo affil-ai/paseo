@@ -165,6 +165,14 @@ class WorkspaceStatus {
     return Object.fromEntries(entries.entries.map((entry) => [entry.id, entry.status]));
   }
 
+  async workspaceDescriptors(): Promise<Record<string, string | null>> {
+    const entries = await this.directory.listFetchEntries({
+      type: "fetch_workspaces_request",
+      requestId: "workspace-descriptors",
+    });
+    return Object.fromEntries(entries.entries.map((entry) => [entry.id, entry.activityAt]));
+  }
+
   hasWorkingTerminal(changedAt: number): void {
     this.terminals.push({
       cwd: this.workspace.cwd,
@@ -237,6 +245,7 @@ interface AgentState {
   pendingPermissionCount?: number;
   requiresAttention?: boolean;
   attentionReason?: AgentSnapshotPayload["attentionReason"];
+  updatedAt?: string;
 }
 
 function createAgent(
@@ -252,7 +261,7 @@ function createAgent(
     thinkingOptionId: null,
     effectiveThinkingOptionId: null,
     createdAt: NOW,
-    updatedAt: NOW,
+    updatedAt: input.updatedAt ?? NOW,
     lastUserMessageAt: null,
     status: input.status,
     capabilities: {
@@ -479,6 +488,61 @@ describe("WorkspaceDirectory", () => {
     expect(descriptor.status).toBe("running");
     // terminal timestamp (2027) is newer than agent updatedAt (NOW = 2026-03-01)
     expect(descriptor.statusEnteredAt).toBe("2027-01-01T00:00:00.000Z");
+  });
+
+  test("activityAt reflects a running agent's updatedAt", async () => {
+    const workspace = new WorkspaceStatus();
+    const updatedAt = "2026-06-15T08:30:00.000Z";
+
+    workspace.hasRootAgent({ id: "running-agent", status: "running", updatedAt });
+
+    const descriptor = await workspace.workspaceDescriptor();
+    expect(descriptor.activityAt).toBe(updatedAt);
+  });
+
+  test("activityAt picks the newest agent updatedAt across contributing agents", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasRootAgent({
+      id: "older-agent",
+      status: "idle",
+      updatedAt: "2026-06-15T08:30:00.000Z",
+    });
+    workspace.hasRootAgent({
+      id: "newer-agent",
+      status: "running",
+      updatedAt: "2026-06-16T09:00:00.000Z",
+    });
+
+    const descriptor = await workspace.workspaceDescriptor();
+    expect(descriptor.activityAt).toBe("2026-06-16T09:00:00.000Z");
+  });
+
+  test("running subagent bumps its delegation-root workspace's activityAt", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasWorktreeWorkspace();
+    workspace.hasRootAgent({
+      id: "parent-agent",
+      status: "idle",
+      updatedAt: "2026-06-15T08:00:00.000Z",
+    });
+    workspace.hasDelegatedAgentInWorktree({
+      id: "child-agent",
+      status: "running",
+      updatedAt: "2026-06-16T12:00:00.000Z",
+    });
+
+    const entries = await workspace.workspaceDescriptors();
+    // The running subagent's updatedAt reaches the parent (root) workspace.
+    expect(entries["workspace-1"]).toBe("2026-06-16T12:00:00.000Z");
+  });
+
+  test("activityAt is null when a workspace has no agent or terminal activity", async () => {
+    const workspace = new WorkspaceStatus();
+
+    const descriptor = await workspace.workspaceDescriptor();
+    expect(descriptor.activityAt).toBeNull();
   });
 });
 

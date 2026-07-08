@@ -507,6 +507,8 @@ export const ja: TranslationResources = {
         toggle: "エクスプローラーを切り替え",
         changes: "変更",
         files: "ファイル",
+        subagents: "サブエージェント",
+        subagentsEmpty: "このワークスペースにサブエージェントはありません",
       },
       toasts: {
         copyFailed: "コピーに失敗しました",
