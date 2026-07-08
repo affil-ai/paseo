@@ -507,6 +507,8 @@ export const fr: TranslationResources = {
         toggle: "Basculer l'explorateur",
         changes: "Changements",
         files: "Fichiers",
+        subagents: "Sous-agents",
+        subagentsEmpty: "Aucun sous-agent dans cet espace de travail",
       },
       toasts: {
         copyFailed: "Échec de la copie",

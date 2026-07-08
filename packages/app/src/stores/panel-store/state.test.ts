@@ -95,6 +95,34 @@ describe("panel-store explorer tab resolution", () => {
       }),
     ).toBe("files");
   });
+
+  it("restores a stored subagents tab for git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: true,
+        explorerTabByCheckout: {
+          [key]: "subagents",
+        },
+      }),
+    ).toBe("subagents");
+  });
+
+  it("keeps the subagents tab reachable for non-git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: false,
+        explorerTabByCheckout: {
+          [key]: "subagents",
+        },
+      }),
+    ).toBe("subagents");
+  });
 });
 
 describe("panel-store migration", () => {

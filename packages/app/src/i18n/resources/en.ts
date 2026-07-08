@@ -502,6 +502,8 @@ export const en = {
         toggle: "Toggle explorer",
         changes: "Changes",
         files: "Files",
+        subagents: "Subagents",
+        subagentsEmpty: "No subagents in this workspace",
       },
       toasts: {
         copyFailed: "Copy failed",

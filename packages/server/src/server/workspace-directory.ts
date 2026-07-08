@@ -245,6 +245,13 @@ export class WorkspaceDirectory {
       activeWorkspaceIds,
     );
 
+    this.applyActivityAt({
+      activeAgents,
+      contributingAgentsByWorkspaceId,
+      terminalEntriesByWorkspaceId,
+      descriptorsByWorkspaceId,
+    });
+
     // Resolve the workspace-level `statusEnteredAt` (see aggregate semantics
     // on `resolveStatusEnteredAt`).
     const nowIso = new Date().toISOString();
@@ -356,6 +363,81 @@ export class WorkspaceDirectory {
       terminalEntriesByWorkspaceId.set(workspaceId, entries);
     }
     return terminalEntriesByWorkspaceId;
+  }
+
+  // Populate each workspace descriptor's `activityAt` with the newest activity
+  // timestamp attributable to that workspace. Activity comes from:
+  //   - each contributing agent's `updatedAt`, attributed to the agent's own
+  //     workspace (via `groupAgentsByWorkspaceId`);
+  //   - running subagents, whose `updatedAt` also bumps their delegation root's
+  //     workspace so a long-running child keeps the parent workspace fresh;
+  //   - working-terminal `changedAt` for the workspace.
+  // Left null only when a workspace has no attributable agent/terminal activity.
+  private applyActivityAt(params: {
+    activeAgents: AgentSnapshotPayload[];
+    contributingAgentsByWorkspaceId: Map<string, AgentSnapshotPayload[]>;
+    terminalEntriesByWorkspaceId: Map<
+      string,
+      Array<{ bucket: WorkspaceStateBucket; changedAtIso: string }>
+    >;
+    descriptorsByWorkspaceId: Map<string, WorkspaceDescriptorPayload>;
+  }): void {
+    const {
+      activeAgents,
+      contributingAgentsByWorkspaceId,
+      terminalEntriesByWorkspaceId,
+      descriptorsByWorkspaceId,
+    } = params;
+    const activeAgentsById = new Map(activeAgents.map((agent) => [agent.id, agent] as const));
+    const newestByWorkspaceId = new Map<string, number>();
+
+    const bump = (workspaceId: string | undefined, iso: string | null | undefined): void => {
+      if (!workspaceId || !iso || !descriptorsByWorkspaceId.has(workspaceId)) {
+        return;
+      }
+      const parsed = Date.parse(iso);
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+      const existing = newestByWorkspaceId.get(workspaceId);
+      if (existing === undefined || parsed > existing) {
+        newestByWorkspaceId.set(workspaceId, parsed);
+      }
+    };
+
+    // Base: each agent's own workspace picks up that agent's activity.
+    for (const [workspaceId, agents] of contributingAgentsByWorkspaceId) {
+      for (const agent of agents) {
+        bump(workspaceId, agent.updatedAt);
+      }
+    }
+
+    // Reconcile: a running subagent's activity belongs to its delegation root's
+    // workspace, which may differ from the subagent's own worktree workspace.
+    for (const agent of activeAgents) {
+      if (!isDelegatedAgent(agent) || agent.status !== "running") {
+        continue;
+      }
+      const rootAgent = resolveDelegationRootAgent(agent, activeAgentsById);
+      if (!rootAgent) {
+        continue;
+      }
+      bump(rootAgent.workspaceId, agent.updatedAt);
+    }
+
+    // Working terminals also count as activity for their owning workspace.
+    for (const [workspaceId, entries] of terminalEntriesByWorkspaceId) {
+      for (const entry of entries) {
+        bump(workspaceId, entry.changedAtIso);
+      }
+    }
+
+    for (const [workspaceId, parsed] of newestByWorkspaceId) {
+      const descriptor = descriptorsByWorkspaceId.get(workspaceId);
+      if (descriptor) {
+        descriptor.activityAt = new Date(parsed).toISOString();
+      }
+    }
   }
 
   // Aggregate the workspace-level `statusEnteredAt` from its contributing

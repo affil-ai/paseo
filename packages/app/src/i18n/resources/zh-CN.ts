@@ -502,6 +502,8 @@ export const zhCN: TranslationResources = {
         toggle: "切换 explorer",
         changes: "变更",
         files: "文件",
+        subagents: "子代理",
+        subagentsEmpty: "此工作区没有子代理",
       },
       toasts: {
         copyFailed: "复制失败",
