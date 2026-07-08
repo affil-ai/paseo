@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { ChevronLeft } from "lucide-react-native";
+import { ChevronLeft, GitPullRequest } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -13,18 +13,33 @@ import {
 } from "@/panels/pane-context";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import { buildSubagentRowPresentationData } from "@/subagents/track-presentation";
-import { useSubagentsForWorkspace, type SubagentRow } from "@/subagents";
+import {
+  useSubagentsForWorkspace,
+  useSubagentPrTabsForWorkspace,
+  type SubagentRow,
+} from "@/subagents";
+import { formatPrTabLabel } from "@/git/pull-request-panel";
 import type { WorkspaceTabPresentation } from "@/screens/workspace/workspace-tab-presentation";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import type { Theme } from "@/styles/theme";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
+const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+// PR affordance shown on a subagent row: opens that subagent's PR review pane.
+interface SubagentRowPr {
+  cwd: string;
+  prNumber: number;
+}
 
 interface ExplorerSubagentsPaneProps {
   serverId: string;
   workspaceId?: string | null;
   onOpenFile?: (filePath: string) => void;
+  // Open a subagent's PR review pane (switches the explorer to that PR tab).
+  // Undefined in surfaces that don't host explorer PR tabs (e.g. dashboard).
+  onSelectSubagentPr?: (prCwd: string) => void;
 }
 
 function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
@@ -38,12 +53,26 @@ export function ExplorerSubagentsPane({
   serverId,
   workspaceId,
   onOpenFile,
+  onSelectSubagentPr,
 }: ExplorerSubagentsPaneProps) {
   const { t } = useTranslation();
   const rows = useSubagentsForWorkspace({
     serverId,
     workspaceId: workspaceId ?? "",
   });
+  const prTabInputs = useSubagentPrTabsForWorkspace({
+    serverId,
+    workspaceId: workspaceId ?? "",
+  });
+  // Map subagent id -> its PR affordance, so every row that has a PR can open it
+  // (covers overflow PRs beyond the inline header cap).
+  const prBySubagentId = useMemo(() => {
+    const map = new Map<string, SubagentRowPr>();
+    for (const input of prTabInputs) {
+      map.set(input.subagentId, { cwd: input.cwd, prNumber: input.prNumber });
+    }
+    return map;
+  }, [prTabInputs]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const selectedRow = useMemo(
@@ -96,7 +125,13 @@ export function ExplorerSubagentsPane({
       testID="explorer-subagents-list"
     >
       {rows.map((row) => (
-        <ExplorerSubagentRow key={row.id} row={row} onSelect={setSelectedAgentId} />
+        <ExplorerSubagentRow
+          key={row.id}
+          row={row}
+          pr={prBySubagentId.get(row.id) ?? null}
+          onSelect={setSelectedAgentId}
+          onSelectPr={onSelectSubagentPr}
+        />
       ))}
     </ScrollView>
   );
@@ -104,10 +139,14 @@ export function ExplorerSubagentsPane({
 
 function ExplorerSubagentRow({
   row,
+  pr,
   onSelect,
+  onSelectPr,
 }: {
   row: SubagentRow;
+  pr: SubagentRowPr | null;
   onSelect: (id: string) => void;
+  onSelectPr?: (prCwd: string) => void;
 }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -132,10 +171,45 @@ function ExplorerSubagentRow({
             <Text style={styles.rowLabel} numberOfLines={1}>
               {displayLabel}
             </Text>
+            {pr && onSelectPr ? (
+              <SubagentRowPrBadge prNumber={pr.prNumber} cwd={pr.cwd} onSelectPr={onSelectPr} />
+            ) : null}
           </View>
         )}
       </Pressable>
     </View>
+  );
+}
+
+function prBadgeStyle({ hovered, pressed }: { hovered?: boolean; pressed?: boolean }) {
+  return [styles.prBadge, (hovered || pressed) && styles.prBadgeActive];
+}
+
+function SubagentRowPrBadge({
+  prNumber,
+  cwd,
+  onSelectPr,
+}: {
+  prNumber: number;
+  cwd: string;
+  onSelectPr: (prCwd: string) => void;
+}) {
+  const { t } = useTranslation();
+  const handlePress = useCallback(() => onSelectPr(cwd), [cwd, onSelectPr]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("workspace.tabs.explorer.openSubagentPr", { number: prNumber })}
+      testID={`explorer-subagents-pr-${prNumber}`}
+      onPress={handlePress}
+      hitSlop={6}
+      style={prBadgeStyle}
+    >
+      <ThemedGitPullRequest size={12} uniProps={mutedColorMapping} />
+      <Text style={styles.prBadgeText} numberOfLines={1}>
+        {formatPrTabLabel(prNumber)}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -218,6 +292,22 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+  },
+  prBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    flexShrink: 0,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+  },
+  prBadgeActive: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  prBadgeText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
   },
   backRow: {
     flexDirection: "row",

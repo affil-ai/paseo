@@ -360,6 +360,15 @@ function PullRequestReview({
 }) {
   const workspace = pr.workspace;
   const [activeTab, setActiveTab] = useState<ExplorerTab>("changes");
+  const [prCwd, setPrCwd] = useState<string | null>(null);
+  const handleTabPress = useCallback((tab: ExplorerTab) => {
+    setActiveTab(tab);
+    setPrCwd(null);
+  }, []);
+  const handleSelectPr = useCallback((nextPrCwd: string | null) => {
+    setActiveTab("pr");
+    setPrCwd(nextPrCwd);
+  }, []);
   const handleOpenFile = useCallback(
     (_filePath: string) => {
       if (!workspace) {
@@ -382,7 +391,9 @@ function PullRequestReview({
   return (
     <ExplorerSidebarContent
       activeTab={activeTab}
-      onTabPress={setActiveTab}
+      prCwd={prCwd}
+      onTabPress={handleTabPress}
+      onSelectPr={handleSelectPr}
       onClose={onClose}
       serverId={pr.serverId}
       workspaceId={workspace.workspaceId}

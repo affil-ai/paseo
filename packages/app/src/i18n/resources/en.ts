@@ -504,6 +504,7 @@ export const en = {
         files: "Files",
         subagents: "Subagents",
         subagentsEmpty: "No subagents in this workspace",
+        openSubagentPr: "Open pull request #{{number}}",
       },
       toasts: {
         copyFailed: "Copy failed",

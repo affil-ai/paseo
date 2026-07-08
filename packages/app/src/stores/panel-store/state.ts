@@ -47,6 +47,11 @@ export interface PanelCoreState {
   desktop: DesktopSidebarState;
   explorerTab: ExplorerTab;
   explorerTabByCheckout: Record<string, ExplorerTab>;
+  // Which checkout the PR pane points at while `explorerTab === "pr"`. `null`
+  // means the workspace's own PR; a subagent's cwd selects that subagent's PR.
+  // Ephemeral (not persisted): subagent PRs come and go, so this is re-derived
+  // from live workspace descriptors each session.
+  explorerPrCwd: string | null;
 }
 
 function clampNumber(value: number, min: number, max: number): number {

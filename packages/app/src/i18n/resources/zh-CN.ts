@@ -504,6 +504,7 @@ export const zhCN: TranslationResources = {
         files: "文件",
         subagents: "子代理",
         subagentsEmpty: "此工作区没有子代理",
+        openSubagentPr: "打开拉取请求 #{{number}}",
       },
       toasts: {
         copyFailed: "复制失败",
