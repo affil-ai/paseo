@@ -508,6 +508,7 @@ export const ru: TranslationResources = {
         files: "Файлы",
         subagents: "Субагенты",
         subagentsEmpty: "В этом рабочем пространстве нет субагентов",
+        openSubagentPr: "Открыть пул-реквест #{{number}}",
       },
       toasts: {
         copyFailed: "Не удалось скопировать",

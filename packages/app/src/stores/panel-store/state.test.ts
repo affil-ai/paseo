@@ -24,6 +24,7 @@ function makePanelState(overrides: Partial<PanelCoreState> = {}): PanelCoreState
     },
     explorerTab: "changes",
     explorerTabByCheckout: {},
+    explorerPrCwd: null,
     ...overrides,
   };
 }

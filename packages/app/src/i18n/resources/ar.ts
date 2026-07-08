@@ -504,6 +504,7 @@ export const ar: TranslationResources = {
         files: "ملفات",
         subagents: "الوكلاء الفرعيون",
         subagentsEmpty: "لا يوجد وكلاء فرعيون في مساحة العمل هذه",
+        openSubagentPr: "فتح طلب السحب #{{number}}",
       },
       toasts: {
         copyFailed: "فشل النسخ",

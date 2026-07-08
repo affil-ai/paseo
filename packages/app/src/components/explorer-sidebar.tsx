@@ -3,6 +3,7 @@ import {
   View,
   Text,
   Pressable,
+  ScrollView,
   useWindowDimensions,
   StyleSheet as RNStyleSheet,
 } from "react-native";
@@ -37,6 +38,8 @@ import { HEADER_INNER_HEIGHT } from "@/constants/layout";
 import { GitDiffPane } from "@/git/diff-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
 import { ExplorerSubagentsPane } from "./explorer-subagents-pane";
+import { useSubagentPrTabsForWorkspace, useWorkspaceOwnPrIdentity } from "@/subagents";
+import { buildSubagentPrTabs, type SubagentPrTab } from "@/git/explorer-pr-tabs";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
@@ -56,7 +59,9 @@ interface ExplorerSidebarProps {
 
 interface ExplorerSidebarSharedState {
   explorerTab: ExplorerTab;
+  explorerPrCwd: string | null;
   handleTabPress: (tab: ExplorerTab) => void;
+  handleSelectPr: (prCwd: string | null) => void;
 }
 
 export function useExplorerSidebarSharedState({
@@ -65,15 +70,23 @@ export function useExplorerSidebarSharedState({
   isGit,
 }: Pick<ExplorerSidebarProps, "serverId" | "workspaceRoot" | "isGit">): ExplorerSidebarSharedState {
   const explorerTab = usePanelStore((state) => state.explorerTab);
+  const explorerPrCwd = usePanelStore((state) => state.explorerPrCwd);
   const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
+  const selectExplorerPr = usePanelStore((state) => state.selectExplorerPr);
   const handleTabPress = useCallback(
     (tab: ExplorerTab) => {
       setExplorerTabForCheckout({ serverId, cwd: workspaceRoot, isGit, tab });
     },
     [isGit, serverId, setExplorerTabForCheckout, workspaceRoot],
   );
+  const handleSelectPr = useCallback(
+    (prCwd: string | null) => {
+      selectExplorerPr({ serverId, cwd: workspaceRoot, isGit, prCwd });
+    },
+    [isGit, selectExplorerPr, serverId, workspaceRoot],
+  );
 
-  return { explorerTab, handleTabPress };
+  return { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr };
 }
 
 export function CompactExplorerSidebar({
@@ -87,11 +100,12 @@ export function CompactExplorerSidebar({
   const insets = useSafeAreaInsets();
   const isOpen = usePanelStore((state) => selectIsFileExplorerOpen(state, { isCompact: true }));
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
-  const { explorerTab, handleTabPress } = useExplorerSidebarSharedState({
-    serverId,
-    workspaceRoot,
-    isGit,
-  });
+  const { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr } =
+    useExplorerSidebarSharedState({
+      serverId,
+      workspaceRoot,
+      isGit,
+    });
   const closeTouchStartX = useSharedValue(0);
   const closeTouchStartY = useSharedValue(0);
   const { mobilePanelState, gestureAnimatingRef: mobilePanelGestureAnimatingRef } =
@@ -288,7 +302,9 @@ export function CompactExplorerSidebar({
         <Animated.View style={mobileSidebarStyle} pointerEvents="auto">
           <ExplorerSidebarContent
             activeTab={explorerTab}
+            prCwd={explorerPrCwd}
             onTabPress={handleTabPress}
+            onSelectPr={handleSelectPr}
             onClose={handleHeaderClose}
             serverId={serverId}
             workspaceId={workspaceId}
@@ -316,11 +332,12 @@ export function ExplorerSidebar({
   const setExplorerWidth = usePanelStore((state) => state.setExplorerWidth);
   const isOpen = usePanelStore((state) => selectIsFileExplorerOpen(state, { isCompact: false }));
   const closeDesktopFileExplorer = usePanelStore((state) => state.closeDesktopFileExplorer);
-  const { explorerTab, handleTabPress } = useExplorerSidebarSharedState({
-    serverId,
-    workspaceRoot,
-    isGit,
-  });
+  const { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr } =
+    useExplorerSidebarSharedState({
+      serverId,
+      workspaceRoot,
+      isGit,
+    });
   const { width: viewportWidth } = useWindowDimensions();
   const startWidthRef = useRef(explorerWidth);
   const resizeWidth = useSharedValue(explorerWidth);
@@ -388,7 +405,9 @@ export function ExplorerSidebar({
 
         <ExplorerSidebarContent
           activeTab={explorerTab}
+          prCwd={explorerPrCwd}
           onTabPress={handleTabPress}
+          onSelectPr={handleSelectPr}
           onClose={handleDesktopClose}
           serverId={serverId}
           workspaceId={workspaceId}
@@ -433,7 +452,11 @@ function ExplorerTabButton({
 
 interface SidebarContentProps {
   activeTab: ExplorerTab;
+  // Which checkout the PR pane targets while the active tab is "pr": `null` =
+  // the workspace's own PR, otherwise a subagent's cwd.
+  prCwd: string | null;
   onTabPress: (tab: ExplorerTab) => void;
+  onSelectPr: (prCwd: string | null) => void;
   onClose: () => void;
   serverId: string;
   workspaceId?: string | null;
@@ -463,9 +486,81 @@ function resolveVisibleExplorerTab(input: {
   return activeTab;
 }
 
+interface ExplorerPrTabState {
+  inlineSubagentPrTabs: SubagentPrTab[];
+  workspacePrPane: UsePrPaneDataResult;
+  showWorkspacePrTab: boolean;
+  resolvedTab: ExplorerTab;
+  workspacePrTabLabel: string;
+  activeSubagentPrTab: SubagentPrTab | null;
+  isWorkspacePrActive: boolean;
+}
+
+// Derives the PR-tab strip state: the workspace's own PR pane/tab plus the
+// de-duped, capped subagent PR tabs, and which PR (if any) is currently active.
+// Subagent PR identity comes from each subagent's own workspace descriptor in
+// the store, so this fires no new requests; the live PR query only runs for the
+// workspace's own PR and the one open subagent PR pane.
+function useExplorerPrTabState(input: {
+  activeTab: ExplorerTab;
+  prCwd: string | null;
+  serverId: string;
+  workspaceId?: string | null;
+  workspaceRoot: string;
+  isGit: boolean;
+  isOpen: boolean;
+}): ExplorerPrTabState {
+  const { activeTab, prCwd, serverId, workspaceId, workspaceRoot, isGit, isOpen } = input;
+  const canQueryPullRequest = isGit && Boolean(workspaceRoot);
+
+  const workspaceOwnPr = useWorkspaceOwnPrIdentity({ serverId, workspaceId: workspaceId ?? "" });
+  const subagentPrInputs = useSubagentPrTabsForWorkspace({
+    serverId,
+    workspaceId: workspaceId ?? "",
+  });
+  const inlineSubagentPrTabs = useMemo(
+    () =>
+      buildSubagentPrTabs({
+        workspacePr: workspaceOwnPr,
+        workspaceCwd: workspaceRoot,
+        subagentPrs: subagentPrInputs,
+      }).inline,
+    [subagentPrInputs, workspaceOwnPr, workspaceRoot],
+  );
+
+  const workspacePrPane = usePrPaneData({
+    serverId,
+    cwd: workspaceRoot,
+    enabled: canQueryPullRequest && isOpen,
+    timelineEnabled: activeTab === "pr" && prCwd === null && canQueryPullRequest && isOpen,
+  });
+  const hasPullRequest = workspacePrPane.prNumber !== null;
+  const showWorkspacePrTab =
+    hasPullRequest || (activeTab === "pr" && prCwd === null && workspacePrPane.isLoading);
+  const showAnyPrTab = showWorkspacePrTab || inlineSubagentPrTabs.length > 0;
+  const resolvedTab = resolveVisibleExplorerTab({ activeTab, isGit, showPrTab: showAnyPrTab });
+
+  const activeSubagentPrTab =
+    resolvedTab === "pr" && prCwd !== null
+      ? (inlineSubagentPrTabs.find((tab) => tab.cwd === prCwd) ?? null)
+      : null;
+
+  return {
+    inlineSubagentPrTabs,
+    workspacePrPane,
+    showWorkspacePrTab,
+    resolvedTab,
+    workspacePrTabLabel: formatPrTabLabel(workspacePrPane.prNumber),
+    activeSubagentPrTab,
+    isWorkspacePrActive: resolvedTab === "pr" && activeSubagentPrTab === null,
+  };
+}
+
 export function ExplorerSidebarContent({
   activeTab,
+  prCwd,
   onTabPress,
+  onSelectPr,
   onClose,
   serverId,
   workspaceId,
@@ -479,23 +574,25 @@ export function ExplorerSidebarContent({
   const { t } = useTranslation();
   const toast = useToast();
   const padding = useWindowControlsPadding("explorerSidebar");
-  const canQueryPullRequest = isGit && Boolean(workspaceRoot);
-  const prPane = usePrPaneData({
+
+  const {
+    inlineSubagentPrTabs,
+    workspacePrPane,
+    showWorkspacePrTab,
+    resolvedTab,
+    workspacePrTabLabel,
+    activeSubagentPrTab,
+    isWorkspacePrActive,
+  } = useExplorerPrTabState({
+    activeTab,
+    prCwd,
     serverId,
-    cwd: workspaceRoot,
-    enabled: canQueryPullRequest && isOpen,
-    timelineEnabled: activeTab === "pr" && canQueryPullRequest && isOpen,
+    workspaceId,
+    workspaceRoot,
+    isGit,
+    isOpen,
   });
-  const hasPullRequest = prPane.prNumber !== null;
-  const showPrTab = hasPullRequest || (activeTab === "pr" && prPane.isLoading);
-  const resolvedTab = resolveVisibleExplorerTab({ activeTab, isGit, showPrTab });
-  const prTabLabel = formatPrTabLabel(prPane.prNumber);
-  const refreshGitActions = useCheckoutGitActionsStore((s) => s.refresh);
-  const handlePrRetry = useCallback(() => {
-    refreshGitActions({ serverId, cwd: workspaceRoot }).catch((error) => {
-      toast.error(error instanceof Error ? error.message : t("workspace.git.diff.failedRefresh"));
-    });
-  }, [refreshGitActions, serverId, t, toast, workspaceRoot]);
+
   const workspaceAttachmentScopeKey = useMemo(
     () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd: workspaceRoot }),
     [serverId, workspaceId, workspaceRoot],
@@ -506,12 +603,24 @@ export function ExplorerSidebarContent({
     [padding.right],
   );
 
+  const handleWorkspacePrPress = useCallback(() => onSelectPr(null), [onSelectPr]);
+  const refreshGitActions = useCheckoutGitActionsStore((s) => s.refresh);
+  const handleWorkspacePrRetry = useCallback(() => {
+    refreshGitActions({ serverId, cwd: workspaceRoot }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : t("workspace.git.diff.failedRefresh"));
+    });
+  }, [refreshGitActions, serverId, t, toast, workspaceRoot]);
+
   return (
     <View style={styles.sidebarContent} pointerEvents="auto">
       {/* Header with tabs and close button */}
       <View style={headerStyle} testID="explorer-header">
         <TitlebarDragRegion />
-        <View style={styles.tabsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsContainer}
+        >
           {isGit && (
             <ExplorerTabButton
               tab="changes"
@@ -535,23 +644,28 @@ export function ExplorerSidebarContent({
             onTabPress={onTabPress}
             testID="explorer-tab-subagents"
           />
-          {isGit && showPrTab && (
-            <ExplorerTabButton
-              tab="pr"
-              active={resolvedTab === "pr"}
-              label={prTabLabel}
-              onTabPress={onTabPress}
+          {isGit && showWorkspacePrTab && (
+            <ExplorerPrTabButton
+              active={isWorkspacePrActive}
+              label={workspacePrTabLabel}
+              activeColor={theme.colors.foreground}
+              inactiveColor={theme.colors.foregroundMuted}
+              onPress={handleWorkspacePrPress}
               testID="explorer-tab-pr"
-            >
-              <PullRequestTabIcon
-                size={13}
-                color={
-                  resolvedTab === "pr" ? theme.colors.foreground : theme.colors.foregroundMuted
-                }
-              />
-            </ExplorerTabButton>
+            />
           )}
-        </View>
+          {isGit &&
+            inlineSubagentPrTabs.map((prTab) => (
+              <SubagentPrTabButton
+                key={prTab.key}
+                prTab={prTab}
+                active={activeSubagentPrTab?.cwd === prTab.cwd}
+                activeColor={theme.colors.foreground}
+                inactiveColor={theme.colors.foregroundMuted}
+                onSelectPr={onSelectPr}
+              />
+            ))}
+        </ScrollView>
         <View style={styles.headerRightSection}>
           {isMobile && (
             <Pressable onPress={onClose} style={styles.closeButton}>
@@ -584,19 +698,122 @@ export function ExplorerSidebarContent({
             serverId={serverId}
             workspaceId={workspaceId}
             onOpenFile={onOpenFile}
+            onSelectSubagentPr={onSelectPr}
           />
         )}
-        {resolvedTab === "pr" && (
+        {resolvedTab === "pr" && activeSubagentPrTab && (
+          <PrPaneForCheckout
+            serverId={serverId}
+            cwd={activeSubagentPrTab.cwd}
+            workspaceId={workspaceId}
+            isOpen={isOpen}
+          />
+        )}
+        {resolvedTab === "pr" && !activeSubagentPrTab && (
           <PrTabContent
             serverId={serverId}
             cwd={workspaceRoot}
-            prPane={prPane}
+            prPane={workspacePrPane}
             workspaceAttachmentScopeKey={workspaceAttachmentScopeKey}
-            onRetry={handlePrRetry}
+            onRetry={handleWorkspacePrRetry}
           />
         )}
       </View>
     </View>
+  );
+}
+
+// A header PR tab button with the PR icon + number label.
+function ExplorerPrTabButton({
+  active,
+  label,
+  activeColor,
+  inactiveColor,
+  onPress,
+  testID,
+}: {
+  active: boolean;
+  label: string;
+  activeColor: string;
+  inactiveColor: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  const tabStyle = useMemo(() => [styles.tab, active && styles.tabActive], [active]);
+  const tabTextStyle = useMemo(() => [styles.tabText, active && styles.tabTextActive], [active]);
+  return (
+    <Pressable testID={testID} style={tabStyle} onPress={onPress}>
+      <PullRequestTabIcon size={13} color={active ? activeColor : inactiveColor} />
+      <Text style={tabTextStyle}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SubagentPrTabButton({
+  prTab,
+  active,
+  activeColor,
+  inactiveColor,
+  onSelectPr,
+}: {
+  prTab: SubagentPrTab;
+  active: boolean;
+  activeColor: string;
+  inactiveColor: string;
+  onSelectPr: (prCwd: string | null) => void;
+}) {
+  const handlePress = useCallback(() => onSelectPr(prTab.cwd), [onSelectPr, prTab.cwd]);
+  return (
+    <ExplorerPrTabButton
+      active={active}
+      label={formatPrTabLabel(prTab.prNumber)}
+      activeColor={activeColor}
+      inactiveColor={inactiveColor}
+      onPress={handlePress}
+      testID={`explorer-tab-subagent-pr-${prTab.subagentId}`}
+    />
+  );
+}
+
+// Renders the PR review pane for an arbitrary checkout cwd (a subagent's
+// worktree). Owns its own PR data query so the pane can point anywhere.
+function PrPaneForCheckout({
+  serverId,
+  cwd,
+  workspaceId,
+  isOpen,
+}: {
+  serverId: string;
+  cwd: string;
+  workspaceId?: string | null;
+  isOpen: boolean;
+}) {
+  const toast = useToast();
+  const { t } = useTranslation();
+  const prPane = usePrPaneData({
+    serverId,
+    cwd,
+    enabled: isOpen,
+    timelineEnabled: isOpen,
+  });
+  const refreshGitActions = useCheckoutGitActionsStore((s) => s.refresh);
+  const handleRetry = useCallback(() => {
+    refreshGitActions({ serverId, cwd }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : t("workspace.git.diff.failedRefresh"));
+    });
+  }, [cwd, refreshGitActions, serverId, t, toast]);
+  const attachmentScopeKey = useMemo(
+    () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd }),
+    [cwd, serverId, workspaceId],
+  );
+  return (
+    <PrTabContent
+      serverId={serverId}
+      cwd={cwd}
+      prPane={prPane}
+      workspaceAttachmentScopeKey={attachmentScopeKey}
+      onRetry={handleRetry}
+    />
   );
 }
 

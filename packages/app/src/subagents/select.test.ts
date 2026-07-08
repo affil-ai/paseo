@@ -1,7 +1,12 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { selectSubagentsForParent, selectSubagentsForWorkspace } from "./select";
-import { useSessionStore, type Agent } from "@/stores/session-store";
+import {
+  selectSubagentPrTabsForWorkspace,
+  selectSubagentsForParent,
+  selectSubagentsForWorkspace,
+  selectWorkspaceOwnPrIdentity,
+} from "./select";
+import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 
 const SERVER_ID = "server-1";
 const AGENT_TIMESTAMP = new Date("2026-03-08T10:00:00.000Z");
@@ -467,5 +472,176 @@ describe("selectSubagentsForWorkspace", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual(["child-active"]);
+  });
+});
+
+function makeWorkspace(input: {
+  id: string;
+  cwd: string;
+  prNumber?: number;
+  prUrl?: string;
+  repoOwner?: string;
+  repoName?: string;
+}): WorkspaceDescriptor {
+  const hasPr = input.prNumber !== undefined || input.prUrl !== undefined;
+  return {
+    id: input.id,
+    projectId: "project-1",
+    projectDisplayName: "Project",
+    projectRootPath: "/repo",
+    workspaceDirectory: input.cwd,
+    projectKind: "git",
+    workspaceKind: "worktree",
+    name: input.id,
+    status: "done",
+    statusEnteredAt: null,
+    archivingAt: null,
+    diffStat: null,
+    scripts: [],
+    githubRuntime: hasPr
+      ? {
+          featuresEnabled: true,
+          pullRequest: {
+            number: input.prNumber,
+            url: input.prUrl ?? `https://github.com/acme/app/pull/${input.prNumber}`,
+            title: "PR",
+            state: "open",
+            baseRefName: "main",
+            headRefName: "feature",
+            isMerged: false,
+            repoOwner: input.repoOwner ?? "acme",
+            repoName: input.repoName ?? "app",
+          },
+          error: null,
+        }
+      : undefined,
+  };
+}
+
+function setWorkspaces(workspaces: WorkspaceDescriptor[]): void {
+  useSessionStore.getState().setWorkspaces(SERVER_ID, new Map(workspaces.map((w) => [w.id, w])));
+}
+
+describe("selectSubagentPrTabsForWorkspace", () => {
+  const PARENT_WS = "ws-office";
+
+  it("returns a PR tab per subagent that has a PR, read from the subagent's own worktree descriptor", () => {
+    setAgents([
+      makeAgent({ id: "office", workspaceId: PARENT_WS, cwd: "/repo/office" }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-a",
+        cwd: "/repo/wt-a",
+        createdAt: new Date("2026-03-08T10:01:00.000Z"),
+      }),
+      makeAgent({
+        id: "child-b",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-b",
+        cwd: "/repo/wt-b",
+        createdAt: new Date("2026-03-08T10:02:00.000Z"),
+      }),
+    ]);
+    setWorkspaces([
+      makeWorkspace({ id: PARENT_WS, cwd: "/repo/office" }),
+      makeWorkspace({ id: "ws-wt-a", cwd: "/repo/wt-a", prNumber: 1942 }),
+      makeWorkspace({ id: "ws-wt-b", cwd: "/repo/wt-b", prNumber: 1947 }),
+    ]);
+
+    const tabs = selectSubagentPrTabsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: PARENT_WS },
+      new Set(),
+    );
+
+    expect(tabs.map((tab) => tab.prNumber)).toEqual([1942, 1947]);
+    expect(tabs.map((tab) => tab.cwd)).toEqual(["/repo/wt-a", "/repo/wt-b"]);
+    expect(tabs[0]).toMatchObject({ subagentId: "child-a", repoOwner: "acme", repoName: "app" });
+  });
+
+  it("omits subagents without a PR", () => {
+    setAgents([
+      makeAgent({ id: "office", workspaceId: PARENT_WS, cwd: "/repo/office" }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-a",
+        cwd: "/repo/wt-a",
+      }),
+      makeAgent({
+        id: "child-b",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-b",
+        cwd: "/repo/wt-b",
+      }),
+    ]);
+    setWorkspaces([
+      makeWorkspace({ id: PARENT_WS, cwd: "/repo/office" }),
+      makeWorkspace({ id: "ws-wt-a", cwd: "/repo/wt-a", prNumber: 1942 }),
+      makeWorkspace({ id: "ws-wt-b", cwd: "/repo/wt-b" }),
+    ]);
+
+    const tabs = selectSubagentPrTabsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: PARENT_WS },
+      new Set(),
+    );
+
+    expect(tabs.map((tab) => tab.subagentId)).toEqual(["child-a"]);
+  });
+
+  it("parses the PR number from the URL when the descriptor omits number", () => {
+    setAgents([
+      makeAgent({ id: "office", workspaceId: PARENT_WS, cwd: "/repo/office" }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-a",
+        cwd: "/repo/wt-a",
+      }),
+    ]);
+    setWorkspaces([
+      makeWorkspace({ id: PARENT_WS, cwd: "/repo/office" }),
+      makeWorkspace({
+        id: "ws-wt-a",
+        cwd: "/repo/wt-a",
+        prUrl: "https://github.com/acme/app/pull/2024",
+      }),
+    ]);
+
+    const tabs = selectSubagentPrTabsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: PARENT_WS },
+      new Set(),
+    );
+
+    expect(tabs.map((tab) => tab.prNumber)).toEqual([2024]);
+  });
+});
+
+describe("selectWorkspaceOwnPrIdentity", () => {
+  it("reads the workspace's own PR identity from its descriptor", () => {
+    setAgents([makeAgent({ id: "root", workspaceId: "ws-1", cwd: "/repo/main" })]);
+    setWorkspaces([makeWorkspace({ id: "ws-1", cwd: "/repo/main", prNumber: 1947 })]);
+
+    expect(
+      selectWorkspaceOwnPrIdentity(useSessionStore.getState(), {
+        serverId: SERVER_ID,
+        workspaceId: "ws-1",
+      }),
+    ).toEqual({ prNumber: 1947, repoOwner: "acme", repoName: "app" });
+  });
+
+  it("returns null when the workspace has no PR", () => {
+    setAgents([makeAgent({ id: "root", workspaceId: "ws-1", cwd: "/repo/main" })]);
+    setWorkspaces([makeWorkspace({ id: "ws-1", cwd: "/repo/main" })]);
+
+    expect(
+      selectWorkspaceOwnPrIdentity(useSessionStore.getState(), {
+        serverId: SERVER_ID,
+        workspaceId: "ws-1",
+      }),
+    ).toBeNull();
   });
 });

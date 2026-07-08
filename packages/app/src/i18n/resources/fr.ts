@@ -509,6 +509,7 @@ export const fr: TranslationResources = {
         files: "Fichiers",
         subagents: "Sous-agents",
         subagentsEmpty: "Aucun sous-agent dans cet espace de travail",
+        openSubagentPr: "Ouvrir la pull request #{{number}}",
       },
       toasts: {
         copyFailed: "Échec de la copie",

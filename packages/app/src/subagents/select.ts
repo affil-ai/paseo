@@ -2,7 +2,11 @@ import { usePendingArchiveAgentIds } from "@/hooks/use-archive-agent";
 import equal from "fast-deep-equal";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useSessionStore, type Agent } from "@/stores/session-store";
-import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
+import {
+  normalizeWorkspaceOpaqueId,
+  resolveWorkspaceMapKeyByIdentity,
+} from "@/utils/workspace-identity";
+import type { SubagentPrTabInput } from "@/git/explorer-pr-tabs";
 
 export interface SubagentRow {
   id: Agent["id"];
@@ -77,11 +81,12 @@ interface SelectWorkspaceSubagentsParams {
   workspaceId: string;
 }
 
-// Subagents surfaced by the workspace-level Subagents explorer tab. A subagent
-// is scoped to a workspace by its PARENT RELATIONSHIP, not by its own
-// workspaceId: when a parent (e.g. the office agent) delegates work, the child
-// runs in its OWN fresh worktree, so the child's workspaceId is that worktree,
-// while parentAgentId points back at the parent. The user expects to open the
+// Subagent agents (full records) that belong to a workspace by the SAME
+// parent-relationship scoping the Subagents tab uses. A subagent is scoped to a
+// workspace by its PARENT RELATIONSHIP, not by its own workspaceId: when a
+// parent (e.g. the office agent) delegates work, the child runs in its OWN
+// fresh worktree, so the child's workspaceId is that worktree while
+// parentAgentId points back at the parent. The user expects to open the
 // PARENT's workspace and see the children it spawned there.
 //
 // Membership is the union of:
@@ -95,19 +100,22 @@ interface SelectWorkspaceSubagentsParams {
 // surfaces in the workspace whose agent is its direct parent (case a) or in its
 // own worktree (case b); we deliberately do not walk the whole delegation chain
 // to attribute deep descendants to a top-level ancestor's workspace.
-export function selectSubagentsForWorkspace(
+//
+// Returns agents sorted by createdAt ascending (stable order for both the
+// Subagents list and the derived PR tab strip).
+function collectWorkspaceSubagentAgents(
   state: SessionStoreSnapshot,
   params: SelectWorkspaceSubagentsParams,
   pendingArchiveIds: ReadonlySet<string>,
-): SubagentRow[] {
+): Agent[] {
   const session = state.sessions[params.serverId];
   const agents = session?.agents;
   if (!agents || agents.size === 0) {
-    return EMPTY_SUBAGENT_ROWS;
+    return [];
   }
   const workspaceId = normalizeWorkspaceOpaqueId(params.workspaceId);
   if (!workspaceId) {
-    return EMPTY_SUBAGENT_ROWS;
+    return [];
   }
 
   const agentDetails = session?.agentDetails;
@@ -116,7 +124,7 @@ export function selectSubagentsForWorkspace(
     return parent ? normalizeWorkspaceOpaqueId(parent.workspaceId) : null;
   };
 
-  const rows: SubagentRow[] = [];
+  const matches: Agent[] = [];
   for (const agent of agents.values()) {
     if (agent.archivedAt || pendingArchiveIds.has(agent.id) || !agent.parentAgentId) {
       continue;
@@ -126,15 +134,144 @@ export function selectSubagentsForWorkspace(
     if (!parentInWorkspace && !childInWorkspace) {
       continue;
     }
-    rows.push(toSubagentRow(agent));
+    matches.push(agent);
   }
 
-  if (rows.length === 0) {
+  matches.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  return matches;
+}
+
+// Subagents surfaced by the workspace-level Subagents explorer tab. See
+// `collectWorkspaceSubagentAgents` for the parent-relationship scoping.
+export function selectSubagentsForWorkspace(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams,
+  pendingArchiveIds: ReadonlySet<string>,
+): SubagentRow[] {
+  const agents = collectWorkspaceSubagentAgents(state, params, pendingArchiveIds);
+  if (agents.length === 0) {
     return EMPTY_SUBAGENT_ROWS;
   }
+  return agents.map(toSubagentRow);
+}
 
-  rows.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
-  return rows;
+const EMPTY_SUBAGENT_PR_TABS: SubagentPrTabInput[] = [];
+
+// PR tab inputs for a workspace's subagents: one entry per scoped subagent that
+// ACTUALLY has a PR. PR identity is read from the subagent's OWN workspace
+// descriptor (githubRuntime.pullRequest) already present in the session store,
+// so this fires NO new requests — the live PR pane query only runs for the tab
+// the user actually opens. Subagents without a PR contribute nothing.
+export function selectSubagentPrTabsForWorkspace(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams,
+  pendingArchiveIds: ReadonlySet<string>,
+): SubagentPrTabInput[] {
+  const agents = collectWorkspaceSubagentAgents(state, params, pendingArchiveIds);
+  if (agents.length === 0) {
+    return EMPTY_SUBAGENT_PR_TABS;
+  }
+
+  const workspaces = state.sessions[params.serverId]?.workspaces;
+  const tabs: SubagentPrTabInput[] = [];
+  for (const agent of agents) {
+    const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+      workspaces,
+      workspaceId: agent.workspaceId,
+    });
+    const descriptor = workspaceKey ? workspaces?.get(workspaceKey) : null;
+    const pullRequest = descriptor?.githubRuntime?.pullRequest;
+    if (!pullRequest) {
+      continue;
+    }
+    const prNumber = resolvePrNumber(pullRequest);
+    if (prNumber === null) {
+      continue;
+    }
+    tabs.push({
+      subagentId: agent.id,
+      subagentTitle: agent.title,
+      provider: agent.provider,
+      cwd: agent.cwd,
+      prNumber,
+      repoOwner:
+        pullRequest.repoOwner && pullRequest.repoOwner.length > 0 ? pullRequest.repoOwner : null,
+      repoName:
+        pullRequest.repoName && pullRequest.repoName.length > 0 ? pullRequest.repoName : null,
+    });
+  }
+
+  if (tabs.length === 0) {
+    return EMPTY_SUBAGENT_PR_TABS;
+  }
+  return tabs;
+}
+
+// PR identity for a workspace's OWN checkout, read from its descriptor's
+// githubRuntime.pullRequest (same store source as the subagent PR tabs, so no
+// new requests). Used to de-dupe the workspace's own PR tab against subagent
+// PRs that point at the same PR.
+export function selectWorkspaceOwnPrIdentity(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams,
+): { prNumber: number; repoOwner: string | null; repoName: string | null } | null {
+  const workspaces = state.sessions[params.serverId]?.workspaces;
+  const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+    workspaces,
+    workspaceId: params.workspaceId,
+  });
+  const descriptor = workspaceKey ? workspaces?.get(workspaceKey) : null;
+  const pullRequest = descriptor?.githubRuntime?.pullRequest;
+  if (!pullRequest) {
+    return null;
+  }
+  const prNumber = resolvePrNumber(pullRequest);
+  if (prNumber === null) {
+    return null;
+  }
+  return {
+    prNumber,
+    repoOwner:
+      pullRequest.repoOwner && pullRequest.repoOwner.length > 0 ? pullRequest.repoOwner : null,
+    repoName: pullRequest.repoName && pullRequest.repoName.length > 0 ? pullRequest.repoName : null,
+  };
+}
+
+export function useWorkspaceOwnPrIdentity(
+  params: SelectWorkspaceSubagentsParams,
+): { prNumber: number; repoOwner: string | null; repoName: string | null } | null {
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => selectWorkspaceOwnPrIdentity(state, params),
+    equal,
+  );
+}
+
+interface PullRequestLike {
+  number?: number;
+  url: string;
+  repoOwner?: string;
+  repoName?: string;
+}
+
+function resolvePrNumber(pullRequest: PullRequestLike): number | null {
+  if (typeof pullRequest.number === "number" && Number.isFinite(pullRequest.number)) {
+    return pullRequest.number;
+  }
+  return parsePrNumberFromUrl(pullRequest.url);
+}
+
+function parsePrNumberFromUrl(url: string): number | null {
+  try {
+    const match = new URL(url).pathname.match(/\/pull\/(\d+)(?:\/|$)/);
+    if (!match) {
+      return null;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function useSubagentsForWorkspace(params: SelectWorkspaceSubagentsParams): SubagentRow[] {
@@ -142,6 +279,17 @@ export function useSubagentsForWorkspace(params: SelectWorkspaceSubagentsParams)
   return useStoreWithEqualityFn(
     useSessionStore,
     (state) => selectSubagentsForWorkspace(state, params, pendingArchiveIds),
+    equal,
+  );
+}
+
+export function useSubagentPrTabsForWorkspace(
+  params: SelectWorkspaceSubagentsParams,
+): SubagentPrTabInput[] {
+  const pendingArchiveIds = usePendingArchiveAgentIds(params.serverId);
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => selectSubagentPrTabsForWorkspace(state, params, pendingArchiveIds),
     equal,
   );
 }

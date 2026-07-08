@@ -70,6 +70,9 @@ export interface PanelState {
   // File explorer settings (shared between mobile/desktop)
   explorerTab: ExplorerTab;
   explorerTabByCheckout: Record<string, ExplorerTab>;
+  // Which checkout the PR pane points at while `explorerTab === "pr"`. `null`
+  // means the workspace's own PR; otherwise a subagent's cwd. Ephemeral.
+  explorerPrCwd: string | null;
   expandedPathsByWorkspace: Record<string, string[]>;
   diffExpandedPathsByWorkspace: Record<string, string[]>;
   sidebarWidth: number;
@@ -96,6 +99,9 @@ export interface PanelState {
   // File explorer settings actions
   setExplorerTab: (tab: ExplorerTab) => void;
   setExplorerTabForCheckout: (params: ExplorerCheckoutContext & { tab: ExplorerTab }) => void;
+  // Select which PR the explorer PR pane shows: pass a subagent cwd, or `null`
+  // for the workspace's own PR. Also switches the active tab to "pr".
+  selectExplorerPr: (params: ExplorerCheckoutContext & { prCwd: string | null }) => void;
   setExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   setDiffExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   activateExplorerTabForCheckout: (checkout: ExplorerCheckoutContext) => void;
@@ -124,6 +130,7 @@ export const usePanelStore = create<PanelState>()(
       // File explorer defaults
       explorerTab: "changes",
       explorerTabByCheckout: {},
+      explorerPrCwd: null,
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
@@ -230,7 +237,9 @@ export const usePanelStore = create<PanelState>()(
         set((state) => {
           const resolvedTab = coerceExplorerTabForCheckout(tab, isGit);
           const key = buildExplorerCheckoutKey(serverId, cwd);
-          const nextState: Partial<PanelState> = { explorerTab: resolvedTab };
+          // Pressing the header PR tab always targets the workspace's own PR;
+          // any non-PR tab clears the PR pane target.
+          const nextState: Partial<PanelState> = { explorerTab: resolvedTab, explorerPrCwd: null };
           if (key) {
             const current = state.explorerTabByCheckout[key];
             if (current !== resolvedTab) {
@@ -239,6 +248,21 @@ export const usePanelStore = create<PanelState>()(
                 [key]: resolvedTab,
               };
             }
+          }
+          return nextState;
+        }),
+      selectExplorerPr: ({ serverId, cwd, isGit, prCwd }) =>
+        set((state) => {
+          const key = buildExplorerCheckoutKey(serverId, cwd);
+          const nextState: Partial<PanelState> = {
+            explorerTab: "pr",
+            explorerPrCwd: prCwd,
+          };
+          if (key && state.explorerTabByCheckout[key] !== "pr") {
+            nextState.explorerTabByCheckout = {
+              ...state.explorerTabByCheckout,
+              [key]: coerceExplorerTabForCheckout("pr", isGit),
+            };
           }
           return nextState;
         }),
