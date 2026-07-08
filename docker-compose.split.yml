@@ -1,0 +1,100 @@
+# Split Paseo runtime for deployments where agent uptime matters.
+#
+# Public routing:
+# - your UI host -> paseo-ui:6767
+# - your chat/webhook host -> paseo-chat-bridge:8787
+# - paseo-daemon should stay private on the Docker network.
+#
+# The daemon and chat bridge share /home/paseo so daemon-owned chat tools can
+# read the chat bridge service token. Slack/API credentials stay in the bridge
+# process environment.
+x-paseo-image: &paseo-image
+  image: ${PASEO_IMAGE:-paseo-split:latest}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+
+x-paseo-common-env: &paseo-common-env
+  PASEO_PASSWORD: ${PASEO_PASSWORD:?set PASEO_PASSWORD}
+  PASEO_LOG_LEVEL: ${PASEO_LOG_LEVEL:-info}
+  PASEO_LOG_FORMAT: ${PASEO_LOG_FORMAT:-json}
+
+services:
+  paseo-daemon:
+    <<: *paseo-image
+    environment:
+      <<: *paseo-common-env
+      PASEO_RUNTIME_ROLE: daemon
+      PASEO_LISTEN: 0.0.0.0:6767
+      PASEO_WEB_UI_ENABLED: "false"
+      PASEO_CHAT_ENABLED: "false"
+      PASEO_CHAT_SERVICE_HOST: paseo-chat-bridge
+      PASEO_CHAT_SERVICE_PORT: "8788"
+      PASEO_HOSTNAMES: ${PASEO_HOSTNAMES:-paseo-daemon}
+    volumes:
+      - ${PASEO_HOME_HOST:-./paseo-home}:/home/paseo
+      - ${PASEO_WORKSPACE_HOST:-./workspace}:/workspace
+    expose:
+      - "6767"
+
+  paseo-chat-bridge:
+    <<: *paseo-image
+    depends_on:
+      paseo-daemon:
+        condition: service_healthy
+    environment:
+      <<: *paseo-common-env
+      PASEO_RUNTIME_ROLE: chat-bridge
+      PASEO_LISTEN: 0.0.0.0:6767
+      PASEO_CHAT_DAEMON_HOST: paseo-daemon:6767
+      PASEO_CHAT_DEEP_LINK_BASE_URL: ${PASEO_CHAT_DEEP_LINK_BASE_URL:-http://localhost:6767}
+      PASEO_CHAT_PROVIDER: ${PASEO_CHAT_PROVIDER:-pi}
+      PASEO_CHAT_MODEL: ${PASEO_CHAT_MODEL:-openrouter/anthropic/claude-fable-5}
+      PASEO_CHAT_MODE_ID: ${PASEO_CHAT_MODE_ID:-}
+      PASEO_CHAT_THINKING_OPTION_ID: ${PASEO_CHAT_THINKING_OPTION_ID:-high}
+      PASEO_CHAT_ACK_EMOJI: ${PASEO_CHAT_ACK_EMOJI:-}
+      PASEO_CHAT_OFFICE_PROMPT_PATH: ${PASEO_CHAT_OFFICE_PROMPT_PATH:-}
+      PASEO_CHAT_SHOW_REASONING: ${PASEO_CHAT_SHOW_REASONING:-false}
+      PASEO_CHAT_RELAY_MODE: ${PASEO_CHAT_RELAY_MODE:-auto}
+      PASEO_CHAT_SLACK_MODE: ${PASEO_CHAT_SLACK_MODE:-socket}
+      PASEO_CHAT_HTTP_HOST: 0.0.0.0
+      PASEO_CHAT_HTTP_PORT: "8787"
+      PASEO_CHAT_SERVICE_HOST: 0.0.0.0
+      PASEO_CHAT_SERVICE_PORT: "8788"
+      PASEO_CHAT_EMAIL_PROVIDER: ${PASEO_CHAT_EMAIL_PROVIDER:-}
+      PASEO_CHAT_EMAIL_CLASSIFIER_PROVIDER: ${PASEO_CHAT_EMAIL_CLASSIFIER_PROVIDER:-pi}
+      PASEO_CHAT_EMAIL_CLASSIFIER_MODEL: ${PASEO_CHAT_EMAIL_CLASSIFIER_MODEL:-openrouter/anthropic/claude-sonnet-5}
+      PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID: ${PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID:-off}
+      PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS: ${PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS:-60000}
+      PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND: ${PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND:-}
+      PASEO_CHAT_GITHUB_WEBHOOK_SECRET: ${PASEO_CHAT_GITHUB_WEBHOOK_SECRET:-}
+      PASEO_CHAT_PEOPLE_JSON: ${PASEO_CHAT_PEOPLE_JSON:-}
+      PASEO_CHAT_CHANNELS_JSON: ${PASEO_CHAT_CHANNELS_JSON:-}
+      PASEO_CHAT_MAX_UPLOAD_BYTES: ${PASEO_CHAT_MAX_UPLOAD_BYTES:-26214400}
+      PASEO_CHAT_BOT_NAME: ${PASEO_CHAT_BOT_NAME:-cto}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+    volumes:
+      - ${PASEO_HOME_HOST:-./paseo-home}:/home/paseo
+    expose:
+      - "8787"
+      - "8788"
+
+  paseo-ui:
+    <<: *paseo-image
+    depends_on:
+      paseo-daemon:
+        condition: service_healthy
+    environment:
+      <<: *paseo-common-env
+      PASEO_RUNTIME_ROLE: ui
+      PASEO_UI_HOST: 0.0.0.0
+      PASEO_UI_PORT: "6767"
+      PASEO_UI_DAEMON_TARGET: http://paseo-daemon:6767
+      PASEO_UI_LABEL: ${PASEO_UI_LABEL:-paseo}
+      PASEO_UI_INITIAL_DAEMON_CONNECTION: ${PASEO_UI_INITIAL_DAEMON_CONNECTION:-}
+      PASEO_UI_INITIAL_DAEMON_TLS: ${PASEO_UI_INITIAL_DAEMON_TLS:-}
+    expose:
+      - "6767"

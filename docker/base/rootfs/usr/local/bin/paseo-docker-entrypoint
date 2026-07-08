@@ -7,6 +7,7 @@ IMAGE_HOME="/home/paseo"
 : "${PASEO_HOME:=${HOME}/.paseo}"
 : "${PASEO_LISTEN:=0.0.0.0:6767}"
 : "${PASEO_WEB_UI_ENABLED:=true}"
+: "${PASEO_RUNTIME_ROLE:=daemon}"
 : "${PASEO_LOG_LEVEL:=info}"
 : "${PASEO_LOG_FORMAT:=json}"
 : "${CLAUDE_CONFIG_DIR:=${HOME}/.claude}"
@@ -20,6 +21,7 @@ export HOME
 export PASEO_HOME
 export PASEO_LISTEN
 export PASEO_WEB_UI_ENABLED
+export PASEO_RUNTIME_ROLE
 export PASEO_LOG_LEVEL
 export PASEO_LOG_FORMAT
 export CLAUDE_CONFIG_DIR
@@ -55,6 +57,31 @@ if [[ "$#" -gt 0 ]]; then
     exec gosu paseo "$@"
   fi
   exec "$@"
+fi
+
+case "$PASEO_RUNTIME_ROLE" in
+  daemon | chat-bridge | chat | ui | web-ui) ;;
+  *)
+    echo "[paseo] FATAL: unknown PASEO_RUNTIME_ROLE '${PASEO_RUNTIME_ROLE}'." >&2
+    echo "[paseo] Expected one of: daemon, chat-bridge, ui." >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$PASEO_RUNTIME_ROLE" == "chat" || "$PASEO_RUNTIME_ROLE" == "chat-bridge" ]]; then
+  echo "[paseo] starting chat bridge runtime"
+  if [[ "$(id -u)" == "0" ]]; then
+    exec gosu paseo /usr/local/bin/paseo-chat-bridge-entrypoint
+  fi
+  exec /usr/local/bin/paseo-chat-bridge-entrypoint
+fi
+
+if [[ "$PASEO_RUNTIME_ROLE" == "ui" || "$PASEO_RUNTIME_ROLE" == "web-ui" ]]; then
+  echo "[paseo] starting web UI runtime"
+  if [[ "$(id -u)" == "0" ]]; then
+    exec gosu paseo /usr/local/bin/paseo-web-ui-entrypoint
+  fi
+  exec /usr/local/bin/paseo-web-ui-entrypoint
 fi
 
 if [[ -z "${PASEO_PASSWORD:-}" ]]; then

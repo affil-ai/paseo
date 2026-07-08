@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${PASEO_UI_HOST:=0.0.0.0}"
+: "${PASEO_UI_PORT:=6767}"
+: "${PASEO_UI_DAEMON_TARGET:=http://paseo-daemon:6767}"
+: "${PASEO_UI_LABEL:=$(hostname)}"
+
+export PASEO_UI_HOST
+export PASEO_UI_PORT
+export PASEO_UI_DAEMON_TARGET
+export PASEO_UI_LABEL
+
+exec node /usr/local/lib/paseo-web-ui-server.mjs

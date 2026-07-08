@@ -27,7 +27,7 @@ RUN set -eux; \
 
 FROM ${NODE_IMAGE}
 
-ARG PASEO_INITIAL_DAEMON_CONNECTION=affil.olumbe.com:443
+ARG PASEO_INITIAL_DAEMON_CONNECTION=
 
 ENV HOME=/home/paseo \
     PASEO_HOME=/home/paseo/.paseo \
@@ -150,14 +150,18 @@ RUN set -eux; \
     chown -R paseo:paseo /home/paseo /workspace
 
 COPY docker/base/rootfs/ /
-RUN chmod +x /usr/local/bin/paseo-docker-entrypoint /usr/local/bin/paseo-chat-bridge-entrypoint
+RUN chmod +x \
+    /usr/local/bin/paseo-docker-entrypoint \
+    /usr/local/bin/paseo-chat-bridge-entrypoint \
+    /usr/local/bin/paseo-web-ui-entrypoint \
+    /usr/local/bin/paseo-healthcheck
 
 WORKDIR /workspace
 
-EXPOSE 6767 8787
+EXPOSE 6767 8787 8788
 VOLUME ["/home/paseo"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD node -e "const listen=process.env.PASEO_LISTEN||'0.0.0.0:6767'; const m=listen.match(/:(\\d+)$/); const port=m?Number(m[1]):6767; require('http').get({hostname:'127.0.0.1',port,path:'/api/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  CMD /usr/local/bin/paseo-healthcheck
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/paseo-docker-entrypoint"]

@@ -927,6 +927,11 @@ export async function startChatServiceServer(input: {
 }): Promise<Server> {
   const token = await ensureServiceToken(input.tokenPath);
   const server = createServer(async (request, response) => {
+    if (request.method === "GET" && request.url === "/health") {
+      writeJson(response, 200, { ok: true, service: "office-chat-service" });
+      return;
+    }
+
     if (request.method !== "POST" || request.url !== "/chat-bridge/rpc") {
       writeJson(response, 404, { ok: false, error: { code: "not_found" } });
       return;

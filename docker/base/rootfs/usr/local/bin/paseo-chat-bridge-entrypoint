@@ -16,6 +16,15 @@ daemon_port="${PASEO_LISTEN##*:}"
 export PASEO_CHAT_DAEMON_HOST
 export PASEO_CHAT_HTTP_HOST
 
+daemon_health_url() {
+  local host="$PASEO_CHAT_DAEMON_HOST"
+  if [[ "$host" == http://* || "$host" == https://* ]]; then
+    printf '%s/api/health\n' "${host%/}"
+  else
+    printf 'http://%s/api/health\n' "${host%/}"
+  fi
+}
+
 entry=""
 for candidate in \
   "$(npm root -g)/@getpaseo/chat/dist/index.js" \
@@ -34,10 +43,12 @@ fi
 
 wait_for_daemon() {
   local attempts=0
-  until curl -fsS "http://127.0.0.1:${daemon_port}/api/health" >/dev/null 2>&1; do
+  local health_url
+  health_url="$(daemon_health_url)"
+  until curl -fsS "$health_url" >/dev/null 2>&1; do
     attempts=$((attempts + 1))
     if (( attempts == 1 || attempts % 30 == 0 )); then
-      echo "[paseo] waiting for daemon health before starting chat bridge" >&2
+      echo "[paseo] waiting for daemon health at ${health_url} before starting chat bridge" >&2
     fi
     sleep 1
   done
