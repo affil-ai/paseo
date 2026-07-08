@@ -58,6 +58,11 @@ const AskInputSchema = z.object({
     .default(60),
 });
 
+const AddReactionInputSchema = z.object({
+  conversationId: z.string().min(1).optional(),
+  name: z.string().min(1).max(80).default("check"),
+});
+
 function requireCallerAgentId(callerAgentId: string | undefined): string {
   if (!callerAgentId) {
     throw new ChatToolError("agent_scoped_only", "chat.* tools are only available to agents.");
@@ -100,6 +105,12 @@ function sendResultMessage(result: { conversationId?: string; requestId?: string
   return result.conversationId
     ? `Sent chat message to ${result.conversationId}.`
     : "Sent chat message.";
+}
+
+function reactionResultMessage(result: { conversationId?: string; reactionName?: string }): string {
+  return `Added ${result.reactionName ?? "check"} reaction${
+    result.conversationId ? ` to ${result.conversationId}` : ""
+  }.`;
 }
 
 export function registerChatTools(
@@ -167,6 +178,32 @@ export function registerChatTools(
           idempotencyKey: chatIdempotencyKey("chat.ask", officeAgentId),
         });
         return textResult(result, sendResultMessage(result));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  registerTool(
+    "chat.addReaction",
+    {
+      title: "Add chat reaction",
+      description:
+        'Add an emoji reaction to the initial/root message of the current Slack thread or a specific chat conversation. Use name "check" (default) to add a checkmark when the work is complete.',
+      inputSchema: AddReactionInputSchema,
+      outputSchema: ChatToolOutputSchema.shape,
+    },
+    async (input: z.infer<typeof AddReactionInputSchema>) => {
+      const { conversationId, name } = input;
+      try {
+        const officeAgentId = requireCallerAgentId(deps.callerAgentId);
+        const result = await client.call("addReaction", {
+          officeAgentId,
+          conversationId,
+          name,
+          idempotencyKey: chatIdempotencyKey("chat.addReaction", officeAgentId),
+        });
+        return textResult(result, reactionResultMessage(result));
       } catch (error) {
         return errorResult(error);
       }

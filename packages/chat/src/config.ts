@@ -53,6 +53,7 @@ const envSchema = z.object({
   PASEO_CHAT_EMAIL_CLASSIFIER_THINKING_OPTION_ID: z.string().default("off"),
   PASEO_CHAT_EMAIL_CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   PASEO_CHAT_EMAIL_CLASSIFIER_COMMAND: z.string().optional(),
+  PASEO_CHAT_GITHUB_WEBHOOK_SECRET: z.string().optional(),
   PASEO_CHAT_PEOPLE_JSON: z.string().optional(),
   PASEO_CHAT_CHANNELS_JSON: z.string().optional(),
   PASEO_CHAT_MAX_UPLOAD_BYTES: z.coerce
@@ -278,6 +279,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
               : {}),
           },
     repository: resolveRepositoryConfig(persistedRepository),
+    githubWebhookSecret: parsed.PASEO_CHAT_GITHUB_WEBHOOK_SECRET?.trim() || undefined,
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };
 }

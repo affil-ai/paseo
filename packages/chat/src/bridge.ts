@@ -33,6 +33,7 @@ import {
   externalIntakeAgentPrompt,
   loadOfficePrompt,
 } from "./prompt.js";
+import { extractGithubPrLinks } from "./github.js";
 import { slackPostableMessagesFromMarkdown } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
 import {
@@ -805,6 +806,13 @@ export class ChatBridge {
         binding.kind === "outbound-conversation" ? binding.conversationId : input.externalThreadId,
       messagePreview: input.text.replace(/\s+/g, " ").trim().slice(0, 240),
       result: "posted",
+    });
+    await this.store.recordGithubPrLinks(extractGithubPrLinks(input.text), {
+      officeAgentId: input.agentId,
+      externalThreadId: input.externalThreadId,
+      ...(binding.kind === "outbound-conversation"
+        ? { conversationId: binding.conversationId }
+        : {}),
     });
   }
 

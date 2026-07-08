@@ -81,6 +81,18 @@ describe("resolveEmailConfig", () => {
   });
 });
 
+describe("loadConfig GitHub webhook", () => {
+  it("reads the GitHub webhook secret from env", async () => {
+    const home = await createTempHome();
+    const config = loadConfig({
+      PASEO_HOME: home,
+      PASEO_CHAT_GITHUB_WEBHOOK_SECRET: " whsec_123 ",
+    } as NodeJS.ProcessEnv);
+
+    expect(config.githubWebhookSecret).toBe("whsec_123");
+  });
+});
+
 describe("loadConfig chat.email", () => {
   it("reads chat.email from the persisted config.json", async () => {
     const home = await createTempHome();

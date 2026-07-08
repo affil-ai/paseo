@@ -8,6 +8,7 @@ import { PermissionBridge } from "./permissions.js";
 import { FileChatStateAdapter } from "./state/chat-state-adapter.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
 import { startInboundHttpServer } from "./inbound-http.js";
+import { GithubMergeNotifier } from "./github.js";
 import { EmailIntakeBridge } from "./intake/email-bridge.js";
 import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
 import { loadOfficePrompt } from "./prompt.js";
@@ -54,8 +55,9 @@ function startHttpBridge(input: {
   config: ResolvedChatBridgeConfig;
   chat: ChatRuntime;
   emailIntake: EmailIntakeBridge | null;
+  githubMergeNotifier: GithubMergeNotifier | null;
 }): InboundHttpServer | null {
-  if (input.config.slackMode !== "http" && !input.emailIntake) {
+  if (input.config.slackMode !== "http" && !input.emailIntake && !input.githubMergeNotifier) {
     return null;
   }
   return startInboundHttpServer({
@@ -69,6 +71,14 @@ function startHttpBridge(input: {
             input.emailIntake!.handleResendWebhook(rawBody, headers),
         }
       : {}),
+    ...(input.githubMergeNotifier
+      ? {
+          githubWebhook: (
+            rawBody: Buffer,
+            headers: Record<string, string | string[] | undefined>,
+          ) => input.githubMergeNotifier!.handleWebhook(rawBody, headers),
+        }
+      : {}),
   });
 }
 
@@ -77,6 +87,7 @@ function logReady(input: {
   client: PaseoDaemonClient;
   httpServer: InboundHttpServer | null;
   emailIntake: EmailIntakeBridge | null;
+  githubMergeNotifier: GithubMergeNotifier | null;
 }): void {
   const serverInfo = input.client.getLastServerInfoMessage();
   console.log("Office chat bridge v1 ready");
@@ -93,6 +104,11 @@ function logReady(input: {
   );
   if (input.httpServer && input.config.slackMode === "http") {
     console.log(`  http: http://${input.config.httpHost}:${input.config.httpPort}/slack/events`);
+  }
+  if (input.httpServer && input.githubMergeNotifier) {
+    console.log(
+      `  github webhook: http://${input.config.httpHost}:${input.config.httpPort}/github/webhook`,
+    );
   }
   if (input.httpServer && input.emailIntake && input.config.email?.provider === "resend") {
     console.log(
@@ -178,8 +194,11 @@ export async function main(): Promise<void> {
     tokenPath: config.serviceTokenPath,
   });
   const { emailIntake } = startEmailIntakes({ config, chat, client, state, bridge });
-  const httpServer = startHttpBridge({ config, chat, emailIntake });
-  logReady({ config, client, httpServer, emailIntake });
+  const githubMergeNotifier = config.githubWebhookSecret
+    ? new GithubMergeNotifier(config.githubWebhookSecret, state, client)
+    : null;
+  const httpServer = startHttpBridge({ config, chat, emailIntake, githubMergeNotifier });
+  logReady({ config, client, httpServer, emailIntake, githubMergeNotifier });
 
   const shutdown = async () => {
     clearInterval(askExpiryInterval);
