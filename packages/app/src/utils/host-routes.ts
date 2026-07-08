@@ -366,6 +366,46 @@ export function buildHostWorkspaceOpenRoute(
   return `${base}?open=${encodeURIComponent(normalizedOpenIntent)}` as const;
 }
 
+// Deep-link to a specific PR in a workspace's explorer panel. `prIdentityKey`
+// is the stable PR identity (owner/repo#number, or cwd#number fallback); it is
+// URL-encoded into a `?pr=` param. Prefer PR identity over cwd because worktrees
+// move/disappear but the PR is durable and shareable.
+export function buildHostWorkspacePrRoute(
+  serverId: string,
+  workspaceId: string,
+  prIdentityKey: string,
+) {
+  const base = buildHostWorkspaceRoute(serverId, workspaceId);
+  const normalizedPr = trimNonEmpty(prIdentityKey);
+  if (base === "/" || !normalizedPr) {
+    return base;
+  }
+  return `${base}?pr=${encodeURIComponent(normalizedPr)}` as const;
+}
+
+// The absolute shareable URL for a workspace PR deep-link. On web this is
+// origin-qualified so it is copy/pasteable; elsewhere it is the app-relative
+// route (deep links resolve within the app).
+export function buildHostWorkspacePrShareUrl(input: {
+  serverId: string;
+  workspaceId: string;
+  prIdentityKey: string;
+  origin?: string | null;
+}): string {
+  const route = buildHostWorkspacePrRoute(input.serverId, input.workspaceId, input.prIdentityKey);
+  const origin = trimNonEmpty(input.origin);
+  if (!origin || route === "/") {
+    return route;
+  }
+  return `${origin.replace(/\/$/, "")}${route}`;
+}
+
+// Parse the `?pr=` deep-link param into a PR identity key. Returns null when
+// absent/blank.
+export function parseWorkspacePrIntent(value: string | null | undefined): string | null {
+  return trimNonEmpty(value);
+}
+
 export function buildHostAgentDetailRoute(serverId: string, agentId: string, workspaceId?: string) {
   const normalizedWorkspaceId = trimNonEmpty(workspaceId);
   if (normalizedWorkspaceId) {

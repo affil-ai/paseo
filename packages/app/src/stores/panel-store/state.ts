@@ -4,6 +4,7 @@ import {
   resolveExplorerTabForCheckout,
   type ExplorerTab,
 } from "../explorer-tab-memory";
+import { isPrIdentityKeyValue, type ExplorerPrByCheckout } from "../explorer-pr-memory";
 import { type ExplorerCheckoutContext } from "../explorer-checkout-context";
 
 export type MobilePanelView = "agent" | "agent-list" | "file-explorer";
@@ -49,9 +50,14 @@ export interface PanelCoreState {
   explorerTabByCheckout: Record<string, ExplorerTab>;
   // Which checkout the PR pane points at while `explorerTab === "pr"`. `null`
   // means the workspace's own PR; a subagent's cwd selects that subagent's PR.
-  // Ephemeral (not persisted): subagent PRs come and go, so this is re-derived
-  // from live workspace descriptors each session.
+  // In-memory active value; hydrated on load from `explorerPrByCheckout` by
+  // reconciling the persisted PR identity against the live PR set.
   explorerPrCwd: string | null;
+  // Per-checkout persisted PR selection, keyed by STABLE PR identity
+  // (owner/repo#number). `null`/absent = the workspace's own PR. Persisted so a
+  // selected subagent PR survives a reload; reconciled against live PRs on load
+  // (dead PRs fall back to the workspace's own PR).
+  explorerPrByCheckout: ExplorerPrByCheckout;
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -194,6 +200,21 @@ function migratePanelExplorerTabByCheckout(state: MigratablePanelState, version:
   state.explorerTabByCheckout = next;
 }
 
+function migratePanelExplorerPrByCheckout(state: MigratablePanelState): void {
+  if (typeof state.explorerPrByCheckout !== "object" || !state.explorerPrByCheckout) {
+    state.explorerPrByCheckout = {};
+    return;
+  }
+  const entries = Object.entries(state.explorerPrByCheckout as Record<string, unknown>);
+  const next: ExplorerPrByCheckout = {};
+  for (const [key, value] of entries) {
+    if (value === null || isPrIdentityKeyValue(value)) {
+      next[key] = value;
+    }
+  }
+  state.explorerPrByCheckout = next;
+}
+
 function migratePanelDesktopFocusMode(state: MigratablePanelState): void {
   const desktop = state.desktop as Record<string, unknown> | undefined;
   if (!desktop) {
@@ -230,6 +251,7 @@ export function migratePanelState(
     state.explorerTab = "changes";
   }
   migratePanelExplorerTabByCheckout(state, version);
+  migratePanelExplorerPrByCheckout(state);
   if (version < 8) {
     migratePanelDesktopFocusMode(state);
   }

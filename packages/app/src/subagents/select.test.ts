@@ -1,6 +1,7 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  resolveWorkspacePrCwdForIdentity,
   selectSubagentPrTabsForWorkspace,
   selectSubagentsForParent,
   selectSubagentsForWorkspace,
@@ -642,6 +643,59 @@ describe("selectWorkspaceOwnPrIdentity", () => {
         serverId: SERVER_ID,
         workspaceId: "ws-1",
       }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveWorkspacePrCwdForIdentity", () => {
+  const PARENT_WS = "ws-office";
+
+  function seedOfficeWorkspaceWithSubagentPr(): void {
+    setAgents([
+      makeAgent({ id: "office", workspaceId: PARENT_WS, cwd: "/repo/office" }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "office",
+        workspaceId: "ws-wt-a",
+        cwd: "/repo/wt-a",
+      }),
+    ]);
+    setWorkspaces([
+      makeWorkspace({ id: PARENT_WS, cwd: "/repo/office", prNumber: 1947 }),
+      makeWorkspace({ id: "ws-wt-a", cwd: "/repo/wt-a", prNumber: 1942 }),
+    ]);
+  }
+
+  it("resolves a subagent PR identity to its checkout cwd", () => {
+    seedOfficeWorkspaceWithSubagentPr();
+    expect(
+      resolveWorkspacePrCwdForIdentity(
+        useSessionStore.getState(),
+        { serverId: SERVER_ID, workspaceId: PARENT_WS, prIdentityKey: "acme/app#1942" },
+        new Set(),
+      ),
+    ).toEqual({ prCwd: "/repo/wt-a" });
+  });
+
+  it("resolves the workspace's own PR identity to null (own PR pane)", () => {
+    seedOfficeWorkspaceWithSubagentPr();
+    expect(
+      resolveWorkspacePrCwdForIdentity(
+        useSessionStore.getState(),
+        { serverId: SERVER_ID, workspaceId: PARENT_WS, prIdentityKey: "acme/app#1947" },
+        new Set(),
+      ),
+    ).toEqual({ prCwd: null });
+  });
+
+  it("returns null when no live PR matches the identity", () => {
+    seedOfficeWorkspaceWithSubagentPr();
+    expect(
+      resolveWorkspacePrCwdForIdentity(
+        useSessionStore.getState(),
+        { serverId: SERVER_ID, workspaceId: PARENT_WS, prIdentityKey: "acme/app#9999" },
+        new Set(),
+      ),
     ).toBeNull();
   });
 });

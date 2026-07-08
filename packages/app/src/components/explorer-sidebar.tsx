@@ -40,6 +40,11 @@ import { FileExplorerPane } from "./file-explorer-pane";
 import { ExplorerSubagentsPane } from "./explorer-subagents-pane";
 import { useSubagentPrTabsForWorkspace, useWorkspaceOwnPrIdentity } from "@/subagents";
 import { buildSubagentPrTabs, type SubagentPrTab } from "@/git/explorer-pr-tabs";
+import {
+  buildExplorerPrCandidates,
+  prIdentityKeyForSelectedCwd,
+  resolvePersistedPrSelection,
+} from "@/stores/explorer-pr-memory";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
@@ -66,13 +71,35 @@ interface ExplorerSidebarSharedState {
 
 export function useExplorerSidebarSharedState({
   serverId,
+  workspaceId,
   workspaceRoot,
   isGit,
-}: Pick<ExplorerSidebarProps, "serverId" | "workspaceRoot" | "isGit">): ExplorerSidebarSharedState {
+}: Pick<
+  ExplorerSidebarProps,
+  "serverId" | "workspaceId" | "workspaceRoot" | "isGit"
+>): ExplorerSidebarSharedState {
   const explorerTab = usePanelStore((state) => state.explorerTab);
   const explorerPrCwd = usePanelStore((state) => state.explorerPrCwd);
   const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
   const selectExplorerPr = usePanelStore((state) => state.selectExplorerPr);
+
+  // PR candidates (workspace own + subagents) used to map a selected cwd to its
+  // stable PR identity for persistence.
+  const workspaceOwnPr = useWorkspaceOwnPrIdentity({ serverId, workspaceId: workspaceId ?? "" });
+  const subagentPrInputs = useSubagentPrTabsForWorkspace({
+    serverId,
+    workspaceId: workspaceId ?? "",
+  });
+  const prCandidates = useMemo(
+    () =>
+      buildExplorerPrCandidates({
+        workspacePr: workspaceOwnPr,
+        workspaceCwd: workspaceRoot,
+        subagentPrs: subagentPrInputs,
+      }),
+    [subagentPrInputs, workspaceOwnPr, workspaceRoot],
+  );
+
   const handleTabPress = useCallback(
     (tab: ExplorerTab) => {
       setExplorerTabForCheckout({ serverId, cwd: workspaceRoot, isGit, tab });
@@ -81,9 +108,14 @@ export function useExplorerSidebarSharedState({
   );
   const handleSelectPr = useCallback(
     (prCwd: string | null) => {
-      selectExplorerPr({ serverId, cwd: workspaceRoot, isGit, prCwd });
+      const prIdentityKey = prIdentityKeyForSelectedCwd({
+        prCwd,
+        workspaceCwd: workspaceRoot,
+        candidates: prCandidates,
+      });
+      selectExplorerPr({ serverId, cwd: workspaceRoot, isGit, prCwd, prIdentityKey });
     },
-    [isGit, selectExplorerPr, serverId, workspaceRoot],
+    [isGit, prCandidates, selectExplorerPr, serverId, workspaceRoot],
   );
 
   return { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr };
@@ -103,6 +135,7 @@ export function CompactExplorerSidebar({
   const { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr } =
     useExplorerSidebarSharedState({
       serverId,
+      workspaceId,
       workspaceRoot,
       isGit,
     });
@@ -335,6 +368,7 @@ export function ExplorerSidebar({
   const { explorerTab, explorerPrCwd, handleTabPress, handleSelectPr } =
     useExplorerSidebarSharedState({
       serverId,
+      workspaceId,
       workspaceRoot,
       isGit,
     });
@@ -527,6 +561,53 @@ function useExplorerPrTabState(input: {
       }).inline,
     [subagentPrInputs, workspaceOwnPr, workspaceRoot],
   );
+
+  // Reconcile the persisted PR selection (by stable identity) against the live
+  // PR set and hydrate the in-memory active PR (`explorerPrCwd`) once per
+  // checkout. A vanished PR (merged/closed/subagent archived) falls back to the
+  // workspace's own PR; the inline cap does not restrict reconcile (all
+  // subagent PRs, inline or overflow, are candidates).
+  const explorerPrByCheckout = usePanelStore((state) => state.explorerPrByCheckout);
+  const hydrateExplorerPrForCheckout = usePanelStore((state) => state.hydrateExplorerPrForCheckout);
+  const reconcileCandidates = useMemo(
+    () =>
+      buildExplorerPrCandidates({
+        workspacePr: workspaceOwnPr,
+        workspaceCwd: workspaceRoot,
+        subagentPrs: subagentPrInputs,
+      }),
+    [subagentPrInputs, workspaceOwnPr, workspaceRoot],
+  );
+  const hydratedCheckoutRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !workspaceRoot) {
+      return;
+    }
+    const resolved = resolvePersistedPrSelection({
+      serverId,
+      workspaceCwd: workspaceRoot,
+      explorerPrByCheckout,
+      candidates: reconcileCandidates,
+    });
+    if (!resolved) {
+      return;
+    }
+    // Hydrate once per checkout (identified by serverId+cwd). Re-runs only if
+    // the checkout changes; live selection changes go through selectExplorerPr.
+    const checkoutKey = `${serverId}::${workspaceRoot}`;
+    if (hydratedCheckoutRef.current === checkoutKey) {
+      return;
+    }
+    hydratedCheckoutRef.current = checkoutKey;
+    hydrateExplorerPrForCheckout({ prCwd: resolved.isWorkspaceOwnPr ? null : resolved.prCwd });
+  }, [
+    explorerPrByCheckout,
+    hydrateExplorerPrForCheckout,
+    isOpen,
+    reconcileCandidates,
+    serverId,
+    workspaceRoot,
+  ]);
 
   const workspacePrPane = usePrPaneData({
     serverId,

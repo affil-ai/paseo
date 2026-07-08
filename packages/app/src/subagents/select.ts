@@ -6,7 +6,7 @@ import {
   normalizeWorkspaceOpaqueId,
   resolveWorkspaceMapKeyByIdentity,
 } from "@/utils/workspace-identity";
-import type { SubagentPrTabInput } from "@/git/explorer-pr-tabs";
+import { prIdentityKey, type SubagentPrTabInput } from "@/git/explorer-pr-tabs";
 
 export interface SubagentRow {
   id: Agent["id"];
@@ -292,4 +292,46 @@ export function useSubagentPrTabsForWorkspace(
     (state) => selectSubagentPrTabsForWorkspace(state, params, pendingArchiveIds),
     equal,
   );
+}
+
+// Resolve a persisted/deep-linked PR identity to the checkout cwd it should open
+// for a workspace, using the live PR set (workspace's own PR + subagent PRs).
+// Returns:
+//   - { prCwd: null } when the identity matches the workspace's own PR;
+//   - { prCwd: <cwd> } when it matches a subagent PR;
+//   - null when no live PR matches (caller decides the fallback).
+// Pure over a session snapshot so it runs outside React (deep-link consumption).
+export function resolveWorkspacePrCwdForIdentity(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams & { prIdentityKey: string },
+  pendingArchiveIds: ReadonlySet<string>,
+): { prCwd: string | null } | null {
+  const workspaceCwd = selectWorkspaceCwd(state, params);
+  const workspaceOwnPr = selectWorkspaceOwnPrIdentity(state, params);
+  if (workspaceCwd && workspaceOwnPr) {
+    const ownKey = prIdentityKey(workspaceOwnPr, workspaceCwd);
+    if (ownKey === params.prIdentityKey) {
+      return { prCwd: null };
+    }
+  }
+  const subagentPrs = selectSubagentPrTabsForWorkspace(state, params, pendingArchiveIds);
+  for (const pr of subagentPrs) {
+    if (prIdentityKey(pr, pr.cwd) === params.prIdentityKey) {
+      return { prCwd: pr.cwd };
+    }
+  }
+  return null;
+}
+
+function selectWorkspaceCwd(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams,
+): string | null {
+  const workspaces = state.sessions[params.serverId]?.workspaces;
+  const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+    workspaces,
+    workspaceId: params.workspaceId,
+  });
+  const descriptor = workspaceKey ? workspaces?.get(workspaceKey) : null;
+  return descriptor?.workspaceDirectory || null;
 }

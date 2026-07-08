@@ -510,6 +510,9 @@ export const ja: TranslationResources = {
         subagents: "サブエージェント",
         subagentsEmpty: "このワークスペースにサブエージェントはありません",
         openSubagentPr: "プルリクエスト #{{number}} を開く",
+        copyPrLink: "プルリクエスト #{{number}} へのリンクをコピー",
+        copyPrLinkLabel: "PR リンク",
+        copyPrLinkFailed: "PR リンクをコピーできませんでした",
       },
       toasts: {
         copyFailed: "コピーに失敗しました",
