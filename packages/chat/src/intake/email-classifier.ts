@@ -1,11 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ChatEmailClassifierConfig } from "../config.js";
-import {
-  emailBody,
-  stripQuotedEmailChain,
-  truncateText,
-  type ResendReceivedEmail,
-} from "./email-resend.js";
+import { emailBody, truncateText, type ResendReceivedEmail } from "./email-resend.js";
 
 const DEFAULT_PI_COMMAND = "pi";
 const DEFAULT_CLASSIFIER_TIMEOUT_MS = 60_000;
@@ -121,7 +116,7 @@ function buildClassifierPrompt(email: ResendReceivedEmail): string {
     `Cc: ${(email.cc ?? []).join(", ") || "(none)"}`,
     `Subject: ${email.subject ?? "(no subject)"}`,
     "",
-    truncateText(stripQuotedEmailChain(emailBody(email)), 4000),
+    truncateText(emailBody(email), 4000),
   ].join("\n");
 }
 

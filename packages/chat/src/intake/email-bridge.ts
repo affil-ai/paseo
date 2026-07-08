@@ -23,7 +23,6 @@ import {
   formatFollowupEmailForAgent,
   formatSupportEmailForAgent,
   processEmailAttachments,
-  stripQuotedEmailChain,
   supportEmailDuplicateExternalIds,
   supportEmailLookupExternalIds,
   supportEmailSlackPreview,
@@ -291,10 +290,7 @@ export class EmailIntakeBridge {
     const ownerAgentId = getBindingOwnerAgentId(binding);
     const sender = emailSenderIdentityForContext(input.email, this.context);
     const slackFiles = await emailSlackFiles(input.processed.attachments);
-    const previewText = truncateText(
-      stripQuotedEmailChain(emailBody(input.email)),
-      REPLY_PREVIEW_MAX_CHARS,
-    );
+    const previewText = truncateText(emailBody(input.email), REPLY_PREVIEW_MAX_CHARS);
 
     await this.deps.chat
       .thread(input.existingThreadId)

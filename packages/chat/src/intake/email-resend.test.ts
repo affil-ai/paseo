@@ -5,12 +5,12 @@ import {
   emailBody,
   emailSenderIdentity,
   emailSenderIdentityForContext,
+  formatFollowupEmailForAgent,
   formatSupportEmailForAgent,
   htmlToText,
   isForwardLikeEmail,
   isFromInternalSender,
   normalizeEmailAddress,
-  stripQuotedEmailChain,
   supportEmailDuplicateExternalIds,
   supportEmailLookupExternalIds,
   supportEmailSlackPreview,
@@ -192,38 +192,6 @@ describe("body handling and formatting", () => {
     expect(htmlToText("<style>p{}</style><p>Hi &amp; bye</p>")).toBe("Hi & bye");
   });
 
-  it("strips quoted reply chains", () => {
-    const body = [
-      "Thanks, that fixed it!",
-      "",
-      "On Mon, Jul 6, 2026 at 9:00 AM Support wrote:",
-      "> We pushed a fix.",
-    ].join("\n");
-    expect(stripQuotedEmailChain(body)).toBe("Thanks, that fixed it!");
-  });
-
-  it("preserves human context before nested forwarded receipt content", () => {
-    const body = [
-      "---------- Forwarded message ---------",
-      "From: Chia Yang <chia@example.com>",
-      "Date: Wed, Jul 8, 2026 at 10:04 AM",
-      "Subject: Fw: Your receipt from NOK'S KITCHEN",
-      "To: <hello@nextcard.com>",
-      "",
-      "I ordered online yesterday and the restaurant was closed. Can you help?",
-      "",
-      "Begin forwarded message:",
-      "",
-      "NOK'S KITCHEN",
-      "$13.11",
-    ].join("\n");
-
-    expect(stripQuotedEmailChain(body)).toContain(
-      "I ordered online yesterday and the restaurant was closed. Can you help?",
-    );
-    expect(stripQuotedEmailChain(body)).not.toContain("NOK'S KITCHEN\n$13.11");
-  });
-
   it("formats the agent prompt with identity headers and keeps paths out of the Slack preview", () => {
     const email = makeEmail({
       headers: {
@@ -252,6 +220,15 @@ describe("body handling and formatting", () => {
     const preview = supportEmailSlackPreview({ email, attachments: [], context });
     expect(preview).toContain("Subject: Cannot log in");
     expect(preview).not.toContain("/tmp/att/screenshot.png");
+  });
+
+  it("keeps full email body context in support Slack previews and follow-up prompts", () => {
+    const email = makeEmail({
+      text: "Still broken after clearing cookies.\n\nOn Mon wrote:\n> We pushed a fix.",
+    });
+
+    expect(supportEmailSlackPreview({ email, context })).toContain("We pushed a fix");
+    expect(formatFollowupEmailForAgent(email)).toContain("We pushed a fix");
   });
 
   it("truncates long previews", () => {

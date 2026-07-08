@@ -186,49 +186,6 @@ export function truncateText(input: string, maxLength: number): string {
   return `${input.slice(0, maxLength - suffix.length)}${suffix}`;
 }
 
-function shouldCutAtForwardHeader(lines: readonly string[], index: number): boolean {
-  const line = lines[index]?.trim() ?? "";
-  if (!/^from:\s+/i.test(line)) return false;
-  const window = lines.slice(index, index + 8).join("\n");
-  return /\n(?:sent|date|to|subject):\s+/i.test(window);
-}
-
-function isStandaloneChainMarker(line: string): boolean {
-  return (
-    /^[-_ ]*original message[-_ ]*$/i.test(line) ||
-    /^[-_ ]*forwarded message[-_ ]*$/i.test(line) ||
-    /^begin forwarded message:?$/i.test(line)
-  );
-}
-
-export function stripQuotedEmailChain(body: string): string {
-  const lines = body.split(/\r?\n/);
-  let lastMeaningfulLine = -1;
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const trimmed = line.trim();
-    const hasPriorBody = lastMeaningfulLine >= 0;
-    const quoteMarker =
-      /^on .+ wrote:$/i.test(trimmed) ||
-      /^[-_ ]*original message[-_ ]*$/i.test(trimmed) ||
-      /^[-_ ]*forwarded message[-_ ]*$/i.test(trimmed) ||
-      /^begin forwarded message:?$/i.test(trimmed) ||
-      (trimmed.startsWith(">") && hasPriorBody) ||
-      (hasPriorBody && shouldCutAtForwardHeader(lines, index));
-
-    if (quoteMarker && hasPriorBody) {
-      return lines.slice(0, index).join("\n").trim();
-    }
-
-    if (trimmed.length > 0 && !trimmed.startsWith(">") && !isStandaloneChainMarker(trimmed)) {
-      lastMeaningfulLine = index;
-    }
-  }
-
-  return body.trim();
-}
-
 // --- Addresses & identities --------------------------------------------------
 
 export function normalizeEmailAddress(value: string): string | undefined {
@@ -492,7 +449,7 @@ export function formatFollowupEmailForAgent(
     `Subject: ${email.subject ?? "(no subject)"}`,
     ...(email.created_at !== undefined ? [`Date: ${email.created_at}`] : []),
     "",
-    stripQuotedEmailChain(emailBody(email)),
+    emailBody(email),
     ...attachmentLines(attachments),
   ].join("\n");
 }
@@ -599,7 +556,7 @@ export function supportEmailSlackPreview(input: {
   readonly context?: EmailIntakeContext | undefined;
 }): string {
   const email = input.email;
-  const body = stripQuotedEmailChain(emailBody(email));
+  const body = emailBody(email);
   const preview = [
     `From: ${email.from ?? "(unknown sender)"}`,
     `To: ${(email.to ?? [input.context?.supportAddress ?? "(unknown recipient)"]).join(", ")}`,

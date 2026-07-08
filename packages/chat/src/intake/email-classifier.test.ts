@@ -86,6 +86,8 @@ describe("createPiEmailClassifier", () => {
     expect(calls[0]?.prompt).toContain(
       "I ordered online yesterday and the restaurant was closed. Can you help?",
     );
+    expect(calls[0]?.prompt).toContain("NOK'S KITCHEN");
+    expect(calls[0]?.prompt).toContain("$13.11");
   });
 
   it("parses fenced JSON but still asks the model for raw JSON only", async () => {

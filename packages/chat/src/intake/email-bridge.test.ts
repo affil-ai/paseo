@@ -323,7 +323,7 @@ describe("EmailIntakeBridge", () => {
     expect(harness.sentMessages).toHaveLength(1);
     expect(harness.sentMessages[0]?.agentId).toBe("agent-1");
     expect(harness.sentMessages[0]?.message).toContain("Still broken after clearing cookies.");
-    expect(harness.sentMessages[0]?.message).not.toContain("We pushed a fix");
+    expect(harness.sentMessages[0]?.message).toContain("We pushed a fix");
     expect(harness.sentMessages[0]?.message).toContain("inbound support email");
     const preview = harness.threadPosts.find((post) =>
       String((post.message as { markdown?: string }).markdown).includes("Email reply from"),
