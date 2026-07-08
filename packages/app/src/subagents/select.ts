@@ -77,16 +77,31 @@ interface SelectWorkspaceSubagentsParams {
   workspaceId: string;
 }
 
-// Subagents (any agent with a parentAgentId) that belong to this workspace,
-// regardless of which parent they hang off. Scoped by workspaceId the same way
-// workspace-tabs/agent-visibility scopes agents. Used by the workspace-level
-// Subagents explorer tab, which may span several parents.
+// Subagents surfaced by the workspace-level Subagents explorer tab. A subagent
+// is scoped to a workspace by its PARENT RELATIONSHIP, not by its own
+// workspaceId: when a parent (e.g. the office agent) delegates work, the child
+// runs in its OWN fresh worktree, so the child's workspaceId is that worktree,
+// while parentAgentId points back at the parent. The user expects to open the
+// PARENT's workspace and see the children it spawned there.
+//
+// Membership is the union of:
+//   (a) the child's parent agent belongs to this workspace
+//       (parent.workspaceId === workspaceId) — the primary, cross-workspace
+//       case; mirrors how SubagentsTrack groups children under their parent;
+//   (b) the child's own workspaceId === this workspace — a locally-run subagent,
+//       kept so the child's own worktree still lists it and nothing regresses.
+//
+// Multi-level delegation: we only match against the DIRECT parent. A grandchild
+// surfaces in the workspace whose agent is its direct parent (case a) or in its
+// own worktree (case b); we deliberately do not walk the whole delegation chain
+// to attribute deep descendants to a top-level ancestor's workspace.
 export function selectSubagentsForWorkspace(
   state: SessionStoreSnapshot,
   params: SelectWorkspaceSubagentsParams,
   pendingArchiveIds: ReadonlySet<string>,
 ): SubagentRow[] {
-  const agents = state.sessions[params.serverId]?.agents;
+  const session = state.sessions[params.serverId];
+  const agents = session?.agents;
   if (!agents || agents.size === 0) {
     return EMPTY_SUBAGENT_ROWS;
   }
@@ -95,14 +110,20 @@ export function selectSubagentsForWorkspace(
     return EMPTY_SUBAGENT_ROWS;
   }
 
+  const agentDetails = session?.agentDetails;
+  const resolveParentWorkspaceId = (parentAgentId: string): string | null => {
+    const parent = agents.get(parentAgentId) ?? agentDetails?.get(parentAgentId) ?? null;
+    return parent ? normalizeWorkspaceOpaqueId(parent.workspaceId) : null;
+  };
+
   const rows: SubagentRow[] = [];
   for (const agent of agents.values()) {
-    if (
-      agent.archivedAt ||
-      pendingArchiveIds.has(agent.id) ||
-      !agent.parentAgentId ||
-      normalizeWorkspaceOpaqueId(agent.workspaceId) !== workspaceId
-    ) {
+    if (agent.archivedAt || pendingArchiveIds.has(agent.id) || !agent.parentAgentId) {
+      continue;
+    }
+    const parentInWorkspace = resolveParentWorkspaceId(agent.parentAgentId) === workspaceId;
+    const childInWorkspace = normalizeWorkspaceOpaqueId(agent.workspaceId) === workspaceId;
+    if (!parentInWorkspace && !childInWorkspace) {
       continue;
     }
     rows.push(toSubagentRow(agent));
