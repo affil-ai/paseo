@@ -1670,7 +1670,58 @@ function shouldEnableCheckoutDiff(input: { paneEnabled: boolean; isGit: boolean 
   return input.paneEnabled && input.isGit;
 }
 
-export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPaneProps) {
+export interface DiffFilesPaneStatus {
+  isLoading: boolean;
+  errorMessage: string | null;
+  notGit: boolean;
+}
+
+export interface DiffFilesPaneRefresh {
+  isRefreshing: boolean;
+  onRefresh: () => void;
+}
+
+export interface DiffFilesPaneProps {
+  files: ParsedDiffFile[];
+  /** Panel-store key persisting which file sections are expanded across mounts. */
+  stateKey: string | null;
+  isDiffLoading: boolean;
+  diffErrorMessage: string | null;
+  emptyMessage: string;
+  /** Checkout status phase — only the workspace Changes tab has one. */
+  status?: DiffFilesPaneStatus;
+  showToolbar: boolean;
+  /** Leading toolbar slot (the workspace pane's committed/uncommitted dropdown). */
+  toolbarLeading?: ReactNode;
+  /** Only diff sources that can re-request with ignoreWhitespace support this toggle. */
+  showWhitespaceToggle?: boolean;
+  reviewActions?: InlineReviewActions;
+  refresh?: DiffFilesPaneRefresh | null;
+  /** Rendered between the toolbar and the diff body (error banners, truncation notices). */
+  banner?: ReactNode;
+}
+
+/**
+ * The diff presentation shared by the workspace Changes tab and the dashboard
+ * PR review pane: collapsible per-file sections in a virtualized list plus the
+ * unified/split, wrap, and expand-all toolbar. Data fetching, branch/diff-mode
+ * chrome, and review-draft plumbing stay with the caller so a GitHub-sourced
+ * diff renders identically to a checkout-sourced one.
+ */
+export function DiffFilesPane({
+  files,
+  stateKey,
+  isDiffLoading,
+  diffErrorMessage,
+  emptyMessage,
+  status,
+  showToolbar,
+  toolbarLeading,
+  showWhitespaceToggle = false,
+  reviewActions,
+  refresh,
+  banner,
+}: DiffFilesPaneProps) {
   const { settings: appSettings } = useAppSettings();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
@@ -1717,7 +1768,6 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
       ...(monoFontFamily ? { fontFamily: monoFontFamily } : null),
     };
   }, [appSettings.monoFontFamily, codeFontSize, diffBodyLineHeight]);
-  const diffModeTriggerStyle = useMemo(() => buildDiffModeTriggerStyle(), []);
 
   const unifiedToggleStyle = useMemo(
     () =>
@@ -1751,142 +1801,8 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
 
   const refreshToggleStyle = useMemo(() => buildExpandAllButtonStyle(), []);
 
-  const toast = useToast();
-  const refreshSupported = useSessionStore(
-    (s) => s.sessions[serverId]?.serverInfo?.features?.checkoutRefresh === true,
-  );
-  const runRefresh = useCheckoutGitActionsStore((s) => s.refresh);
-  const isRefreshing =
-    useCheckoutGitActionsStore((s) => s.getStatus({ serverId, cwd, actionId: "refresh" })) ===
-    "pending";
-
-  const handleRefresh = useCallback(() => {
-    if (isRefreshing) {
-      return;
-    }
-    void runRefresh({ serverId, cwd }).catch((error) => {
-      toast.error(error instanceof Error ? error.message : t("workspace.git.diff.failedRefresh"));
-    });
-  }, [cwd, isRefreshing, runRefresh, serverId, t, toast]);
-
-  const {
-    status,
-    isLoading: isStatusLoading,
-    isError: isStatusError,
-    error: statusError,
-  } = useCheckoutStatusQuery({ serverId, cwd });
-  const statusState = deriveStatusState({ status, isStatusLoading, isStatusError, statusError });
-  const { isGit, notGit, statusErrorMessage, baseRef, hasUncommittedChanges, currentBranchName } =
-    statusState;
-
-  const reviewDraftScopeKey = useMemo(
-    () =>
-      buildReviewDraftScopeKey({
-        serverId,
-        workspaceId,
-        cwd,
-        baseRef,
-        ignoreWhitespace: changesPreferences.hideWhitespace,
-      }),
-    [baseRef, changesPreferences.hideWhitespace, cwd, serverId, workspaceId],
-  );
-  const diffMode = useResolvedDiffMode({
-    scopeKey: reviewDraftScopeKey,
-    hasUncommittedChanges,
-  });
-  const setDiffModeOverride = useSetDiffModeOverride();
-
-  const {
-    files,
-    payloadError: diffPayloadError,
-    isLoading: isDiffLoading,
-  } = useCheckoutDiffQuery({
-    serverId,
-    cwd,
-    mode: diffMode,
-    baseRef,
-    ignoreWhitespace: changesPreferences.hideWhitespace,
-    enabled: shouldEnableCheckoutDiff({ paneEnabled: enabled !== false, isGit }),
-  });
-  const reviewDraftKey = useMemo(
-    () =>
-      buildReviewDraftKey({
-        serverId,
-        workspaceId,
-        cwd,
-        mode: diffMode,
-        baseRef,
-        ignoreWhitespace: changesPreferences.hideWhitespace,
-      }),
-    [baseRef, changesPreferences.hideWhitespace, cwd, diffMode, serverId, workspaceId],
-  );
-
-  const handleSelectUncommitted = useCallback(() => {
-    setDiffModeOverride({
-      scopeKey: reviewDraftScopeKey,
-      override: { serverId, cwd, mode: "uncommitted", isDirtyAtSelection: hasUncommittedChanges },
-    });
-  }, [cwd, hasUncommittedChanges, reviewDraftScopeKey, serverId, setDiffModeOverride]);
-
-  const handleSelectBase = useCallback(() => {
-    setDiffModeOverride({
-      scopeKey: reviewDraftScopeKey,
-      override: { serverId, cwd, mode: "base", isDirtyAtSelection: hasUncommittedChanges },
-    });
-  }, [cwd, hasUncommittedChanges, reviewDraftScopeKey, serverId, setDiffModeOverride]);
-
-  const reviewActions = useInlineReviewController({
-    reviewDraftKey,
-  });
-  const reviewAttachment = useReviewAttachmentSnapshot({
-    key: reviewDraftKey,
-    diffFiles: files,
-    cwd,
-    mode: diffMode,
-    baseRef,
-  });
-  const workspaceAttachmentScopeKey = useMemo(
-    () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd }),
-    [cwd, serverId, workspaceId],
-  );
-  const setWorkspaceAttachments = useWorkspaceAttachmentsStore(
-    (state) => state.setWorkspaceAttachments,
-  );
-  const clearWorkspaceAttachments = useWorkspaceAttachmentsStore(
-    (state) => state.clearWorkspaceAttachments,
-  );
-
-  useEffect(() => {
-    setWorkspaceAttachments({
-      scopeKey: workspaceAttachmentScopeKey,
-      attachments: reviewAttachment ? [reviewAttachment] : [],
-    });
-
-    return () => {
-      clearWorkspaceAttachments({ scopeKey: workspaceAttachmentScopeKey });
-    };
-  }, [
-    clearWorkspaceAttachments,
-    reviewAttachment,
-    setWorkspaceAttachments,
-    workspaceAttachmentScopeKey,
-  ]);
-  const { githubFeaturesEnabled, payloadError: prPayloadError } = useCheckoutPrStatusQuery({
-    serverId,
-    cwd,
-    enabled: isGit,
-  });
-  const normalizedWorkspaceRoot = useMemo(() => cwd.trim(), [cwd]);
-  const workspaceStateKey = useMemo(
-    () =>
-      buildWorkspaceExplorerStateKey({
-        workspaceId,
-        workspaceRoot: normalizedWorkspaceRoot,
-      }),
-    [normalizedWorkspaceRoot, workspaceId],
-  );
   const expandedPathsArray = usePanelStore((state) =>
-    workspaceStateKey ? state.diffExpandedPathsByWorkspace[workspaceStateKey] : undefined,
+    stateKey ? state.diffExpandedPathsByWorkspace[stateKey] : undefined,
   );
   const setDiffExpandedPathsForWorkspace = usePanelStore(
     (state) => state.setDiffExpandedPathsForWorkspace,
@@ -2034,7 +1950,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
 
   const handleToggleExpanded = useCallback(
     (path: string) => {
-      if (!workspaceStateKey) {
+      if (!stateKey) {
         return;
       }
       const isCurrentlyExpanded = expandedPaths.has(path);
@@ -2062,9 +1978,9 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
       const nextPaths = nextExpanded
         ? [...expandedPaths, path]
         : Array.from(expandedPaths).filter((expandedPath) => expandedPath !== path);
-      setDiffExpandedPathsForWorkspace(workspaceStateKey, nextPaths);
+      setDiffExpandedPathsForWorkspace(stateKey, nextPaths);
     },
-    [computeHeaderOffset, expandedPaths, setDiffExpandedPathsForWorkspace, workspaceStateKey],
+    [computeHeaderOffset, expandedPaths, setDiffExpandedPathsForWorkspace, stateKey],
   );
 
   const allExpanded = useMemo(() => {
@@ -2073,18 +1989,18 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
   }, [expandedPaths, files]);
 
   const handleToggleExpandAll = useCallback(() => {
-    if (!workspaceStateKey) {
+    if (!stateKey) {
       return;
     }
     if (allExpanded) {
-      setDiffExpandedPathsForWorkspace(workspaceStateKey, []);
+      setDiffExpandedPathsForWorkspace(stateKey, []);
     } else {
       setDiffExpandedPathsForWorkspace(
-        workspaceStateKey,
+        stateKey,
         files.map((file) => file.path),
       );
     }
-  }, [allExpanded, files, setDiffExpandedPathsForWorkspace, workspaceStateKey]);
+  }, [allExpanded, files, setDiffExpandedPathsForWorkspace, stateKey]);
 
   const renderFlatItem = useCallback(
     ({ item }: { item: DiffFlatItem }) => {
@@ -2178,6 +2094,235 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
   );
 
   const hasChanges = files.length > 0;
+
+  const bodyContent: ReactElement = (
+    <DiffBodyContent
+      isStatusLoading={status?.isLoading ?? false}
+      statusErrorMessage={status?.errorMessage ?? null}
+      notGit={status?.notGit ?? false}
+      isDiffLoading={isDiffLoading}
+      diffErrorMessage={diffErrorMessage}
+      hasChanges={hasChanges}
+      emptyMessage={emptyMessage}
+      flatItems={flatItems}
+      stickyHeaderIndices={stickyHeaderIndices}
+      renderFlatItem={renderFlatItem}
+      flatKeyExtractor={flatKeyExtractor}
+      getFlatItemLayout={getFlatItemLayout}
+      flatExtraData={flatExtraData}
+      diffListRef={diffListRef}
+      handleDiffListLayout={handleDiffListLayout}
+      handleDiffListScroll={handleDiffListScroll}
+      onContentSizeChange={scrollbar.onContentSizeChange}
+      showDesktopWebScrollbar={showDesktopWebScrollbar}
+      checkingRepositoryLabel={t("workspace.git.diff.checkingRepository")}
+      notRepositoryLabel={t("workspace.git.diff.notRepository")}
+    />
+  );
+
+  return (
+    <View style={styles.container}>
+      {showToolbar ? (
+        <View style={styles.diffStatusContainer}>
+          <View style={styles.diffStatusInner}>
+            {toolbarLeading ?? <View />}
+            <View style={styles.diffStatusButtons}>
+              {canUseSplitLayout ? (
+                <DiffLayoutToggleGroup
+                  layout={changesPreferences.layout}
+                  unifiedToggleStyle={unifiedToggleStyle}
+                  splitToggleStyle={splitToggleStyle}
+                  onUnified={handleLayoutUnified}
+                  onSplit={handleLayoutSplit}
+                />
+              ) : null}
+              {showWhitespaceToggle ? (
+                <DiffWhitespaceToggle
+                  hideWhitespace={changesPreferences.hideWhitespace}
+                  isMobile={isMobile}
+                  toggleStyle={hideWhitespaceToggleStyle}
+                  onToggle={handleToggleHideWhitespace}
+                />
+              ) : null}
+              {files.length > 0 ? (
+                <DiffFilesToolbar
+                  wrapLines={wrapLines}
+                  allExpanded={allExpanded}
+                  isMobile={isMobile}
+                  wrapLinesToggleStyle={wrapLinesToggleStyle}
+                  expandAllToggleStyle={expandAllToggleStyle}
+                  onToggleWrapLines={handleToggleWrapLines}
+                  onToggleExpandAll={handleToggleExpandAll}
+                />
+              ) : null}
+              {refresh ? (
+                <DiffRefreshButton
+                  isRefreshing={refresh.isRefreshing}
+                  toggleStyle={refreshToggleStyle}
+                  onPress={refresh.onRefresh}
+                />
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {banner}
+
+      <View style={styles.diffContainer}>
+        {bodyContent}
+        {hasChanges ? scrollbar.overlay : null}
+      </View>
+    </View>
+  );
+}
+
+export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPaneProps) {
+  const { t } = useTranslation();
+  const isMobile = useIsCompactFormFactor();
+  const { preferences: changesPreferences } = useChangesPreferences();
+  const diffModeTriggerStyle = useMemo(() => buildDiffModeTriggerStyle(), []);
+
+  const toast = useToast();
+  const refreshSupported = useSessionStore(
+    (s) => s.sessions[serverId]?.serverInfo?.features?.checkoutRefresh === true,
+  );
+  const runRefresh = useCheckoutGitActionsStore((s) => s.refresh);
+  const isRefreshing =
+    useCheckoutGitActionsStore((s) => s.getStatus({ serverId, cwd, actionId: "refresh" })) ===
+    "pending";
+
+  const handleRefresh = useCallback(() => {
+    if (isRefreshing) {
+      return;
+    }
+    void runRefresh({ serverId, cwd }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : t("workspace.git.diff.failedRefresh"));
+    });
+  }, [cwd, isRefreshing, runRefresh, serverId, t, toast]);
+
+  const refreshControl = useMemo(
+    () => (refreshSupported ? { isRefreshing, onRefresh: handleRefresh } : null),
+    [handleRefresh, isRefreshing, refreshSupported],
+  );
+
+  const {
+    status,
+    isLoading: isStatusLoading,
+    isError: isStatusError,
+    error: statusError,
+  } = useCheckoutStatusQuery({ serverId, cwd });
+  const statusState = deriveStatusState({ status, isStatusLoading, isStatusError, statusError });
+  const { isGit, notGit, statusErrorMessage, baseRef, hasUncommittedChanges, currentBranchName } =
+    statusState;
+
+  const reviewDraftScopeKey = useMemo(
+    () =>
+      buildReviewDraftScopeKey({
+        serverId,
+        workspaceId,
+        cwd,
+        baseRef,
+        ignoreWhitespace: changesPreferences.hideWhitespace,
+      }),
+    [baseRef, changesPreferences.hideWhitespace, cwd, serverId, workspaceId],
+  );
+  const diffMode = useResolvedDiffMode({
+    scopeKey: reviewDraftScopeKey,
+    hasUncommittedChanges,
+  });
+  const setDiffModeOverride = useSetDiffModeOverride();
+
+  const {
+    files,
+    payloadError: diffPayloadError,
+    isLoading: isDiffLoading,
+  } = useCheckoutDiffQuery({
+    serverId,
+    cwd,
+    mode: diffMode,
+    baseRef,
+    ignoreWhitespace: changesPreferences.hideWhitespace,
+    enabled: shouldEnableCheckoutDiff({ paneEnabled: enabled !== false, isGit }),
+  });
+  const reviewDraftKey = useMemo(
+    () =>
+      buildReviewDraftKey({
+        serverId,
+        workspaceId,
+        cwd,
+        mode: diffMode,
+        baseRef,
+        ignoreWhitespace: changesPreferences.hideWhitespace,
+      }),
+    [baseRef, changesPreferences.hideWhitespace, cwd, diffMode, serverId, workspaceId],
+  );
+
+  const handleSelectUncommitted = useCallback(() => {
+    setDiffModeOverride({
+      scopeKey: reviewDraftScopeKey,
+      override: { serverId, cwd, mode: "uncommitted", isDirtyAtSelection: hasUncommittedChanges },
+    });
+  }, [cwd, hasUncommittedChanges, reviewDraftScopeKey, serverId, setDiffModeOverride]);
+
+  const handleSelectBase = useCallback(() => {
+    setDiffModeOverride({
+      scopeKey: reviewDraftScopeKey,
+      override: { serverId, cwd, mode: "base", isDirtyAtSelection: hasUncommittedChanges },
+    });
+  }, [cwd, hasUncommittedChanges, reviewDraftScopeKey, serverId, setDiffModeOverride]);
+
+  const reviewActions = useInlineReviewController({
+    reviewDraftKey,
+  });
+  const reviewAttachment = useReviewAttachmentSnapshot({
+    key: reviewDraftKey,
+    diffFiles: files,
+    cwd,
+    mode: diffMode,
+    baseRef,
+  });
+  const workspaceAttachmentScopeKey = useMemo(
+    () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd }),
+    [cwd, serverId, workspaceId],
+  );
+  const setWorkspaceAttachments = useWorkspaceAttachmentsStore(
+    (state) => state.setWorkspaceAttachments,
+  );
+  const clearWorkspaceAttachments = useWorkspaceAttachmentsStore(
+    (state) => state.clearWorkspaceAttachments,
+  );
+
+  useEffect(() => {
+    setWorkspaceAttachments({
+      scopeKey: workspaceAttachmentScopeKey,
+      attachments: reviewAttachment ? [reviewAttachment] : [],
+    });
+
+    return () => {
+      clearWorkspaceAttachments({ scopeKey: workspaceAttachmentScopeKey });
+    };
+  }, [
+    clearWorkspaceAttachments,
+    reviewAttachment,
+    setWorkspaceAttachments,
+    workspaceAttachmentScopeKey,
+  ]);
+  const { githubFeaturesEnabled, payloadError: prPayloadError } = useCheckoutPrStatusQuery({
+    serverId,
+    cwd,
+    enabled: isGit,
+  });
+  const normalizedWorkspaceRoot = useMemo(() => cwd.trim(), [cwd]);
+  const workspaceStateKey = useMemo(
+    () =>
+      buildWorkspaceExplorerStateKey({
+        workspaceId,
+        workspaceRoot: normalizedWorkspaceRoot,
+      }),
+    [normalizedWorkspaceRoot, workspaceId],
+  );
+
   const diffErrorMessage = diffPayloadError?.message ?? null;
   const prErrorMessage = computePrErrorMessage(githubFeaturesEnabled, prPayloadError);
   const baseRefLabel = useMemo(
@@ -2224,29 +2369,60 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
     },
   );
 
-  const bodyContent: ReactElement = (
-    <DiffBodyContent
-      isStatusLoading={isStatusLoading}
-      statusErrorMessage={statusErrorMessage}
-      notGit={notGit}
-      isDiffLoading={isDiffLoading}
-      diffErrorMessage={diffErrorMessage}
-      hasChanges={hasChanges}
-      emptyMessage={emptyMessage}
-      flatItems={flatItems}
-      stickyHeaderIndices={stickyHeaderIndices}
-      renderFlatItem={renderFlatItem}
-      flatKeyExtractor={flatKeyExtractor}
-      getFlatItemLayout={getFlatItemLayout}
-      flatExtraData={flatExtraData}
-      diffListRef={diffListRef}
-      handleDiffListLayout={handleDiffListLayout}
-      handleDiffListScroll={handleDiffListScroll}
-      onContentSizeChange={scrollbar.onContentSizeChange}
-      showDesktopWebScrollbar={showDesktopWebScrollbar}
-      checkingRepositoryLabel={t("workspace.git.diff.checkingRepository")}
-      notRepositoryLabel={t("workspace.git.diff.notRepository")}
-    />
+  const diffModeDropdown = useMemo(
+    () => (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          style={diffModeTriggerStyle}
+          testID="changes-diff-status"
+          accessibilityRole="button"
+          accessibilityLabel={t("workspace.git.diff.diffMode")}
+        >
+          <Text style={styles.diffStatusText} numberOfLines={1}>
+            {diffMode === "uncommitted" ? uncommittedLabel : committedLabel}
+          </Text>
+          <ThemedChevronDown size={12} uniProps={foregroundMutedIconColorMapping} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" width={260} testID="changes-diff-status-menu">
+          <DropdownMenuItem
+            testID="changes-diff-mode-uncommitted"
+            selected={diffMode === "uncommitted"}
+            onSelect={handleSelectUncommitted}
+          >
+            {uncommittedLabel}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            testID="changes-diff-mode-committed"
+            selected={diffMode === "base"}
+            description={committedDiffDescription}
+            onSelect={handleSelectBase}
+          >
+            {committedLabel}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ),
+    [
+      committedDiffDescription,
+      committedLabel,
+      diffMode,
+      diffModeTriggerStyle,
+      handleSelectBase,
+      handleSelectUncommitted,
+      t,
+      uncommittedLabel,
+    ],
+  );
+
+  const statusPhase = useMemo(
+    () => ({ isLoading: isStatusLoading, errorMessage: statusErrorMessage, notGit }),
+    [isStatusLoading, notGit, statusErrorMessage],
+  );
+
+  const prErrorBanner = useMemo(
+    () => (prErrorMessage ? <Text style={styles.actionErrorText}>{prErrorMessage}</Text> : null),
+    [prErrorMessage],
   );
 
   return (
@@ -2265,85 +2441,20 @@ export function GitDiffPane({ serverId, workspaceId, cwd, enabled }: GitDiffPane
         </View>
       ) : null}
 
-      {isGit ? (
-        <View style={styles.diffStatusContainer}>
-          <View style={styles.diffStatusInner}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                style={diffModeTriggerStyle}
-                testID="changes-diff-status"
-                accessibilityRole="button"
-                accessibilityLabel={t("workspace.git.diff.diffMode")}
-              >
-                <Text style={styles.diffStatusText} numberOfLines={1}>
-                  {diffMode === "uncommitted" ? uncommittedLabel : committedLabel}
-                </Text>
-                <ThemedChevronDown size={12} uniProps={foregroundMutedIconColorMapping} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" width={260} testID="changes-diff-status-menu">
-                <DropdownMenuItem
-                  testID="changes-diff-mode-uncommitted"
-                  selected={diffMode === "uncommitted"}
-                  onSelect={handleSelectUncommitted}
-                >
-                  {uncommittedLabel}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  testID="changes-diff-mode-committed"
-                  selected={diffMode === "base"}
-                  description={committedDiffDescription}
-                  onSelect={handleSelectBase}
-                >
-                  {committedLabel}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <View style={styles.diffStatusButtons}>
-              {canUseSplitLayout ? (
-                <DiffLayoutToggleGroup
-                  layout={changesPreferences.layout}
-                  unifiedToggleStyle={unifiedToggleStyle}
-                  splitToggleStyle={splitToggleStyle}
-                  onUnified={handleLayoutUnified}
-                  onSplit={handleLayoutSplit}
-                />
-              ) : null}
-              <DiffWhitespaceToggle
-                hideWhitespace={changesPreferences.hideWhitespace}
-                isMobile={isMobile}
-                toggleStyle={hideWhitespaceToggleStyle}
-                onToggle={handleToggleHideWhitespace}
-              />
-              {files.length > 0 ? (
-                <DiffFilesToolbar
-                  wrapLines={wrapLines}
-                  allExpanded={allExpanded}
-                  isMobile={isMobile}
-                  wrapLinesToggleStyle={wrapLinesToggleStyle}
-                  expandAllToggleStyle={expandAllToggleStyle}
-                  onToggleWrapLines={handleToggleWrapLines}
-                  onToggleExpandAll={handleToggleExpandAll}
-                />
-              ) : null}
-              {refreshSupported ? (
-                <DiffRefreshButton
-                  isRefreshing={isRefreshing}
-                  toggleStyle={refreshToggleStyle}
-                  onPress={handleRefresh}
-                />
-              ) : null}
-            </View>
-          </View>
-        </View>
-      ) : null}
-
-      {prErrorMessage ? <Text style={styles.actionErrorText}>{prErrorMessage}</Text> : null}
-
-      <View style={styles.diffContainer}>
-        {bodyContent}
-        {hasChanges ? scrollbar.overlay : null}
-      </View>
+      <DiffFilesPane
+        files={files}
+        stateKey={workspaceStateKey}
+        isDiffLoading={isDiffLoading}
+        diffErrorMessage={diffErrorMessage}
+        emptyMessage={emptyMessage}
+        status={statusPhase}
+        showToolbar={isGit}
+        toolbarLeading={diffModeDropdown}
+        showWhitespaceToggle
+        reviewActions={reviewActions}
+        refresh={refreshControl}
+        banner={prErrorBanner}
+      />
     </View>
   );
 }

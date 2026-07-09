@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   Image,
   Pressable,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
   type PressableStateCallbackType,
 } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
@@ -31,7 +34,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ExplorerSidebarContent } from "@/components/explorer-sidebar";
 import { ProjectIconView } from "@/components/project-icon-view";
-import type { ExplorerTab } from "@/stores/panel-store";
+import {
+  usePanelStore,
+  MIN_EXPLORER_SIDEBAR_WIDTH,
+  MAX_EXPLORER_SIDEBAR_WIDTH,
+  type ExplorerTab,
+} from "@/stores/panel-store";
 import {
   useDashboardPullRequests,
   type DashboardPrBadge,
@@ -79,7 +87,7 @@ type IconByProjectKey = Map<string, string | null>;
 export function DashboardScreen() {
   const { t } = useTranslation();
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
-  const { pullRequests, repos, iconTargets, isLoading, hasError, refetch } =
+  const { pullRequests, repos, iconTargets, isLoading, isFetching, hasError, refetch } =
     useDashboardPullRequests({ repoFilter });
   const iconByProjectKey = useProjectIconDataByProjectKey({ projects: iconTargets });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -87,19 +95,27 @@ export function DashboardScreen() {
 
   const selectedPr = pullRequests.find((pr) => pr.id === selectedId) ?? null;
 
-  // Drop the selection if the PR disappears from the board (e.g. merged/closed).
+  // Drop the selection once the PR is truly gone from the board (merged/closed).
+  // Never drop while loading or refetching — mid-refresh the list can be
+  // transiently empty/partial and closing the review pane then feels like a bug.
   useEffect(() => {
+    if (isLoading || isFetching) {
+      return;
+    }
     if (selectedId && !pullRequests.some((pr) => pr.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [pullRequests, selectedId]);
+  }, [isFetching, isLoading, pullRequests, selectedId]);
 
   // Clear a stale repo filter once its repo no longer has open PRs.
   useEffect(() => {
+    if (isLoading || isFetching) {
+      return;
+    }
     if (repoFilter && !repos.some((repo) => repo.projectKey === repoFilter)) {
       setRepoFilter(null);
     }
-  }, [repoFilter, repos]);
+  }, [isFetching, isLoading, repoFilter, repos]);
 
   const repoFilterControl = useMemo(
     () => <RepoFilter repos={repos} value={repoFilter} onChange={setRepoFilter} />,
@@ -162,12 +178,80 @@ export function DashboardScreen() {
       <View style={styles.body}>
         <View style={styles.mainColumn}>{board}</View>
         {selectedPr ? (
-          <View style={styles.reviewPane}>
+          <ResizableReviewPane>
             <PullRequestReviewPane pr={selectedPr} isCompact={false} onClose={handleCloseReview} />
-          </View>
+          </ResizableReviewPane>
         ) : null}
       </View>
     </View>
+  );
+}
+
+// Minimum width the PR board keeps when the review pane is resized wider.
+const MIN_BOARD_WIDTH = 400;
+
+/**
+ * Desktop review pane wrapper with a draggable left-edge resize handle. Width
+ * is the shared `explorerWidth` (same store as the workspace explorer
+ * sidebar), so resizing here and in a workspace feels like one surface.
+ */
+function ResizableReviewPane({ children }: { children: React.ReactNode }) {
+  const explorerWidth = usePanelStore((state) => state.explorerWidth);
+  const setExplorerWidth = usePanelStore((state) => state.setExplorerWidth);
+  const { width: viewportWidth } = useWindowDimensions();
+  const startWidthRef = useRef(explorerWidth);
+  const resizeWidth = useSharedValue(explorerWidth);
+
+  useEffect(() => {
+    resizeWidth.value = explorerWidth;
+  }, [explorerWidth, resizeWidth]);
+
+  useEffect(() => {
+    const maxWidth = Math.max(
+      MIN_EXPLORER_SIDEBAR_WIDTH,
+      Math.min(MAX_EXPLORER_SIDEBAR_WIDTH, viewportWidth - MIN_BOARD_WIDTH),
+    );
+    if (explorerWidth > maxWidth) {
+      setExplorerWidth(maxWidth);
+    }
+  }, [explorerWidth, setExplorerWidth, viewportWidth]);
+
+  const resizeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(true)
+        .hitSlop({ left: 8, right: 8, top: 0, bottom: 0 })
+        .onStart(() => {
+          startWidthRef.current = explorerWidth;
+          resizeWidth.value = explorerWidth;
+        })
+        .onUpdate((event) => {
+          const newWidth = startWidthRef.current - event.translationX;
+          const maxWidth = Math.max(
+            MIN_EXPLORER_SIDEBAR_WIDTH,
+            Math.min(MAX_EXPLORER_SIDEBAR_WIDTH, viewportWidth - MIN_BOARD_WIDTH),
+          );
+          const clampedWidth = Math.max(MIN_EXPLORER_SIDEBAR_WIDTH, Math.min(maxWidth, newWidth));
+          resizeWidth.value = clampedWidth;
+        })
+        .onEnd(() => {
+          runOnJS(setExplorerWidth)(resizeWidth.value);
+        }),
+    [explorerWidth, resizeWidth, setExplorerWidth, viewportWidth],
+  );
+
+  const resizeAnimatedStyle = useAnimatedStyle(() => ({
+    width: resizeWidth.value,
+  }));
+  const paneStyle = useMemo(() => [styles.reviewPane, resizeAnimatedStyle], [resizeAnimatedStyle]);
+
+  return (
+    <Animated.View style={paneStyle}>
+      <GestureDetector gesture={resizeGesture}>
+        <View style={reviewResizeHandleStyle} />
+      </GestureDetector>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -783,9 +867,17 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.normal,
   },
   reviewPane: {
-    width: 480,
+    position: "relative",
     borderLeftWidth: 1,
     borderLeftColor: theme.colors.border,
+  },
+  reviewResizeHandle: {
+    position: "absolute",
+    left: -5,
+    top: 0,
+    bottom: 0,
+    width: 10,
+    zIndex: 10,
   },
   boardRow: {
     flex: 1,
@@ -1051,3 +1143,8 @@ function previewLinkStyle({ hovered }: PressableStateCallbackType & { hovered?: 
 function iconButtonStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
   return [styles.iconButton, hovered && styles.iconButtonHovered];
 }
+
+const reviewResizeHandleStyle = [
+  styles.reviewResizeHandle,
+  isWeb && ({ cursor: "col-resize" } as object),
+];

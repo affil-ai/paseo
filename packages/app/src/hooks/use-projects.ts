@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getHostRuntimeStore, useHosts } from "@/runtime/host-runtime";
 import type { ProjectSummary } from "@/utils/projects";
 import {
@@ -49,6 +49,10 @@ export function useProjects(): UseProjectsResult {
     queryKey: [...projectsQueryKey, projectsQueryRuntimeKey(hostInputs), runtimeVersion] as const,
     queryFn: () => fetchAggregatedProjects({ hosts: hostInputs, runtime }),
     staleTime: 5_000,
+    // The key embeds runtimeVersion, which bumps on every host-runtime event.
+    // Without keepPreviousData each bump would blank `projects` until the
+    // refetch lands, collapsing downstream UI (e.g. the dashboard PR board).
+    placeholderData: keepPreviousData,
   });
 
   return {
