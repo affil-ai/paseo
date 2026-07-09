@@ -10,6 +10,7 @@ import {
   computeSidebarOrderUpdates,
   createSidebarWorkspaceEntry,
   deriveSidebarLoadingState,
+  prioritizeOfficeProjects,
   shouldShowSidebarHostLabels,
   type SidebarProjectEntry,
 } from "./sidebar-workspaces-view-model";
@@ -152,6 +153,51 @@ describe("applyStoredOrdering", () => {
     });
 
     expect(result).toBe(baseline);
+  });
+});
+
+describe("prioritizeOfficeProjects", () => {
+  it("pins configured Office projects first while preserving relative order", () => {
+    const projects = [
+      sidebarProject({ projectKey: "project-a", workspaceKeys: ["ws-a"] }),
+      sidebarProject({ projectKey: "office-b", workspaceKeys: ["ws-b"] }),
+      sidebarProject({ projectKey: "project-c", workspaceKeys: ["ws-c"] }),
+      sidebarProject({ projectKey: "office-d", workspaceKeys: ["ws-d"] }),
+    ];
+
+    const result = prioritizeOfficeProjects({
+      projects,
+      officeProjectKeys: new Set(["office-b", "office-d"]),
+    });
+
+    expect(result.map((entry) => entry.projectKey)).toEqual([
+      "office-b",
+      "office-d",
+      "project-a",
+      "project-c",
+    ]);
+  });
+
+  it("pins the canonical affil-ai/office project when daemon config is unavailable", () => {
+    const projects = [
+      sidebarProject({ projectKey: "remote:github.com/affil-ai/affil", workspaceKeys: ["ws-a"] }),
+      sidebarProject({
+        projectKey: "remote:github.com/affil-ai/office",
+        workspaceKeys: ["ws-office"],
+      }),
+      sidebarProject({ projectKey: "remote:github.com/affil-ai/paseo", workspaceKeys: ["ws-p"] }),
+    ];
+
+    const result = prioritizeOfficeProjects({
+      projects,
+      officeProjectKeys: new Set(),
+    });
+
+    expect(result.map((entry) => entry.projectKey)).toEqual([
+      "remote:github.com/affil-ai/office",
+      "remote:github.com/affil-ai/affil",
+      "remote:github.com/affil-ai/paseo",
+    ]);
   });
 });
 

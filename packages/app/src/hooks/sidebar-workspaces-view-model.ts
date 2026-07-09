@@ -13,6 +13,7 @@ import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 
 const EMPTY_PROJECTS: SidebarProjectEntry[] = [];
+const AFFIL_OFFICE_PROJECT_NAME = "affil-ai/office";
 
 export type SidebarStateBucket = WorkspaceDescriptor["status"];
 
@@ -425,6 +426,41 @@ export function buildSidebarProjectsFromHostProjects(input: {
       }),
     ),
   }));
+}
+
+export function prioritizeOfficeProjects<T extends { projectKey: string }>(input: {
+  projects: readonly T[];
+  officeProjectKeys: ReadonlySet<string>;
+}): readonly T[] {
+  if (input.projects.length <= 1) {
+    return input.projects;
+  }
+
+  const configuredOfficeProjectNames = new Set(
+    Array.from(input.officeProjectKeys, (projectKey) =>
+      projectDisplayNameFromProjectId(projectKey).toLowerCase(),
+    ),
+  );
+
+  const officeProjects: T[] = [];
+  const otherProjects: T[] = [];
+  for (const project of input.projects) {
+    const projectName = projectDisplayNameFromProjectId(project.projectKey).toLowerCase();
+    if (
+      input.officeProjectKeys.has(project.projectKey) ||
+      configuredOfficeProjectNames.has(projectName) ||
+      projectName === AFFIL_OFFICE_PROJECT_NAME
+    ) {
+      officeProjects.push(project);
+    } else {
+      otherProjects.push(project);
+    }
+  }
+
+  if (officeProjects.length === 0 || otherProjects.length === 0) {
+    return input.projects;
+  }
+  return [...officeProjects, ...otherProjects];
 }
 
 // Host labels disambiguate which machine a workspace lives on; they only earn their

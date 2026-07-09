@@ -31,6 +31,8 @@ import { isEmphasizedStatusDotBucket } from "@/utils/status-dot-color";
 import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
+import { useSubagentPrTabsForWorkspace } from "@/subagents";
+import { collectWorkspaceRowPrHints } from "./sidebar-workspace-pr-hints";
 
 const DEFAULT_STATUS_DOT_SIZE = 7;
 const EMPHASIZED_STATUS_DOT_SIZE = 9;
@@ -117,6 +119,18 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
     settings: { workspaceTitleSource },
   } = useAppSettings();
   const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({ workspace, workspaceTitleSource });
+  const subagentPrs = useSubagentPrTabsForWorkspace({
+    serverId: workspace.serverId,
+    workspaceId: workspace.workspaceId,
+  });
+  const rowPrHints = useMemo(
+    () =>
+      collectWorkspaceRowPrHints({
+        workspacePrHint: workspace.prHint,
+        subagentPrs,
+      }),
+    [subagentPrs, workspace.prHint],
+  );
   const workspaceBranchTextStyle = useMemo(
     () => [
       styles.workspaceBranchText,
@@ -151,10 +165,14 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
               {subtitle}
             </Text>
           ) : null}
-          {workspace.prHint ? (
+          {rowPrHints.length > 0 ? (
             <View style={styles.workspacePrBadgeRow}>
-              <PrBadge hint={workspace.prHint} />
-              <ChecksBadge checks={workspace.prHint.checks} />
+              {rowPrHints.map((hint) => (
+                <View key={hint.url} style={styles.workspacePrBadgeGroup}>
+                  <PrBadge hint={hint} />
+                  <ChecksBadge checks={hint.checks} />
+                </View>
+              ))}
             </View>
           ) : null}
         </View>
@@ -591,9 +609,15 @@ const styles = StyleSheet.create((theme) => ({
   },
   workspacePrBadgeRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: theme.spacing[2],
     marginTop: theme.spacing[1],
+  },
+  workspacePrBadgeGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
   statusDotNeedsInput: {
     backgroundColor: theme.colors.palette.amber[500],

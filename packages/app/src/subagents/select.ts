@@ -7,6 +7,7 @@ import {
   resolveWorkspaceMapKeyByIdentity,
 } from "@/utils/workspace-identity";
 import { prIdentityKey, type SubagentPrTabInput } from "@/git/explorer-pr-tabs";
+import { selectPrHintFromStatus } from "@/git/pr-hint";
 
 export interface SubagentRow {
   id: Agent["id"];
@@ -184,8 +185,8 @@ export function selectSubagentPrTabsForWorkspace(
     if (!pullRequest) {
       continue;
     }
-    const prNumber = resolvePrNumber(pullRequest);
-    if (prNumber === null) {
+    const prHint = selectPrHintFromStatus(pullRequest);
+    if (!prHint) {
       continue;
     }
     tabs.push({
@@ -193,11 +194,12 @@ export function selectSubagentPrTabsForWorkspace(
       subagentTitle: agent.title,
       provider: agent.provider,
       cwd: agent.cwd,
-      prNumber,
+      prNumber: prHint.number,
       repoOwner:
         pullRequest.repoOwner && pullRequest.repoOwner.length > 0 ? pullRequest.repoOwner : null,
       repoName:
         pullRequest.repoName && pullRequest.repoName.length > 0 ? pullRequest.repoName : null,
+      prHint,
     });
   }
 

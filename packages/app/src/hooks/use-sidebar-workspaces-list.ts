@@ -11,11 +11,13 @@ import { getHostRuntimeStore, useHostRegistryLoaded, useHosts } from "@/runtime/
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { shouldSuppressWorkspaceForLocalArchive } from "@/contexts/session-workspace-upserts";
+import { useDaemonConfigs } from "@/hooks/use-daemon-config";
 import {
   buildSidebarWorkspacePlacementModel,
   computeSidebarOrderUpdates,
   createSidebarWorkspaceEntry,
   deriveSidebarLoadingState,
+  prioritizeOfficeProjects,
   type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
   type SidebarWorkspacePlacement,
@@ -31,6 +33,7 @@ export {
   computeSidebarOrderUpdates,
   createSidebarWorkspaceEntry,
   deriveSidebarLoadingState,
+  prioritizeOfficeProjects,
   shouldShowSidebarHostLabels,
   type SidebarLoadingState,
   type SidebarOrderUpdates,
@@ -132,13 +135,27 @@ export function useSidebarWorkspacesList(options?: {
   );
 
   const hostProjects = useHostProjects(serverIds);
+  const daemonConfigs = useDaemonConfigs(serverIds);
+  const officeProjectKeys = useMemo(() => {
+    const projectKeys = new Set<string>();
+    for (const config of daemonConfigs.values()) {
+      const projectKey = config.chat.repository.projectId?.trim();
+      if (projectKey) {
+        projectKeys.add(projectKey);
+      }
+    }
+    return projectKeys;
+  }, [daemonConfigs]);
 
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
-        projects: hostProjects,
+        projects: prioritizeOfficeProjects({
+          projects: hostProjects,
+          officeProjectKeys,
+        }),
       }),
-    [hostProjects],
+    [hostProjects, officeProjectKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;

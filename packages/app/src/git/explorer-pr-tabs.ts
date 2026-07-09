@@ -1,4 +1,5 @@
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
+import type { PrHint } from "@/git/pr-hint";
 
 // Cap on how many SUBAGENT PR tabs render inline in the explorer header. The
 // workspace's own PR tab is always shown in addition to these and does not
@@ -28,6 +29,7 @@ export interface SubagentPrTabInput extends PrIdentity {
   subagentTitle: string | null;
   provider: AgentProvider;
   cwd: string;
+  prHint?: PrHint;
 }
 
 export interface SubagentPrTab extends SubagentPrTabInput {

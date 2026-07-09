@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Check, MessageSquare } from "lucide-react-native";
@@ -10,6 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Combobox } from "@/components/ui/combobox";
+import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { Button } from "@/components/ui/button";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
@@ -351,6 +353,62 @@ function SelectSettingRow({
   );
 }
 
+function SearchableSelectSettingRow({
+  label,
+  hint,
+  value,
+  options,
+  onSelect,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  options: ChatDefaultOption[];
+  onSelect: (value: string) => void;
+}) {
+  const anchorRef = useRef<View>(null);
+  const [open, setOpen] = useState(false);
+  const selectedLabel = options.find((option) => option.id === value)?.label ?? value;
+  const handleOpen = useCallback(() => setOpen(true), []);
+
+  return (
+    <View style={ROW_WITH_BORDER_STYLE}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{label}</Text>
+        <Text style={settingsStyles.rowHint}>{hint}</Text>
+      </View>
+      <View>
+        <ComboboxTrigger
+          ref={anchorRef}
+          onPress={handleOpen}
+          style={triggerStyle}
+          accessibilityRole="button"
+          accessibilityLabel={`Select ${label.toLowerCase()}`}
+          testID="office-default-model-trigger"
+        >
+          <Text style={styles.triggerText} numberOfLines={1}>
+            {selectedLabel}
+          </Text>
+        </ComboboxTrigger>
+        <Combobox
+          options={options}
+          value={value}
+          onSelect={onSelect}
+          searchable
+          searchPlaceholder="Search models"
+          emptyText="No models match your search."
+          title={label}
+          open={open}
+          onOpenChange={setOpen}
+          anchorRef={anchorRef}
+          desktopPlacement="bottom-start"
+          desktopMinWidth={320}
+        />
+      </View>
+    </View>
+  );
+}
+
 function SelectSettingMenuItem({
   option,
   selected,
@@ -626,7 +684,7 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
         <View style={settingsStyles.card}>
           <ChatRepositoryRow serverId={serverId} config={config} patchConfig={patchConfig} />
           <ProviderRow draft={draft} setDraft={setDraft} providers={providers} />
-          <SelectSettingRow
+          <SearchableSelectSettingRow
             label="Default model"
             hint="Model used for new office chats."
             value={draft.model}

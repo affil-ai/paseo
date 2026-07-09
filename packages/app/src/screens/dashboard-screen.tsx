@@ -58,11 +58,12 @@ import { SlackIcon } from "@/components/icons/slack-icon";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 
-const COLUMNS: Array<{ id: DashboardPrColumn; label: string }> = [
-  { id: "draft", label: "Draft" },
-  { id: "review", label: "Ready for review" },
-  { id: "blocked", label: "Blocked" },
-];
+// Status dot accessibility labels, keyed by the PR's derived column.
+const STATUS_LABELS: Record<DashboardPrColumn, string> = {
+  review: "Ready for review",
+  blocked: "Blocked",
+  draft: "Draft",
+};
 
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
@@ -79,8 +80,6 @@ const blueIconUniProps = (theme: Theme) => ({ color: theme.colors.palette.blue[5
 const DEVIN_AVATAR_SOURCE = {
   uri: "https://avatars.githubusercontent.com/in/811515?s=80&v=4",
 } as const;
-
-const EMPTY_COLUMN_ITEMS: DashboardPullRequest[] = [];
 
 type IconByProjectKey = Map<string, string | null>;
 
@@ -145,7 +144,6 @@ export function DashboardScreen() {
       pullRequests={pullRequests}
       iconByProjectKey={iconByProjectKey}
       selectedId={selectedId}
-      isCompact={isCompact}
       hasError={hasError}
       onSelect={handleSelect}
       onRefresh={refetch}
@@ -331,7 +329,6 @@ function PullRequestBoard({
   pullRequests,
   iconByProjectKey,
   selectedId,
-  isCompact,
   hasError,
   onSelect,
   onRefresh,
@@ -339,22 +336,10 @@ function PullRequestBoard({
   pullRequests: DashboardPullRequest[];
   iconByProjectKey: IconByProjectKey;
   selectedId: string | null;
-  isCompact: boolean;
   hasError: boolean;
   onSelect: (pr: DashboardPullRequest) => void;
   onRefresh: () => void;
 }) {
-  const itemsByColumn = useMemo(() => {
-    const byColumn = new Map<DashboardPrColumn, DashboardPullRequest[]>();
-    for (const column of COLUMNS) {
-      byColumn.set(column.id, []);
-    }
-    for (const pr of pullRequests) {
-      byColumn.get(pr.column)?.push(pr);
-    }
-    return byColumn;
-  }, [pullRequests]);
-
   if (pullRequests.length === 0) {
     return (
       <View style={styles.emptyState}>
@@ -372,99 +357,20 @@ function PullRequestBoard({
     );
   }
 
-  // Compact stacks the columns in one vertical scroller; desktop gives each
-  // column its own vertical scroller so long lanes never clip.
-  if (isCompact) {
-    return (
-      <ScrollView contentContainerStyle={styles.compactBoardScroll}>
-        {COLUMNS.map((column) => {
-          const columnItems = itemsByColumn.get(column.id) ?? EMPTY_COLUMN_ITEMS;
-          return (
-            <View key={column.id} style={styles.compactColumn}>
-              <ColumnHeader column={column.id} label={column.label} count={columnItems.length} />
-              <ColumnCards
-                items={columnItems}
-                iconByProjectKey={iconByProjectKey}
-                selectedId={selectedId}
-                onSelect={onSelect}
-              />
-            </View>
-          );
-        })}
-      </ScrollView>
-    );
-  }
-
   return (
-    <View style={styles.boardRow}>
-      {COLUMNS.map((column) => {
-        const columnItems = itemsByColumn.get(column.id) ?? EMPTY_COLUMN_ITEMS;
-        return (
-          <View key={column.id} style={styles.column}>
-            <ColumnHeader column={column.id} label={column.label} count={columnItems.length} />
-            <ScrollView
-              style={styles.columnScroll}
-              contentContainerStyle={styles.columnScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              <ColumnCards
-                items={columnItems}
-                iconByProjectKey={iconByProjectKey}
-                selectedId={selectedId}
-                onSelect={onSelect}
-              />
-            </ScrollView>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function ColumnHeader({
-  column,
-  label,
-  count,
-}: {
-  column: DashboardPrColumn;
-  label: string;
-  count: number;
-}) {
-  return (
-    <View style={styles.columnHeader}>
-      <View style={columnDotStyle(column)} />
-      <Text style={styles.columnTitle}>{label}</Text>
-      <Text style={styles.columnCount}>{count}</Text>
-    </View>
-  );
-}
-
-function ColumnCards({
-  items,
-  iconByProjectKey,
-  selectedId,
-  onSelect,
-}: {
-  items: DashboardPullRequest[];
-  iconByProjectKey: IconByProjectKey;
-  selectedId: string | null;
-  onSelect: (pr: DashboardPullRequest) => void;
-}) {
-  if (items.length === 0) {
-    return <Text style={styles.columnEmpty}>No pull requests</Text>;
-  }
-  return (
-    <View style={styles.columnCards}>
-      {items.map((pr) => (
-        <PullRequestCard
-          key={pr.id}
-          pr={pr}
-          iconDataUri={iconByProjectKey.get(pr.projectKey) ?? null}
-          isSelected={pr.id === selectedId}
-          onSelect={onSelect}
-        />
-      ))}
-    </View>
+    <ScrollView contentContainerStyle={styles.listScroll}>
+      <View style={styles.listContent}>
+        {pullRequests.map((pr) => (
+          <PullRequestCard
+            key={pr.id}
+            pr={pr}
+            iconDataUri={iconByProjectKey.get(pr.projectKey) ?? null}
+            isSelected={pr.id === selectedId}
+            onSelect={onSelect}
+          />
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -542,6 +448,11 @@ function PullRequestCard({
         {pr.title}
       </Text>
       <View style={styles.cardMetaRow}>
+        <View
+          style={columnDotStyle(pr.column)}
+          accessibilityRole="image"
+          accessibilityLabel={STATUS_LABELS[pr.column]}
+        />
         <PullRequestNumberLink number={pr.number} url={pr.url} />
         <Text style={styles.cardMeta} numberOfLines={1}>
           {pr.headRefName} → {pr.baseRefName}
@@ -861,39 +772,15 @@ const styles = StyleSheet.create((theme) => ({
     width: 10,
     zIndex: 10,
   },
-  boardRow: {
-    flex: 1,
-    flexDirection: "row",
-    minHeight: 0,
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingTop: theme.spacing[3],
-  },
-  compactBoardScroll: {
-    gap: theme.spacing[4],
+  listScroll: {
     padding: theme.spacing[3],
+    paddingBottom: theme.spacing[8],
   },
-  column: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-  },
-  compactColumn: {
+  listContent: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
     gap: theme.spacing[2],
-  },
-  columnScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  columnScrollContent: {
-    paddingBottom: theme.spacing[6],
-  },
-  columnHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[1],
-    paddingBottom: theme.spacing[2],
   },
   columnDotDraft: {
     width: 6,
@@ -912,24 +799,6 @@ const styles = StyleSheet.create((theme) => ({
     height: 6,
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.statusDanger,
-  },
-  columnTitle: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-  },
-  columnCount: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-  },
-  columnEmpty: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-    paddingHorizontal: theme.spacing[1],
-    paddingVertical: theme.spacing[2],
-  },
-  columnCards: {
-    gap: theme.spacing[2],
   },
   card: {
     borderRadius: theme.borderRadius.lg,

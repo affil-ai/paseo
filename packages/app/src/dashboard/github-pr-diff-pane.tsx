@@ -110,6 +110,7 @@ export function GithubPrDiffPane({
         diffErrorMessage={errorMessage}
         emptyMessage={t("diffViewer.empty")}
         showToolbar
+        showFileTree
         refresh={refresh}
         banner={truncatedBanner}
       />

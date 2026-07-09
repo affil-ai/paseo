@@ -79,6 +79,7 @@ import { GitHubIcon } from "@/components/icons/github-icon";
 import { lineNumberGutterWidth } from "@/components/code-insets";
 import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
 import { GitActionsSplitButton } from "@/git/actions-split-button";
+import { DiffFileTree } from "@/git/diff-file-tree";
 import { BranchSwitcher } from "@/components/branch-switcher";
 import { useGitActions } from "@/git/use-actions";
 import { useCheckoutGitActionsStore } from "@/git/actions-store";
@@ -1699,6 +1700,8 @@ export interface DiffFilesPaneProps {
   refresh?: DiffFilesPaneRefresh | null;
   /** Rendered between the toolbar and the diff body (error banners, truncation notices). */
   banner?: ReactNode;
+  /** Show a file tree beside the diff (desktop web only; ignored on compact). */
+  showFileTree?: boolean;
 }
 
 /**
@@ -1721,6 +1724,7 @@ export function DiffFilesPane({
   reviewActions,
   refresh,
   banner,
+  showFileTree = false,
 }: DiffFilesPaneProps) {
   const { settings: appSettings } = useAppSettings();
   const { t } = useTranslation();
@@ -1988,6 +1992,24 @@ export function DiffFilesPane({
     return files.every((file) => expandedPaths.has(file.path));
   }, [expandedPaths, files]);
 
+  // File-tree selection: expand the file (if collapsed) and jump the diff list
+  // to its header. Expanding the target doesn't shift offsets of files above
+  // it, so the pre-expansion offset stays correct.
+  const [activeTreePath, setActiveTreePath] = useState<string | null>(null);
+  const handleSelectTreeFile = useCallback(
+    (path: string) => {
+      setActiveTreePath(path);
+      if (stateKey && !expandedPaths.has(path)) {
+        setDiffExpandedPathsForWorkspace(stateKey, [...expandedPaths, path]);
+      }
+      diffListRef.current?.scrollToOffset({
+        offset: computeHeaderOffset(path),
+        animated: false,
+      });
+    },
+    [computeHeaderOffset, expandedPaths, setDiffExpandedPathsForWorkspace, stateKey],
+  );
+
   const handleToggleExpandAll = useCallback(() => {
     if (!stateKey) {
       return;
@@ -2094,6 +2116,8 @@ export function DiffFilesPane({
   );
 
   const hasChanges = files.length > 0;
+  // The tree needs horizontal room; only show it on desktop web with changes.
+  const showTree = showFileTree && hasChanges && isWeb && !isMobile;
 
   const bodyContent: ReactElement = (
     <DiffBodyContent
@@ -2123,55 +2147,140 @@ export function DiffFilesPane({
   return (
     <View style={styles.container}>
       {showToolbar ? (
-        <View style={styles.diffStatusContainer}>
-          <View style={styles.diffStatusInner}>
-            {toolbarLeading ?? <View />}
-            <View style={styles.diffStatusButtons}>
-              {canUseSplitLayout ? (
-                <DiffLayoutToggleGroup
-                  layout={changesPreferences.layout}
-                  unifiedToggleStyle={unifiedToggleStyle}
-                  splitToggleStyle={splitToggleStyle}
-                  onUnified={handleLayoutUnified}
-                  onSplit={handleLayoutSplit}
-                />
-              ) : null}
-              {showWhitespaceToggle ? (
-                <DiffWhitespaceToggle
-                  hideWhitespace={changesPreferences.hideWhitespace}
-                  isMobile={isMobile}
-                  toggleStyle={hideWhitespaceToggleStyle}
-                  onToggle={handleToggleHideWhitespace}
-                />
-              ) : null}
-              {files.length > 0 ? (
-                <DiffFilesToolbar
-                  wrapLines={wrapLines}
-                  allExpanded={allExpanded}
-                  isMobile={isMobile}
-                  wrapLinesToggleStyle={wrapLinesToggleStyle}
-                  expandAllToggleStyle={expandAllToggleStyle}
-                  onToggleWrapLines={handleToggleWrapLines}
-                  onToggleExpandAll={handleToggleExpandAll}
-                />
-              ) : null}
-              {refresh ? (
-                <DiffRefreshButton
-                  isRefreshing={refresh.isRefreshing}
-                  toggleStyle={refreshToggleStyle}
-                  onPress={refresh.onRefresh}
-                />
-              ) : null}
-            </View>
-          </View>
-        </View>
+        <DiffPaneToolbar
+          toolbarLeading={toolbarLeading}
+          canUseSplitLayout={canUseSplitLayout}
+          layout={changesPreferences.layout}
+          unifiedToggleStyle={unifiedToggleStyle}
+          splitToggleStyle={splitToggleStyle}
+          onLayoutUnified={handleLayoutUnified}
+          onLayoutSplit={handleLayoutSplit}
+          showWhitespaceToggle={showWhitespaceToggle}
+          hideWhitespace={changesPreferences.hideWhitespace}
+          hideWhitespaceToggleStyle={hideWhitespaceToggleStyle}
+          onToggleHideWhitespace={handleToggleHideWhitespace}
+          hasFiles={files.length > 0}
+          wrapLines={wrapLines}
+          allExpanded={allExpanded}
+          isMobile={isMobile}
+          wrapLinesToggleStyle={wrapLinesToggleStyle}
+          expandAllToggleStyle={expandAllToggleStyle}
+          onToggleWrapLines={handleToggleWrapLines}
+          onToggleExpandAll={handleToggleExpandAll}
+          refresh={refresh}
+          refreshToggleStyle={refreshToggleStyle}
+        />
       ) : null}
 
       {banner}
 
-      <View style={styles.diffContainer}>
-        {bodyContent}
-        {hasChanges ? scrollbar.overlay : null}
+      <View style={showTree ? styles.diffBodyRow : styles.diffBodyColumn}>
+        {showTree ? (
+          <View style={styles.fileTreeColumn}>
+            <DiffFileTree
+              files={files}
+              activePath={activeTreePath}
+              onSelectFile={handleSelectTreeFile}
+            />
+          </View>
+        ) : null}
+        <View style={styles.diffContainer}>
+          {bodyContent}
+          {hasChanges ? scrollbar.overlay : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+interface DiffPaneToolbarProps {
+  toolbarLeading?: ReactNode;
+  canUseSplitLayout: boolean;
+  layout: "unified" | "split";
+  unifiedToggleStyle: PressableStyleFn;
+  splitToggleStyle: PressableStyleFn;
+  onLayoutUnified: () => void;
+  onLayoutSplit: () => void;
+  showWhitespaceToggle: boolean;
+  hideWhitespace: boolean;
+  hideWhitespaceToggleStyle: PressableStyleFn;
+  onToggleHideWhitespace: () => void;
+  hasFiles: boolean;
+  wrapLines: boolean;
+  allExpanded: boolean;
+  isMobile: boolean;
+  wrapLinesToggleStyle: PressableStyleFn;
+  expandAllToggleStyle: PressableStyleFn;
+  onToggleWrapLines: () => void;
+  onToggleExpandAll: () => void;
+  refresh?: DiffFilesPaneRefresh | null;
+  refreshToggleStyle: PressableStyleFn;
+}
+
+function DiffPaneToolbar({
+  toolbarLeading,
+  canUseSplitLayout,
+  layout,
+  unifiedToggleStyle,
+  splitToggleStyle,
+  onLayoutUnified,
+  onLayoutSplit,
+  showWhitespaceToggle,
+  hideWhitespace,
+  hideWhitespaceToggleStyle,
+  onToggleHideWhitespace,
+  hasFiles,
+  wrapLines,
+  allExpanded,
+  isMobile,
+  wrapLinesToggleStyle,
+  expandAllToggleStyle,
+  onToggleWrapLines,
+  onToggleExpandAll,
+  refresh,
+  refreshToggleStyle,
+}: DiffPaneToolbarProps) {
+  return (
+    <View style={styles.diffStatusContainer}>
+      <View style={styles.diffStatusInner}>
+        {toolbarLeading ?? <View />}
+        <View style={styles.diffStatusButtons}>
+          {canUseSplitLayout ? (
+            <DiffLayoutToggleGroup
+              layout={layout}
+              unifiedToggleStyle={unifiedToggleStyle}
+              splitToggleStyle={splitToggleStyle}
+              onUnified={onLayoutUnified}
+              onSplit={onLayoutSplit}
+            />
+          ) : null}
+          {showWhitespaceToggle ? (
+            <DiffWhitespaceToggle
+              hideWhitespace={hideWhitespace}
+              isMobile={isMobile}
+              toggleStyle={hideWhitespaceToggleStyle}
+              onToggle={onToggleHideWhitespace}
+            />
+          ) : null}
+          {hasFiles ? (
+            <DiffFilesToolbar
+              wrapLines={wrapLines}
+              allExpanded={allExpanded}
+              isMobile={isMobile}
+              wrapLinesToggleStyle={wrapLinesToggleStyle}
+              expandAllToggleStyle={expandAllToggleStyle}
+              onToggleWrapLines={onToggleWrapLines}
+              onToggleExpandAll={onToggleExpandAll}
+            />
+          ) : null}
+          {refresh ? (
+            <DiffRefreshButton
+              isRefreshing={refresh.isRefreshing}
+              toggleStyle={refreshToggleStyle}
+              onPress={refresh.onRefresh}
+            />
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -2594,8 +2703,25 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.destructive,
   },
+  diffBodyColumn: {
+    flex: 1,
+    minHeight: 0,
+  },
+  diffBodyRow: {
+    flex: 1,
+    minHeight: 0,
+    flexDirection: "row",
+  },
+  fileTreeColumn: {
+    width: 240,
+    flexShrink: 0,
+    minHeight: 0,
+    borderRightWidth: 1,
+    borderRightColor: theme.colors.border,
+  },
   diffContainer: {
     flex: 1,
+    minWidth: 0,
     minHeight: 0,
     position: "relative",
   },

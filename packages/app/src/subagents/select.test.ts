@@ -559,6 +559,11 @@ describe("selectSubagentPrTabsForWorkspace", () => {
     expect(tabs.map((tab) => tab.prNumber)).toEqual([1942, 1947]);
     expect(tabs.map((tab) => tab.cwd)).toEqual(["/repo/wt-a", "/repo/wt-b"]);
     expect(tabs[0]).toMatchObject({ subagentId: "child-a", repoOwner: "acme", repoName: "app" });
+    expect(tabs[0]?.prHint).toMatchObject({
+      number: 1942,
+      url: "https://github.com/acme/app/pull/1942",
+      state: "open",
+    });
   });
 
   it("omits subagents without a PR", () => {

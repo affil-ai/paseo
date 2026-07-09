@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import {
+  getHostRuntimeStore,
+  useHostRuntimeClient,
+  useHostRuntimeConnectionStatuses,
+  useHostRuntimeIsConnected,
+} from "@/runtime/host-runtime";
 
 export function daemonConfigQueryKey(serverId: string | null) {
   return ["daemon-config", serverId] as const;
@@ -67,4 +72,62 @@ export function useDaemonConfig(serverId: string | null): UseDaemonConfigResult 
     isLoading: configQuery.isLoading,
     patchConfig,
   };
+}
+
+export function useDaemonConfigs(
+  serverIds: readonly string[],
+): ReadonlyMap<string, MutableDaemonConfig> {
+  const queryClient = useQueryClient();
+  const runtime = getHostRuntimeStore();
+  const connectionStatuses = useHostRuntimeConnectionStatuses(serverIds);
+  const configQueries = useQueries({
+    queries: serverIds.map((serverId) => {
+      const client = runtime.getSnapshot(serverId)?.client ?? null;
+      return {
+        queryKey: daemonConfigQueryKey(serverId),
+        enabled: Boolean(client && connectionStatuses.get(serverId) === "online"),
+        staleTime: Infinity,
+        queryFn: async () => {
+          if (!client) {
+            throw new Error("Host disconnected");
+          }
+          const result = await client.getDaemonConfig();
+          return result.config;
+        },
+      };
+    }),
+  });
+
+  useEffect(() => {
+    const unsubscribes = serverIds.flatMap((serverId) => {
+      const client = runtime.getSnapshot(serverId)?.client;
+      if (!client) return [];
+      return [
+        client.on("status", (message) => {
+          if (message.type === "status" && message.payload.status === "daemon_config_changed") {
+            queryClient.setQueryData(
+              daemonConfigQueryKey(serverId),
+              message.payload.config as MutableDaemonConfig,
+            );
+          }
+        }),
+      ];
+    });
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [connectionStatuses, queryClient, runtime, serverIds]);
+
+  return useMemo(() => {
+    const configs = new Map<string, MutableDaemonConfig>();
+    for (const [index, serverId] of serverIds.entries()) {
+      const config = configQueries[index]?.data;
+      if (config) {
+        configs.set(serverId, config);
+      }
+    }
+    return configs;
+  }, [configQueries, serverIds]);
 }
