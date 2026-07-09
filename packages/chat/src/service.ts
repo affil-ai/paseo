@@ -144,6 +144,10 @@ function withFiles(message: AdapterPostableMessage, files: FileUpload[]): Adapte
   return { ...message, files };
 }
 
+function fileAttachmentRootMessage(fileCount: number): AdapterPostableMessage {
+  return { markdown: fileCount === 1 ? "File attached." : `${fileCount} files attached.` };
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -336,21 +340,20 @@ export class ChatBridgeService {
       }
 
       const destination = input.destination ?? ({ kind: "current" } satisfies ChatDestination);
-      const files = input.files ?? [];
-      const messages = withFilesOnFirstMessage(
-        slackPostableMessagesFromMarkdown(input.message ?? ""),
-        files.length > 0 ? files.map(toFileUpload) : undefined,
-      );
+      const files = input.files?.map(toFileUpload) ?? [];
+      const messages = slackPostableMessagesFromMarkdown(input.message ?? "");
       const binding = await this.postSendMessages({
         officeAgentId: input.officeAgentId,
         destination,
         messages,
+        files,
+        hasMessage: Boolean(input.message?.trim()),
         subscribe: input.subscribe ?? true,
       });
       await this.suppressActiveAutoRelay(binding.externalThreadId);
       const result = {
         ...this.resultFromBinding(binding),
-        ...(files[0] ? { fileId: files[0].filename } : {}),
+        ...(input.files?.[0] ? { fileId: input.files[0].filename } : {}),
       };
       await this.recordGithubPrLinksFromText(input.officeAgentId, binding, input.message);
       await this.completeIdempotentResult(input.idempotencyKey, result);
@@ -444,11 +447,14 @@ export class ChatBridgeService {
     officeAgentId: string;
     destination: ChatDestination;
     messages: AdapterPostableMessage[];
+    files: FileUpload[];
+    hasMessage: boolean;
     subscribe: boolean;
   }): Promise<ChatBinding> {
+    const messagesWithFiles = withFilesOnFirstMessage(input.messages, input.files);
     if (input.destination.kind === "current") {
       const binding = await this.resolveCurrentBinding(input.officeAgentId);
-      await this.postMessages(binding.externalThreadId, input.messages);
+      await this.postMessages(binding.externalThreadId, messagesWithFiles);
       return binding;
     }
 
@@ -457,7 +463,7 @@ export class ChatBridgeService {
         input.officeAgentId,
         input.destination.conversationId,
       );
-      await this.postMessages(binding.externalThreadId, input.messages);
+      await this.postMessages(binding.externalThreadId, messagesWithFiles);
       return binding;
     }
 
@@ -467,7 +473,7 @@ export class ChatBridgeService {
     );
     if (reusableBinding) {
       if (input.subscribe) await this.chat.thread(reusableBinding.externalThreadId).subscribe();
-      await this.postMessages(reusableBinding.externalThreadId, input.messages);
+      await this.postMessages(reusableBinding.externalThreadId, messagesWithFiles);
       return reusableBinding;
     }
 
@@ -477,7 +483,21 @@ export class ChatBridgeService {
       : null;
     this.assertBindingOwner(input.officeAgentId, existingResolvedBinding);
 
-    const firstMessage = input.messages[0] ?? { markdown: "" };
+    const startsNewThread = resolved.mode === "new-thread";
+    let firstMessage = messagesWithFiles[0] ?? { markdown: "" };
+    if (startsNewThread) {
+      firstMessage = input.hasMessage
+        ? (input.messages[0] ?? { markdown: "" })
+        : fileAttachmentRootMessage(input.files.length);
+    }
+    // Slack uploads files before it posts the accompanying text. Establish the canonical root
+    // first so its thread timestamp can anchor every file share in a new conversation.
+    const remainingMessages = startsNewThread
+      ? [
+          ...input.messages.slice(1),
+          ...(input.files.length > 0 ? [withFiles({ markdown: "" }, input.files)] : []),
+        ]
+      : messagesWithFiles.slice(1);
     const sent = await resolved.target.post(firstMessage);
     const externalThreadId = threadIdFromPostedMessage(resolved.target.id, sent);
     const existingBinding =
@@ -485,11 +505,10 @@ export class ChatBridgeService {
     if (existingBinding) {
       this.assertBindingOwner(input.officeAgentId, existingBinding);
       if (input.subscribe) await this.chat.thread(existingBinding.externalThreadId).subscribe();
-      await this.postRemainingMessages(existingBinding.externalThreadId, input.messages);
+      await this.postMessages(existingBinding.externalThreadId, remainingMessages);
       return existingBinding;
     }
 
-    await this.postRemainingMessages(externalThreadId, input.messages);
     const conversationId = `conv_${randomUUID()}`;
     const binding = this.createOutboundBinding({
       conversationId,
@@ -500,6 +519,7 @@ export class ChatBridgeService {
     });
     await this.store.upsertBinding(binding);
     if (binding.subscribed) await this.chat.thread(externalThreadId).subscribe();
+    await this.postMessages(externalThreadId, remainingMessages);
     return binding;
   }
 

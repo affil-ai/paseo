@@ -261,7 +261,65 @@ describe("ChatBridgeService", () => {
     });
   });
 
-  it("sends an image-only DM through chat.send", async () => {
+  it.each([
+    {
+      name: "DM",
+      destination: { kind: "person", key: "Jenny Yoo" } as const,
+      rootTargetId: "slack:DU555:",
+      externalThreadId: "slack:DU555:333.444",
+    },
+    {
+      name: "channel",
+      destination: { kind: "channel", id: "C123" } as const,
+      rootTargetId: "slack:C123:",
+      externalThreadId: "slack:C123:111.222",
+    },
+  ])(
+    "roots a new $name conversation in the text post before uploading files to its thread",
+    async ({ destination, rootTargetId, externalThreadId }) => {
+      const store = new ThreadSessionStore(await createTempDir());
+      const chat = new FakeChat();
+      const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
+        people: { "jenny yoo": "U555" },
+        channels: {},
+      });
+
+      const result = await service.send({
+        officeAgentId: "agent-office",
+        destination,
+        message: "Mystery cards attached",
+        files: [filePayload("image/png"), filePayload("image/png")],
+      });
+
+      expect(result.externalThreadId).toBe(externalThreadId);
+      expect(chat.posted[0]?.message).not.toHaveProperty("files");
+      expect(chat.posted).toMatchObject([
+        {
+          targetId: rootTargetId,
+          message: { markdown: "Mystery cards attached" },
+        },
+        {
+          targetId: externalThreadId,
+          message: {
+            markdown: "",
+            files: [
+              { filename: "chart.png", mimeType: "image/png" },
+              { filename: "chart.png", mimeType: "image/png" },
+            ],
+          },
+        },
+      ]);
+      expect(chat.targets.get(externalThreadId)?.subscribed).toEqual([externalThreadId]);
+      await expect(store.getConversation(result.conversationId)).resolves.toMatchObject({
+        kind: "outbound-conversation",
+        externalThreadId,
+        officeAgentId: "agent-office",
+        subscribed: true,
+      });
+    },
+  );
+
+  it("sends an image-only DM through chat.send with a safe canonical root", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();
     const service = new ChatBridgeService(chat, fakeDaemonClient(), store, {
@@ -276,13 +334,19 @@ describe("ChatBridgeService", () => {
     });
 
     expect(result.externalThreadId).toBe("slack:DU555:333.444");
-    expect(chat.posted[0]).toMatchObject({
-      targetId: "slack:DU555:",
-      message: {
-        markdown: "",
-        files: [{ filename: "chart.png", mimeType: "image/png" }],
+    expect(chat.posted).toMatchObject([
+      {
+        targetId: "slack:DU555:",
+        message: { markdown: "File attached." },
       },
-    });
+      {
+        targetId: result.externalThreadId,
+        message: {
+          markdown: "",
+          files: [{ filename: "chart.png", mimeType: "image/png" }],
+        },
+      },
+    ]);
   });
 
   it("sends a file-only message to the current binding through chat.send", async () => {
