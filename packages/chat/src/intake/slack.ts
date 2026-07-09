@@ -2,12 +2,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
-import type { Attachment, Message, Thread } from "chat";
+import type { Attachment, Message, Thread, UserInfo } from "chat";
 
 export interface SenderIdentity {
   userId: string;
   name: string;
   handle?: string;
+  avatarUrl?: string;
 }
 
 export type ThreadCommand = "mute" | "unmute" | "archive" | "escape" | "aside" | null;
@@ -45,15 +46,19 @@ export function cleanSlackText(text: string): string {
     .trim();
 }
 
+async function getSlackUser(thread: Thread, userId: string): Promise<UserInfo | null> {
+  const adapter = thread.adapter as {
+    getUser?: (userId: string) => Promise<UserInfo | null>;
+  };
+  return (await adapter.getUser?.(userId).catch(() => null)) ?? null;
+}
+
 async function getSlackUserName(
   thread: Thread,
   userId: string,
   fallback?: string,
 ): Promise<string> {
-  const adapter = thread.adapter as {
-    getUser?: (userId: string) => Promise<{ userName?: string; fullName?: string } | null>;
-  };
-  const user = await adapter.getUser?.(userId).catch(() => null);
+  const user = await getSlackUser(thread, userId);
   return user?.userName || user?.fullName || fallback || userId;
 }
 
@@ -96,13 +101,15 @@ export function titleFromText(text: string): string {
   return first.length > 120 ? `${first.slice(0, 117)}...` : first;
 }
 
-export async function resolveSender(message: Message): Promise<SenderIdentity> {
+export async function resolveSender(thread: Thread, message: Message): Promise<SenderIdentity> {
   const author = message.author;
-  const handle = author.userName || author.userId;
+  const user = await getSlackUser(thread, author.userId);
+  const handle = user?.userName || author.userName || author.userId;
   return {
     userId: author.userId,
-    name: author.fullName || handle,
+    name: user?.fullName || author.fullName || handle,
     handle,
+    ...(user?.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 
@@ -221,7 +228,7 @@ export async function normalizeMessage(
     eventId: `slack:${externalThreadId}:${message.id}`,
     cleanedText,
     command: parseCommand(message.text),
-    sender: await resolveSender(message),
+    sender: await resolveSender(thread, message),
     images,
     attachments,
     attachmentText,

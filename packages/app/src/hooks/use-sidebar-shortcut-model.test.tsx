@@ -4,11 +4,20 @@
 import React from "react";
 import { act } from "@testing-library/react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   SidebarProjectEntry,
   SidebarWorkspaceEntry,
 } from "@/hooks/use-sidebar-workspaces-list";
+
+vi.mock("@react-native-async-storage/async-storage", () => ({
+  default: {
+    getItem: vi.fn().mockResolvedValue(null),
+    setItem: vi.fn().mockResolvedValue(undefined),
+    removeItem: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sections-store";
 import { useSidebarShortcutModel } from "./use-sidebar-shortcut-model";
 
@@ -35,6 +44,7 @@ function workspace(projectKey: string, workspaceId: string): SidebarWorkspaceEnt
     archiveUnpushedCommitCount: null,
     scripts: [],
     hasRunningScripts: false,
+    chatStartedBy: null,
   };
 }
 

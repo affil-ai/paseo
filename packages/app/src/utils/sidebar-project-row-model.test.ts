@@ -31,6 +31,7 @@ function workspace(overrides: Partial<SidebarWorkspaceEntry> = {}): SidebarWorks
     statusEnteredAt: null,
     ...overrides,
     archivingAt: overrides.archivingAt ?? null,
+    chatStartedBy: overrides.chatStartedBy ?? null,
   };
 }
 

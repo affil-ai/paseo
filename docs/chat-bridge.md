@@ -390,6 +390,10 @@ workspace row under it:
   user-message attribution in Paseo. Current values are `slack` for direct Slack intake and
   `support` for support-email sessions that announce into Slack. UI code must resolve this through
   `getChatUserMessageSourceFromLabels()` rather than parsing prompt text or Slack thread ids.
+- **Chat starter metadata.** Slack-created office agents carry starter labels for the stable Slack
+  user id plus display metadata (`paseo.chat-started-by-*`), and the bridge stores the same
+  `startedBy` object on the inbound `ThreadSession`. UI surfaces should treat the Slack user id as
+  durable and the avatar URL as display metadata that can change.
 
 ## Release roadmap
 

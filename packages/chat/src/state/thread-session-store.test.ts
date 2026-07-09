@@ -134,6 +134,40 @@ describe("ThreadSessionStore chat bindings", () => {
     await expect(store.findBindingsByAgent("agent-child")).resolves.toEqual([]);
   });
 
+  it("persists inbound session starter metadata", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "slack:C1:111.222",
+      rootAgentId: "agent-office",
+      startedBy: {
+        source: "slack",
+        userId: "U123",
+        name: "Jane Doe",
+        handle: "jane",
+        avatarUrl: "https://example.com/jane.png",
+      },
+      muted: false,
+      activeRelayId: null,
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    await expect(store.getSession("slack:C1:111.222")).resolves.toMatchObject({
+      startedBy: {
+        source: "slack",
+        userId: "U123",
+        name: "Jane Doe",
+        handle: "jane",
+        avatarUrl: "https://example.com/jane.png",
+      },
+    });
+  });
+
   it("expires pending asks and clears the binding pointer", async () => {
     const dir = await createTempDir();
     const store = new ThreadSessionStore(dir);

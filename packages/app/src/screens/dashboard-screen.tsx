@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
-import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  type PressableStateCallbackType,
+} from "react-native";
 import { router } from "expo-router";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ChevronDown, ExternalLink, GitPullRequest, PanelRightOpen } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import {
+  ChevronDown,
+  CircleX,
+  Globe,
+  GitPullRequest,
+  PanelRightOpen,
+  Slack,
+  TriangleAlert,
+} from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
@@ -15,35 +30,62 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ExplorerSidebarContent } from "@/components/explorer-sidebar";
+import { ProjectIconView } from "@/components/project-icon-view";
 import type { ExplorerTab } from "@/stores/panel-store";
 import {
   useDashboardPullRequests,
+  type DashboardPrBadge,
   type DashboardPrColumn,
+  type DashboardPreviewLink,
   type DashboardPullRequest,
   type DashboardRepoOption,
 } from "@/dashboard/use-dashboard-pull-requests";
+import { GithubPrDiffPane } from "@/dashboard/github-pr-diff-pane";
+import { useProjectIconDataByProjectKey } from "@/projects/project-icons";
 import { buildHostWorkspaceRoute } from "@/utils/host-routes";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
+import { formatTimeAgo } from "@/utils/time";
 import { isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import type { Theme } from "@/styles/theme";
 
 const COLUMNS: Array<{ id: DashboardPrColumn; label: string }> = [
-  { id: "review", label: "Ready for review" },
   { id: "draft", label: "Draft" },
+  { id: "review", label: "Ready for review" },
   { id: "blocked", label: "Blocked" },
 ];
+
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedGitPullRequest = withUnistyles(GitPullRequest);
+const ThemedSlack = withUnistyles(Slack);
+const ThemedGlobe = withUnistyles(Globe);
+const ThemedPanelRightOpen = withUnistyles(PanelRightOpen);
+const ThemedTriangleAlert = withUnistyles(TriangleAlert);
+const ThemedCircleX = withUnistyles(CircleX);
+
+const mutedIconUniProps = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const dangerIconUniProps = (theme: Theme) => ({ color: theme.colors.statusDanger });
+
+// Devin's GitHub App avatar; hoisted so the <Image> source is a stable reference.
+const DEVIN_AVATAR_SOURCE = {
+  uri: "https://avatars.githubusercontent.com/in/811515?s=80&v=4",
+} as const;
+
+const EMPTY_COLUMN_ITEMS: DashboardPullRequest[] = [];
+
+type IconByProjectKey = Map<string, string | null>;
 
 export function DashboardScreen() {
   const { t } = useTranslation();
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
-  const { pullRequests, repos, isLoading, hasError, refetch } = useDashboardPullRequests({
-    repoFilter,
-  });
+  const { pullRequests, repos, iconTargets, isLoading, hasError, refetch } =
+    useDashboardPullRequests({ repoFilter });
+  const iconByProjectKey = useProjectIconDataByProjectKey({ projects: iconTargets });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const isCompact = useIsCompactFormFactor();
 
   const selectedPr = pullRequests.find((pr) => pr.id === selectedId) ?? null;
-  const reviewablePr = selectedPr?.workspace ? selectedPr : null;
 
   // Drop the selection if the PR disappears from the board (e.g. merged/closed).
   useEffect(() => {
@@ -64,12 +106,8 @@ export function DashboardScreen() {
     [repos, repoFilter],
   );
 
+  // Re-selecting the open PR dismisses the review pane.
   const handleSelect = useCallback((pr: DashboardPullRequest) => {
-    if (!pr.workspace) {
-      return;
-    }
-    // Desktop has no in-pane close button, so re-selecting the open PR dismisses
-    // the review pane.
     setSelectedId((current) => (current === pr.id ? null : pr.id));
   }, []);
 
@@ -89,6 +127,7 @@ export function DashboardScreen() {
   const board = (
     <PullRequestBoard
       pullRequests={pullRequests}
+      iconByProjectKey={iconByProjectKey}
       selectedId={selectedId}
       isCompact={isCompact}
       hasError={hasError}
@@ -103,8 +142,8 @@ export function DashboardScreen() {
     return (
       <View style={styles.container}>
         <MenuHeader title={t("sidebar.sections.dashboard")} />
-        {reviewablePr ? (
-          <PullRequestReview pr={reviewablePr} isCompact onClose={handleCloseReview} />
+        {selectedPr ? (
+          <PullRequestReviewPane pr={selectedPr} isCompact onClose={handleCloseReview} />
         ) : (
           <View style={styles.mainColumn}>
             <View style={styles.filterBar}>{repoFilterControl}</View>
@@ -122,9 +161,9 @@ export function DashboardScreen() {
       <MenuHeader title={t("sidebar.sections.dashboard")} rightContent={repoFilterControl} />
       <View style={styles.body}>
         <View style={styles.mainColumn}>{board}</View>
-        {reviewablePr ? (
+        {selectedPr ? (
           <View style={styles.reviewPane}>
-            <PullRequestReview pr={reviewablePr} isCompact={false} onClose={handleCloseReview} />
+            <PullRequestReviewPane pr={selectedPr} isCompact={false} onClose={handleCloseReview} />
           </View>
         ) : null}
       </View>
@@ -141,7 +180,6 @@ function RepoFilter({
   value: string | null;
   onChange: (projectKey: string | null) => void;
 }) {
-  const { theme } = useUnistyles();
   const selectedRepo = useMemo(
     () => (value ? (repos.find((repo) => repo.projectKey === value) ?? null) : null),
     [repos, value],
@@ -165,7 +203,7 @@ function RepoFilter({
         <Text style={styles.filterTriggerText} numberOfLines={1}>
           {triggerLabel}
         </Text>
-        <ChevronDown size={14} color={theme.colors.foregroundMuted} />
+        <ThemedChevronDown size={14} uniProps={mutedIconUniProps} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" width={260}>
         <DropdownMenuItem selected={value === null} onSelect={handleSelectAll}>
@@ -207,6 +245,7 @@ function RepoFilterItem({
 
 function PullRequestBoard({
   pullRequests,
+  iconByProjectKey,
   selectedId,
   isCompact,
   hasError,
@@ -214,16 +253,28 @@ function PullRequestBoard({
   onRefresh,
 }: {
   pullRequests: DashboardPullRequest[];
+  iconByProjectKey: IconByProjectKey;
   selectedId: string | null;
   isCompact: boolean;
   hasError: boolean;
   onSelect: (pr: DashboardPullRequest) => void;
   onRefresh: () => void;
 }) {
+  const itemsByColumn = useMemo(() => {
+    const byColumn = new Map<DashboardPrColumn, DashboardPullRequest[]>();
+    for (const column of COLUMNS) {
+      byColumn.set(column.id, []);
+    }
+    for (const pr of pullRequests) {
+      byColumn.get(pr.column)?.push(pr);
+    }
+    return byColumn;
+  }, [pullRequests]);
+
   if (pullRequests.length === 0) {
     return (
       <View style={styles.emptyState}>
-        <GitPullRequest size={28} color={styles.emptyIcon.color} />
+        <ThemedGitPullRequest size={28} uniProps={mutedIconUniProps} />
         <Text style={styles.emptyTitle}>No open pull requests</Text>
         <Text style={styles.emptyText}>
           {hasError
@@ -237,60 +288,131 @@ function PullRequestBoard({
     );
   }
 
+  // Compact stacks the columns in one vertical scroller; desktop gives each
+  // column its own vertical scroller so long lanes never clip.
+  if (isCompact) {
+    return (
+      <ScrollView contentContainerStyle={styles.compactBoardScroll}>
+        {COLUMNS.map((column) => {
+          const columnItems = itemsByColumn.get(column.id) ?? EMPTY_COLUMN_ITEMS;
+          return (
+            <View key={column.id} style={styles.compactColumn}>
+              <ColumnHeader column={column.id} label={column.label} count={columnItems.length} />
+              <ColumnCards
+                items={columnItems}
+                iconByProjectKey={iconByProjectKey}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  }
+
   return (
-    <ScrollView horizontal={!isCompact} contentContainerStyle={styles.boardScroll}>
+    <View style={styles.boardRow}>
       {COLUMNS.map((column) => {
-        const columnItems = pullRequests.filter((pr) => pr.column === column.id);
+        const columnItems = itemsByColumn.get(column.id) ?? EMPTY_COLUMN_ITEMS;
         return (
-          <View key={column.id} style={isCompact ? styles.compactColumn : styles.column}>
-            <View style={styles.columnHeader}>
-              <Text style={styles.columnTitle}>{column.label}</Text>
-              <Text style={styles.columnCount}>{columnItems.length}</Text>
-            </View>
-            <View style={styles.columnCards}>
-              {columnItems.map((pr) => (
-                <PullRequestCard
-                  key={pr.id}
-                  pr={pr}
-                  isSelected={pr.id === selectedId}
-                  onSelect={onSelect}
-                />
-              ))}
-            </View>
+          <View key={column.id} style={styles.column}>
+            <ColumnHeader column={column.id} label={column.label} count={columnItems.length} />
+            <ScrollView
+              style={styles.columnScroll}
+              contentContainerStyle={styles.columnScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <ColumnCards
+                items={columnItems}
+                iconByProjectKey={iconByProjectKey}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+            </ScrollView>
           </View>
         );
       })}
-    </ScrollView>
+    </View>
+  );
+}
+
+function ColumnHeader({
+  column,
+  label,
+  count,
+}: {
+  column: DashboardPrColumn;
+  label: string;
+  count: number;
+}) {
+  return (
+    <View style={styles.columnHeader}>
+      <View style={columnDotStyle(column)} />
+      <Text style={styles.columnTitle}>{label}</Text>
+      <Text style={styles.columnCount}>{count}</Text>
+    </View>
+  );
+}
+
+function ColumnCards({
+  items,
+  iconByProjectKey,
+  selectedId,
+  onSelect,
+}: {
+  items: DashboardPullRequest[];
+  iconByProjectKey: IconByProjectKey;
+  selectedId: string | null;
+  onSelect: (pr: DashboardPullRequest) => void;
+}) {
+  if (items.length === 0) {
+    return <Text style={styles.columnEmpty}>No pull requests</Text>;
+  }
+  return (
+    <View style={styles.columnCards}>
+      {items.map((pr) => (
+        <PullRequestCard
+          key={pr.id}
+          pr={pr}
+          iconDataUri={iconByProjectKey.get(pr.projectKey) ?? null}
+          isSelected={pr.id === selectedId}
+          onSelect={onSelect}
+        />
+      ))}
+    </View>
   );
 }
 
 function PullRequestCard({
   pr,
+  iconDataUri,
   isSelected,
   onSelect,
 }: {
   pr: DashboardPullRequest;
+  iconDataUri: string | null;
   isSelected: boolean;
   onSelect: (pr: DashboardPullRequest) => void;
 }) {
   const handlePress = useCallback(() => onSelect(pr), [pr, onSelect]);
-  const openPr = useCallback(() => {
-    void openExternalUrl(pr.url);
-  }, [pr.url]);
   const workspaceId = pr.workspace?.workspaceId ?? null;
-  const openWorkspace = useCallback(() => {
-    if (!workspaceId) {
-      return;
-    }
-    const route = buildHostWorkspaceRoute(pr.serverId, workspaceId);
-    if (isWeb && route !== "/") {
-      window.open(route, "_blank", "noopener,noreferrer");
-      return;
-    }
-    router.navigate(route);
-  }, [pr.serverId, workspaceId]);
+  const handleWorkspacePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      if (!workspaceId) {
+        return;
+      }
+      const route = buildHostWorkspaceRoute(pr.serverId, workspaceId);
+      if (isWeb && route !== "/") {
+        window.open(route, "_blank", "noopener,noreferrer");
+        return;
+      }
+      router.navigate(route);
+    },
+    [pr.serverId, workspaceId],
+  );
 
-  const isReviewable = pr.workspace !== null;
   const cardStyle = useCallback(
     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.card,
@@ -301,51 +423,257 @@ function PullRequestCard({
     [isSelected],
   );
 
+  const recencyLabel = useMemo(() => {
+    const raw = pr.lastCommitAt ?? pr.createdAt;
+    if (!raw) {
+      return null;
+    }
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : formatTimeAgo(date);
+  }, [pr.lastCommitAt, pr.createdAt]);
+
+  const hasChipsRow = pr.origin !== null || pr.workspace !== null;
+
   return (
-    <Pressable
-      style={cardStyle}
-      onPress={isReviewable ? handlePress : undefined}
-      accessibilityRole={isReviewable ? "button" : undefined}
-    >
+    <Pressable style={cardStyle} onPress={handlePress} accessibilityRole="button">
       <View style={styles.cardTopRow}>
-        <Text style={styles.cardNumber}>#{pr.number}</Text>
-        <StatusBadge label={pr.badge.label} variant={pr.badge.variant} />
+        <ProjectIconView
+          iconDataUri={iconDataUri}
+          initial={projectIconPlaceholderLabelFromDisplayName(pr.projectName)}
+          projectKey={pr.projectKey}
+          imageStyle={styles.projectIconImage}
+          fallbackStyle={styles.projectIconFallback}
+          textStyle={styles.projectIconText}
+        />
+        <Text style={styles.cardProject} numberOfLines={1}>
+          {pr.projectName}
+        </Text>
+        {pr.devin ? <DevinAvatar devin={pr.devin} /> : null}
+        <View style={styles.cardTopSpacer} />
+        {pr.badge ? <PullRequestBadge badge={pr.badge} /> : null}
+        {recencyLabel ? <Text style={styles.cardRecency}>{recencyLabel}</Text> : null}
       </View>
       <Text style={styles.cardTitle} numberOfLines={3}>
         {pr.title}
       </Text>
-      <Text style={styles.cardMeta} numberOfLines={1}>
-        {pr.projectName} · {pr.serverName}
-      </Text>
-      <Text style={styles.cardMeta} numberOfLines={1}>
-        {pr.headRefName} → {pr.baseRefName}
-      </Text>
-      <View style={styles.cardActions}>
-        <IconButton icon={ExternalLink} label="GitHub" onPress={openPr} />
-        {pr.workspace ? (
-          <IconButton icon={PanelRightOpen} label="Workspace" onPress={openWorkspace} />
-        ) : null}
+      <View style={styles.cardMetaRow}>
+        <PullRequestNumberLink number={pr.number} url={pr.url} />
+        <Text style={styles.cardMeta} numberOfLines={1}>
+          {pr.headRefName} → {pr.baseRefName}
+        </Text>
+        <DiffCounts additions={pr.additions} deletions={pr.deletions} />
       </View>
-      {!isReviewable ? (
-        <Text style={styles.cardHint}>No workspace — open on GitHub to review</Text>
+      {hasChipsRow ? (
+        <View style={styles.cardChipsRow}>
+          {pr.origin ? <OriginChip origin={pr.origin} /> : null}
+          <View style={styles.cardChipsSpacer} />
+          {pr.workspace ? (
+            <Pressable
+              style={iconButtonStyle}
+              onPress={handleWorkspacePress}
+              accessibilityRole="button"
+              accessibilityLabel="Open workspace"
+            >
+              <ThemedPanelRightOpen size={14} uniProps={mutedIconUniProps} />
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
+      {pr.previewLinks.map((link) => (
+        <PreviewLinkRow key={link.url} link={link} />
+      ))}
     </Pressable>
   );
 }
 
-function IconButton({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: ComponentType<{ size: number; color: string }>;
-  label: string;
-  onPress: () => void;
-}) {
+function DevinAvatar({ devin }: { devin: NonNullable<DashboardPullRequest["devin"]> }) {
+  const url = devin.url;
+  const handlePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      if (url) {
+        void openExternalUrl(url);
+      }
+    },
+    [url],
+  );
+  if (!url) {
+    return (
+      <Image
+        source={DEVIN_AVATAR_SOURCE}
+        style={styles.devinAvatar}
+        accessibilityLabel="Authored by Devin"
+      />
+    );
+  }
   return (
-    <Button size="xs" variant="ghost" leftIcon={icon} onPress={onPress}>
-      {label}
-    </Button>
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="link"
+      accessibilityLabel="Open Devin session"
+    >
+      <Image source={DEVIN_AVATAR_SOURCE} style={styles.devinAvatar} />
+    </Pressable>
+  );
+}
+
+function PullRequestBadge({ badge }: { badge: DashboardPrBadge }) {
+  if (badge.display === "pill") {
+    return <StatusBadge label={badge.label} variant={badge.variant} />;
+  }
+  const Icon = badge.icon === "conflicts" ? ThemedTriangleAlert : ThemedCircleX;
+  return (
+    <View accessibilityRole="image" accessibilityLabel={badge.label}>
+      <Icon size={15} uniProps={dangerIconUniProps} />
+    </View>
+  );
+}
+
+function DiffCounts({
+  additions,
+  deletions,
+}: {
+  additions: number | null;
+  deletions: number | null;
+}) {
+  if (additions === null && deletions === null) {
+    return null;
+  }
+  return (
+    <View style={styles.diffCounts}>
+      {additions !== null ? <Text style={styles.diffAddition}>+{additions}</Text> : null}
+      {deletions !== null ? <Text style={styles.diffDeletion}>−{deletions}</Text> : null}
+    </View>
+  );
+}
+
+function previewLinkLabel(link: DashboardPreviewLink): string {
+  if (link.projectName) {
+    return link.projectName;
+  }
+  try {
+    return new URL(link.url).hostname;
+  } catch {
+    return link.url;
+  }
+}
+
+function PreviewLinkRow({ link }: { link: DashboardPreviewLink }) {
+  const url = link.url;
+  const handlePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      void openExternalUrl(url);
+    },
+    [url],
+  );
+  return (
+    <Pressable
+      style={previewLinkStyle}
+      onPress={handlePress}
+      accessibilityRole="link"
+      accessibilityLabel={`Open preview ${previewLinkLabel(link)}`}
+    >
+      <ThemedGlobe size={12} uniProps={mutedIconUniProps} />
+      <Text style={styles.previewLinkText} numberOfLines={1}>
+        {previewLinkLabel(link)}
+      </Text>
+    </Pressable>
+  );
+}
+
+function PullRequestNumberLink({ number, url }: { number: number; url: string }) {
+  const handlePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      void openExternalUrl(url);
+    },
+    [url],
+  );
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="link"
+      accessibilityLabel={`Open pull request #${number} on GitHub`}
+    >
+      {({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
+        <Text style={hovered ? styles.cardNumberHovered : styles.cardNumber}>#{number}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+function OriginChip({ origin }: { origin: NonNullable<DashboardPullRequest["origin"]> }) {
+  return <LinkChip icon={ThemedSlack} label="Slack" url={origin.url} />;
+}
+
+function LinkChip({
+  icon: Icon,
+  label,
+  url,
+}: {
+  icon: ComponentType<{ size?: number; uniProps?: (theme: Theme) => { color: string } }>;
+  label: string;
+  url: string | null;
+}) {
+  const handlePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      if (url) {
+        void openExternalUrl(url);
+      }
+    },
+    [url],
+  );
+  if (!url) {
+    return (
+      <View style={styles.chip}>
+        <Icon size={12} uniProps={mutedIconUniProps} />
+        <Text style={styles.chipText} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      style={chipPressableStyle}
+      onPress={handlePress}
+      accessibilityRole="link"
+      accessibilityLabel={`Open ${label}`}
+    >
+      <Icon size={12} uniProps={mutedIconUniProps} />
+      <Text style={styles.chipText} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// Routes a selected PR to the right review surface: PRs with a local Paseo
+// checkout get the full explorer (diff + PR tabs); everything else gets the
+// read-only GitHub-sourced diff pane, so no checkout is ever required.
+function PullRequestReviewPane({
+  pr,
+  isCompact,
+  onClose,
+}: {
+  pr: DashboardPullRequest;
+  isCompact: boolean;
+  onClose: () => void;
+}) {
+  if (pr.workspace) {
+    return <PullRequestReview pr={pr} isCompact={isCompact} onClose={onClose} />;
+  }
+  return (
+    <GithubPrDiffPane
+      serverId={pr.serverId}
+      cwd={pr.projectCwd}
+      number={pr.number}
+      title={pr.title}
+      url={pr.url}
+      onClose={onClose}
+    />
   );
 }
 
@@ -459,23 +787,57 @@ const styles = StyleSheet.create((theme) => ({
     borderLeftWidth: 1,
     borderLeftColor: theme.colors.border,
   },
-  boardScroll: {
-    flexGrow: 1,
+  boardRow: {
+    flex: 1,
+    flexDirection: "row",
+    minHeight: 0,
     gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+  },
+  compactBoardScroll: {
+    gap: theme.spacing[4],
     padding: theme.spacing[3],
   },
   column: {
-    width: 300,
-    gap: theme.spacing[2],
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
   },
   compactColumn: {
     gap: theme.spacing[2],
   },
+  columnScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  columnScrollContent: {
+    paddingBottom: theme.spacing[6],
+  },
   columnHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[1],
+    paddingBottom: theme.spacing[2],
+  },
+  columnDotDraft: {
+    width: 6,
+    height: 6,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.foregroundMuted,
+  },
+  columnDotReview: {
+    width: 6,
+    height: 6,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.statusSuccess,
+  },
+  columnDotBlocked: {
+    width: 6,
+    height: 6,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.statusDanger,
   },
   columnTitle: {
     color: theme.colors.foreground,
@@ -485,6 +847,12 @@ const styles = StyleSheet.create((theme) => ({
   columnCount: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
+  },
+  columnEmpty: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    paddingHorizontal: theme.spacing[1],
+    paddingVertical: theme.spacing[2],
   },
   columnCards: {
     gap: theme.spacing[2],
@@ -507,12 +875,41 @@ const styles = StyleSheet.create((theme) => ({
   cardTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: theme.spacing[2],
   },
-  cardNumber: {
+  projectIconImage: {
+    width: 16,
+    height: 16,
+    borderRadius: theme.borderRadius.sm,
+  },
+  projectIconFallback: {
+    width: 16,
+    height: 16,
+    borderRadius: theme.borderRadius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  projectIconText: {
+    fontSize: 9,
+    fontWeight: theme.fontWeight.medium,
+  },
+  cardProject: {
+    flexShrink: 1,
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
+  },
+  cardTopSpacer: {
+    flexGrow: 1,
+  },
+  cardRecency: {
+    flexShrink: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  devinAvatar: {
+    width: 14,
+    height: 14,
+    borderRadius: theme.borderRadius.full,
   },
   cardTitle: {
     color: theme.colors.foreground,
@@ -520,20 +917,94 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.normal,
     lineHeight: 20,
   },
-  cardMeta: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-  },
-  cardActions: {
+  cardMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    paddingTop: theme.spacing[1],
   },
-  cardHint: {
+  cardNumber: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
-    fontStyle: "italic",
+  },
+  cardNumberHovered: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.xs,
+    textDecorationLine: "underline",
+  },
+  cardMeta: {
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  diffCounts: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+    gap: theme.spacing[1],
+    marginLeft: "auto",
+    paddingLeft: theme.spacing[2],
+  },
+  diffAddition: {
+    color: theme.colors.diffAddition,
+    fontSize: theme.fontSize.xs,
+  },
+  diffDeletion: {
+    color: theme.colors.diffDeletion,
+    fontSize: theme.fontSize.xs,
+  },
+  cardChipsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
+    paddingTop: theme.spacing[1],
+  },
+  cardChipsSpacer: {
+    flexGrow: 1,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    maxWidth: 160,
+  },
+  chipHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  chipText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  previewLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    borderRadius: theme.borderRadius.sm,
+    paddingVertical: 2,
+    paddingHorizontal: theme.spacing[1],
+    marginHorizontal: -theme.spacing[1],
+  },
+  previewLinkHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  previewLinkText: {
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  iconButton: {
+    padding: 2,
+    borderRadius: 4,
+  },
+  iconButtonHovered: {
+    backgroundColor: theme.colors.surface2,
   },
   emptyState: {
     flex: 1,
@@ -541,9 +1012,6 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     gap: theme.spacing[3],
     padding: theme.spacing[6],
-  },
-  emptyIcon: {
-    color: theme.colors.foregroundMuted,
   },
   emptyTitle: {
     color: theme.colors.foreground,
@@ -557,6 +1025,29 @@ const styles = StyleSheet.create((theme) => ({
   },
 }));
 
+function columnDotStyle(column: DashboardPrColumn) {
+  switch (column) {
+    case "draft":
+      return styles.columnDotDraft;
+    case "review":
+      return styles.columnDotReview;
+    case "blocked":
+      return styles.columnDotBlocked;
+  }
+}
+
 function triggerStyle({ hovered }: { pressed: boolean; hovered: boolean; open: boolean }) {
   return [styles.filterTrigger, hovered && styles.filterTriggerHovered];
+}
+
+function chipPressableStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.chip, hovered && styles.chipHovered];
+}
+
+function previewLinkStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.previewLink, hovered && styles.previewLinkHovered];
+}
+
+function iconButtonStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.iconButton, hovered && styles.iconButtonHovered];
 }

@@ -1108,6 +1108,37 @@ export class CheckoutSession {
     }
   }
 
+  async handleGithubPrDiffRequest(
+    msg: Extract<SessionInboundMessage, { type: "github.pr.diff.request" }>,
+  ): Promise<void> {
+    const { cwd, number, requestId } = msg;
+
+    try {
+      const result = await this.github.getPullRequestDiff({
+        cwd: expandTilde(cwd),
+        number,
+      });
+      this.host.emit({
+        type: "github.pr.diff.response",
+        payload: {
+          diff: result.diff,
+          truncated: result.truncated,
+          error: null,
+          requestId,
+        },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "github.pr.diff.response",
+        payload: {
+          diff: null,
+          error: error instanceof Error ? error.message : String(error),
+          requestId,
+        },
+      });
+    }
+  }
+
   cleanup(): void {
     for (const unsubscribe of this.diffSubscriptions.values()) {
       unsubscribe();

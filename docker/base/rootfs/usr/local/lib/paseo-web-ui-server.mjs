@@ -171,12 +171,12 @@ function buildConnectionHint(req) {
   const configuredListen = process.env.PASEO_UI_INITIAL_DAEMON_CONNECTION?.trim();
   const configuredTls = process.env.PASEO_UI_INITIAL_DAEMON_TLS?.trim().toLowerCase();
   const forwardedProto = readForwardedProto(req);
-  const useTls =
-    configuredTls === "true" || configuredTls === "1"
-      ? true
-      : configuredTls === "false" || configuredTls === "0"
-        ? false
-        : forwardedProto === "https";
+  let useTls = forwardedProto === "https";
+  if (configuredTls === "true" || configuredTls === "1") {
+    useTls = true;
+  } else if (configuredTls === "false" || configuredTls === "0") {
+    useTls = false;
+  }
   const host = configuredListen || firstHeaderValue(req.headers.host);
   const authenticatedUserEmail = readCloudflareAuthenticatedUserEmail(req);
 
@@ -212,8 +212,13 @@ function serveStatic(distDir, req, res) {
     return;
   }
 
-  const acceptEncoding = target.isIndexHtml ? undefined : firstHeaderValue(req.headers["accept-encoding"]);
-  const { finalFile, contentEncoding } = resolveContentEncoding(target.resolvedFile, acceptEncoding);
+  const acceptEncoding = target.isIndexHtml
+    ? undefined
+    : firstHeaderValue(req.headers["accept-encoding"]);
+  const { finalFile, contentEncoding } = resolveContentEncoding(
+    target.resolvedFile,
+    acceptEncoding,
+  );
   res.setHeader("Content-Type", getContentType(target.resolvedFile));
   if (contentEncoding) {
     res.setHeader("Content-Encoding", contentEncoding);

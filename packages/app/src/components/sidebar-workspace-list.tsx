@@ -42,6 +42,7 @@ import {
   CircleCheck,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Copy,
   ExternalLink,
   GitPullRequest,
@@ -88,6 +89,7 @@ import { toWorktreeArchiveRisk } from "@/git/worktree-archive-warning";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import {
   DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
+  SIDEBAR_WORKSPACE_PREVIEW_STEP,
   getVisibleWorkspacesForProject,
   getWorkspaceRecencyTimestamp,
 } from "@/utils/sidebar-recency";
@@ -148,7 +150,7 @@ const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedChevronDown = withUnistyles(ChevronDown);
-const ThemedChevronRight = withUnistyles(ChevronRight);
+const ThemedChevronUp = withUnistyles(ChevronUp);
 const ThemedSyncedLoader = withUnistyles(SyncedLoader);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedMoreVertical = withUnistyles(MoreVertical);
@@ -2091,7 +2093,9 @@ function ProjectBlock({
   const toast = useToast();
   const { t } = useTranslation();
   const [isRemovingProject, setIsRemovingProject] = useState(false);
-  const [workspacesExpanded, setWorkspacesExpanded] = useState(false);
+  const [workspacePreviewLimit, setWorkspacePreviewLimit] = useState(
+    DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
+  );
 
   const handleRemoveProject = useCallback(() => {
     if (isRemovingProject) {
@@ -2163,15 +2167,21 @@ function ProjectBlock({
       getVisibleWorkspacesForProject({
         workspaces: project.workspaces,
         activeWorkspaceKey,
-        isExpanded: workspacesExpanded,
-        previewLimit: DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
+        previewLimit: workspacePreviewLimit,
       }),
-    [project.workspaces, activeWorkspaceKey, workspacesExpanded],
+    [project.workspaces, activeWorkspaceKey, workspacePreviewLimit],
   );
 
-  const handleToggleWorkspacesExpanded = useCallback(() => {
-    setWorkspacesExpanded((current) => !current);
+  const handleShowMoreWorkspaces = useCallback(() => {
+    setWorkspacePreviewLimit((current) => current + SIDEBAR_WORKSPACE_PREVIEW_STEP);
   }, []);
+  const handleShowLessWorkspaces = useCallback(() => {
+    setWorkspacePreviewLimit(DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT);
+  }, []);
+
+  const canShowLessWorkspaces =
+    workspacePreviewLimit > DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT &&
+    project.workspaces.length > DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT;
 
   let projectChildren = null;
   if (!collapsed) {
@@ -2181,12 +2191,13 @@ function ProjectBlock({
           {preview.visibleWorkspaces.map((item) => (
             <View key={item.workspaceKey}>{renderWorkspaceRow(item)}</View>
           ))}
-          {preview.hasHiddenWorkspaces ? (
+          {preview.hiddenCount > 0 || canShowLessWorkspaces ? (
             <ShowMoreWorkspacesRow
-              expanded={workspacesExpanded}
-              hiddenCount={preview.hiddenCount}
-              onPress={handleToggleWorkspacesExpanded}
-              testID={`sidebar-workspace-show-more-${project.projectKey}`}
+              canShowMore={preview.hiddenCount > 0}
+              canShowLess={canShowLessWorkspaces}
+              onShowMore={handleShowMoreWorkspaces}
+              onShowLess={handleShowLessWorkspaces}
+              projectKey={project.projectKey}
             />
           ) : null}
         </View>
@@ -2288,21 +2299,55 @@ function areProjectBlockSelectionsEqual(
 const MemoProjectBlock = memo(ProjectBlock, areProjectBlockPropsEqual);
 
 function ShowMoreWorkspacesRow({
-  expanded,
-  hiddenCount,
+  canShowMore,
+  canShowLess,
+  onShowMore,
+  onShowLess,
+  projectKey,
+}: {
+  canShowMore: boolean;
+  canShowLess: boolean;
+  onShowMore: () => void;
+  onShowLess: () => void;
+  projectKey: string;
+}) {
+  return (
+    <View style={styles.showMoreWorkspacesRowGroup}>
+      {canShowMore ? (
+        <WorkspacePreviewFooterButton
+          label="Show more"
+          direction="more"
+          onPress={onShowMore}
+          testID={`sidebar-workspace-show-more-${projectKey}`}
+        />
+      ) : null}
+      {canShowLess ? (
+        <WorkspacePreviewFooterButton
+          label="Show less"
+          direction="less"
+          onPress={onShowLess}
+          testID={`sidebar-workspace-show-less-${projectKey}`}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function WorkspacePreviewFooterButton({
+  label,
+  direction,
   onPress,
   testID,
 }: {
-  expanded: boolean;
-  hiddenCount: number;
+  label: string;
+  direction: "more" | "less";
   onPress: () => void;
   testID: string;
 }) {
   const [isHovered, setIsHovered] = useState(false);
-  const label = expanded ? "Show fewer" : `Show ${hiddenCount} more`;
   const handleHoverIn = useCallback(() => setIsHovered(true), []);
   const handleHoverOut = useCallback(() => setIsHovered(false), []);
-  const rowStyle = useMemo(
+  const buttonStyle = useMemo(
     () => [styles.showMoreWorkspacesRow, isHovered && styles.showMoreWorkspacesRowHovered],
     [isHovered],
   );
@@ -2315,12 +2360,12 @@ function ShowMoreWorkspacesRow({
       onPress={onPress}
       onHoverIn={handleHoverIn}
       onHoverOut={handleHoverOut}
-      style={rowStyle}
+      style={buttonStyle}
     >
-      {expanded ? (
+      {direction === "more" ? (
         <ThemedChevronDown size={13} uniProps={foregroundMutedColorMapping} />
       ) : (
-        <ThemedChevronRight size={13} uniProps={foregroundMutedColorMapping} />
+        <ThemedChevronUp size={13} uniProps={foregroundMutedColorMapping} />
       )}
       <Text style={styles.showMoreWorkspacesText}>{label}</Text>
     </Pressable>
@@ -2695,10 +2740,15 @@ const styles = StyleSheet.create((theme) => ({
     borderTopColor: theme.colors.border,
   },
   workspaceListContainer: {},
-  showMoreWorkspacesRow: {
-    minHeight: 28,
+  showMoreWorkspacesRowGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
     marginLeft: theme.spacing[6],
     marginRight: theme.spacing[1],
+  },
+  showMoreWorkspacesRow: {
+    minHeight: 28,
     paddingVertical: theme.spacing[1],
     paddingHorizontal: theme.spacing[2],
     borderRadius: theme.borderRadius.md,

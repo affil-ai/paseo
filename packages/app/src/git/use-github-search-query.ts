@@ -25,6 +25,13 @@ interface GitHubSearchQueryInput {
   cwd: string;
   query: string;
   kinds?: GitHubSearchRequest["kinds"];
+  /**
+   * Max results. Omitted → 20 (mention-search default). `null` → the limit is
+   * left off the request entirely so the daemon applies its own (much higher)
+   * default — the wire schema caps explicit limits at 50, so this is the only
+   * way to ask for "everything" (used by the dashboard).
+   */
+  limit?: number | null;
   enabled: boolean;
   hostDisconnectedMessage?: string;
 }
@@ -34,26 +41,35 @@ export function githubSearchQueryKey(
   cwd: string,
   query: string,
   kinds?: GitHubSearchRequest["kinds"],
-) {
+  limit?: number | null,
+): readonly unknown[] {
   const trimmedQuery = query.trim();
-  if (!kinds) {
-    return ["github-search", serverId, cwd, trimmedQuery] as const;
+  const key: unknown[] = ["github-search", serverId, cwd, trimmedQuery];
+  if (kinds) {
+    key.push([...kinds].sort().join(","));
   }
-  return ["github-search", serverId, cwd, trimmedQuery, [...kinds].sort().join(",")] as const;
+  if (limit !== undefined) {
+    key.push(limit === null ? "server-default" : limit);
+  }
+  return key;
 }
 
 export function buildGithubSearchQueryOptions(input: GitHubSearchQueryInput) {
   const query = input.query.trim();
 
   return {
-    queryKey: githubSearchQueryKey(input.serverId, input.cwd, query, input.kinds),
+    queryKey: githubSearchQueryKey(input.serverId, input.cwd, query, input.kinds, input.limit),
     queryFn: async (): Promise<GitHubSearchPayload> => {
       if (!input.client) {
         throw new Error(
           input.hostDisconnectedMessage ?? i18n.t("workspace.terminal.hostDisconnected"),
         );
       }
-      const request = { cwd: input.cwd, query, limit: 20 };
+      const limit = input.limit === undefined ? 20 : input.limit;
+      const request: { cwd: string; query: string; limit?: number } = { cwd: input.cwd, query };
+      if (limit !== null) {
+        request.limit = limit;
+      }
       if (input.kinds) {
         return input.client.searchGitHub({ ...request, kinds: input.kinds });
       }

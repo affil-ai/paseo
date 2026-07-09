@@ -18,10 +18,19 @@ export const ChatDestinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("conversation"), conversationId: z.string().min(1) }),
 ]);
 
+const ChatStarterSchema = z.object({
+  source: z.enum(["slack", "support"]),
+  userId: z.string().min(1),
+  name: z.string().min(1),
+  handle: z.string().min(1).optional(),
+  avatarUrl: z.string().min(1).optional(),
+});
+
 const InboundSessionBindingSchema = z.object({
   kind: z.literal("inbound-session"),
   externalThreadId: z.string(),
   rootAgentId: z.string(),
+  startedBy: ChatStarterSchema.optional(),
   muted: z.boolean().default(false),
   activeRelayId: z.string().nullable().default(null),
   title: z.string().nullable().default(null),
@@ -168,6 +177,7 @@ const StoreSchema = z.object({
 });
 
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
+export type ChatStarter = z.infer<typeof ChatStarterSchema>;
 export type InboundSessionBinding = z.infer<typeof InboundSessionBindingSchema>;
 export type OutboundConversationBinding = z.infer<typeof OutboundConversationBindingSchema>;
 export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { View, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 
-type StatusBadgeVariant = "success" | "error" | "muted";
+type StatusBadgeVariant = "success" | "error" | "warning" | "muted";
 
 interface StatusBadgeProps {
   label: string;
@@ -15,6 +15,7 @@ export function StatusBadge({ label, variant = "muted" }: StatusBadgeProps) {
       styles.pill,
       variant === "success" && styles.pillSuccess,
       variant === "error" && styles.pillError,
+      variant === "warning" && styles.pillWarning,
     ],
     [variant],
   );
@@ -23,6 +24,7 @@ export function StatusBadge({ label, variant = "muted" }: StatusBadgeProps) {
       styles.pillText,
       variant === "success" && styles.pillTextSuccess,
       variant === "error" && styles.pillTextError,
+      variant === "warning" && styles.pillTextWarning,
     ],
     [variant],
   );
@@ -53,6 +55,10 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.palette.red[900],
     borderColor: theme.colors.palette.red[800],
   },
+  pillWarning: {
+    backgroundColor: theme.colors.palette.amber[900],
+    borderColor: theme.colors.palette.amber[800],
+  },
   pillText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.normal,
@@ -63,5 +69,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   pillTextError: {
     color: theme.colors.palette.red[500],
+  },
+  pillTextWarning: {
+    color: theme.colors.palette.amber[400],
   },
 }));

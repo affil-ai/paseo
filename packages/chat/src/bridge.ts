@@ -5,6 +5,13 @@ import type {
   DaemonClient,
   FetchAgentTimelinePayload,
 } from "@getpaseo/client/internal/daemon-client";
+import {
+  CHAT_STARTED_BY_AVATAR_URL_LABEL,
+  CHAT_STARTED_BY_HANDLE_LABEL,
+  CHAT_STARTED_BY_NAME_LABEL,
+  CHAT_STARTED_BY_SOURCE_LABEL,
+  CHAT_STARTED_BY_USER_ID_LABEL,
+} from "@getpaseo/protocol/agent-labels";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import {
   emoji,
@@ -42,6 +49,7 @@ import {
   getBindingOwnerAgentId,
   ThreadSessionStore,
   type ChatBinding,
+  type ChatStarter,
 } from "./state/thread-session-store.js";
 
 function sleep(ms: number): Promise<void> {
@@ -84,6 +92,17 @@ function getSlackThreadRootMessageId(message: Message): string {
   const raw = message.raw as { thread_ts?: unknown } | undefined;
   const threadTs = typeof raw?.thread_ts === "string" && raw.thread_ts ? raw.thread_ts : null;
   return threadTs ?? message.id;
+}
+
+function chatStarterLabels(startedBy: ChatStarter | undefined): Record<string, string> {
+  if (!startedBy) return {};
+  return {
+    [CHAT_STARTED_BY_SOURCE_LABEL]: startedBy.source,
+    [CHAT_STARTED_BY_USER_ID_LABEL]: startedBy.userId,
+    [CHAT_STARTED_BY_NAME_LABEL]: startedBy.name,
+    ...(startedBy.handle ? { [CHAT_STARTED_BY_HANDLE_LABEL]: startedBy.handle } : {}),
+    ...(startedBy.avatarUrl ? { [CHAT_STARTED_BY_AVATAR_URL_LABEL]: startedBy.avatarUrl } : {}),
+  };
 }
 
 export function buildStartedCardUrl(input: {
@@ -471,6 +490,7 @@ export class ChatBridge {
     attachments?: AgentAttachment[];
     thread?: Thread | null;
     initialRelayId?: string;
+    startedBy?: ChatStarter;
   }) {
     const workspaceResult = await this.client.createWorkspace({
       source: { kind: "directory", path: this.config.officeRepoPath },
@@ -494,6 +514,7 @@ export class ChatBridge {
       labels: {
         [CHAT_THREAD_LABEL]: input.externalThreadId,
         [CHAT_SOURCE_LABEL_KEY]: input.source,
+        ...chatStarterLabels(input.startedBy),
       },
     });
 
@@ -502,6 +523,7 @@ export class ChatBridge {
       kind: "inbound-session" as const,
       externalThreadId: input.externalThreadId,
       rootAgentId: agent.id,
+      ...(input.startedBy ? { startedBy: input.startedBy } : {}),
       activeRelayId: input.initialRelayId ?? null,
       muted: false,
       title: input.title,
@@ -564,6 +586,13 @@ export class ChatBridge {
       }),
       images: normalized.images,
       attachments: normalized.attachments,
+      startedBy: {
+        source: "slack",
+        userId: normalized.sender.userId,
+        name: normalized.sender.name,
+        ...(normalized.sender.handle ? { handle: normalized.sender.handle } : {}),
+        ...(normalized.sender.avatarUrl ? { avatarUrl: normalized.sender.avatarUrl } : {}),
+      },
       thread,
     });
     await thread

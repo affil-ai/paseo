@@ -9,6 +9,8 @@ import {
   GitHubCommandError,
   computeGithubNextInterval,
   createGitHubService,
+  extractDevinSessionUrl,
+  extractVercelPreviewLinks,
   resolveGitHubRepo,
   type GitHubCommandRunner,
   type GitHubCommandRunnerOptions,
@@ -2702,11 +2704,13 @@ describe("GitHubService", () => {
       runner: runner.runner,
       resolveGhPath: async () => "/usr/bin/gh",
       now: () => 100,
+      resolveRepo: async () => null,
     });
 
     const first = service.listPullRequests({ cwd: "/repo", query: "bug", limit: 10 });
     const second = service.listPullRequests({ cwd: "/repo", query: "bug", limit: 10 });
-    await Promise.resolve();
+    // Flush microtasks (load awaits resolveRepo before invoking the runner).
+    await vi.advanceTimersByTimeAsync(0);
     runner.resolveNext(pullRequestJson("Shared result"));
 
     await expect(Promise.all([first, second])).resolves.toEqual([
@@ -2722,6 +2726,15 @@ describe("GitHubService", () => {
           labels: ["bug"],
           updatedAt: "",
           isDraft: false,
+          reviewDecision: null,
+          mergeable: null,
+          previewLinks: [],
+          additions: null,
+          deletions: null,
+          createdAt: null,
+          lastCommitAt: null,
+          authorLogin: null,
+          devinSessionUrl: null,
         },
       ],
       [
@@ -2736,6 +2749,15 @@ describe("GitHubService", () => {
           labels: ["bug"],
           updatedAt: "",
           isDraft: false,
+          reviewDecision: null,
+          mergeable: null,
+          previewLinks: [],
+          additions: null,
+          deletions: null,
+          createdAt: null,
+          lastCommitAt: null,
+          authorLogin: null,
+          devinSessionUrl: null,
         },
       ],
     ]);
@@ -2845,6 +2867,15 @@ describe("GitHubService", () => {
           headRefName: "feature",
           updatedAt: "2026-04-18T13:00:00Z",
           isDraft: false,
+          reviewDecision: null,
+          mergeable: null,
+          previewLinks: [],
+          additions: null,
+          deletions: null,
+          createdAt: null,
+          lastCommitAt: null,
+          authorLogin: null,
+          devinSessionUrl: null,
         },
         {
           kind: "issue",
@@ -2883,7 +2914,7 @@ describe("GitHubService", () => {
           "--search",
           "cache",
           "--json",
-          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
+          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
           "--limit",
           "5",
         ],
@@ -2922,7 +2953,7 @@ describe("GitHubService", () => {
         "--search",
         "793",
         "--json",
-        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
+        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
         "--limit",
         "5",
       ],
@@ -2959,6 +2990,15 @@ describe("GitHubService", () => {
           headRefName: "feature",
           updatedAt: "2026-04-18T13:00:00Z",
           isDraft: false,
+          reviewDecision: null,
+          mergeable: null,
+          previewLinks: [],
+          additions: null,
+          deletions: null,
+          createdAt: null,
+          lastCommitAt: null,
+          authorLogin: null,
+          devinSessionUrl: null,
         },
       ],
     });
@@ -2972,12 +3012,138 @@ describe("GitHubService", () => {
           "--search",
           "cache",
           "--json",
-          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
+          "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
           "--limit",
           "5",
         ],
       },
     ]);
+  });
+
+  it("pins pr and issue lists to the origin repo so fork checkouts skip upstream", async () => {
+    const runner = createRunner([issueJson("Issue title"), searchPullRequestJson("PR title")]);
+    const service = createGitHubService({
+      runner: runner.runner,
+      resolveGhPath: async () => "/usr/bin/gh",
+      now: () => 100,
+      resolveRepo: async () => "affil-ai/paseo",
+    });
+
+    await service.searchIssuesAndPrs({ cwd: "/repo", query: "cache", limit: 5 });
+
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      [
+        "issue",
+        "list",
+        "--repo",
+        "affil-ai/paseo",
+        "--search",
+        "cache",
+        "--json",
+        "number,title,url,state,body,labels,updatedAt",
+        "--limit",
+        "5",
+      ],
+      [
+        "pr",
+        "list",
+        "--repo",
+        "affil-ai/paseo",
+        "--search",
+        "cache",
+        "--json",
+        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
+        "--limit",
+        "5",
+      ],
+    ]);
+  });
+
+  it("fetches the full open set when no limit is passed", async () => {
+    const runner = createRunner([searchPullRequestJson("PR title")]);
+    const service = createGitHubService({
+      runner: runner.runner,
+      resolveGhPath: async () => "/usr/bin/gh",
+      now: () => 100,
+      resolveRepo: async () => null,
+    });
+
+    await service.searchIssuesAndPrs({ cwd: "/repo", query: "", kinds: ["github-pr"] });
+
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      [
+        "pr",
+        "list",
+        "--search",
+        "",
+        "--json",
+        "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
+        "--limit",
+        "200",
+      ],
+    ]);
+  });
+
+  it("fetches a PR diff pinned to the origin repo and flags truncation", async () => {
+    const bigDiff = "diff --git a/a.ts b/a.ts\n" + "+x\n".repeat(4_000_000);
+    const runner = createRunner(["small diff", bigDiff]);
+    const service = createGitHubService({
+      runner: runner.runner,
+      resolveGhPath: async () => "/usr/bin/gh",
+      now: () => 100,
+      resolveRepo: async () => "affil-ai/paseo",
+    });
+
+    await expect(service.getPullRequestDiff({ cwd: "/repo", number: 42 })).resolves.toEqual({
+      diff: "small diff",
+      truncated: false,
+    });
+    expect(runner.calls[0]?.args).toEqual(["pr", "diff", "42", "--repo", "affil-ai/paseo"]);
+
+    const truncatedResult = await service.getPullRequestDiff({ cwd: "/repo", number: 43 });
+    expect(truncatedResult.truncated).toBe(true);
+    expect(truncatedResult.diff.length).toBe(3_000_000);
+  });
+
+  it("derives lastCommitAt from the newest commit in the summary", async () => {
+    const runner = createRunner([
+      JSON.stringify([
+        {
+          number: 7,
+          title: "Commit dates",
+          url: "https://github.com/acme/repo/pull/7",
+          state: "OPEN",
+          body: null,
+          baseRefName: "main",
+          headRefName: "feature",
+          labels: [],
+          updatedAt: "2026-04-18T13:00:00Z",
+          isDraft: false,
+          createdAt: "2026-04-16T09:00:00Z",
+          additions: 12,
+          deletions: 3,
+          commits: [
+            { committedDate: "2026-04-17T10:00:00Z" },
+            { committedDate: "2026-04-18T12:30:00Z" },
+            { committedDate: "2026-04-16T09:05:00Z" },
+          ],
+        },
+      ]),
+    ]);
+    const service = createGitHubService({
+      runner: runner.runner,
+      resolveGhPath: async () => "/usr/bin/gh",
+      now: () => 100,
+      resolveRepo: async () => null,
+    });
+
+    const [summary] = await service.listPullRequests({ cwd: "/repo", query: "", limit: 5 });
+    expect(summary).toMatchObject({
+      additions: 12,
+      deletions: 3,
+      createdAt: "2026-04-16T09:00:00Z",
+      lastCommitAt: "2026-04-18T12:30:00Z",
+    });
   });
 
   it("reuses cached PR status without another gh call", async () => {
@@ -3095,5 +3261,95 @@ describe("GitHubService", () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe("extractDevinSessionUrl", () => {
+  it("takes the session link from Devin's own comment, normalizing app/ and [bot] author forms", () => {
+    const url = "https://app.devin.ai/sessions/abc123def";
+    for (const login of [
+      "devin-ai-integration",
+      "app/devin-ai-integration",
+      "devin-ai-integration[bot]",
+    ]) {
+      expect(
+        extractDevinSessionUrl(
+          [{ author: { login }, body: `🤖 Devin is working on this. Session: ${url}` }],
+          null,
+        ),
+      ).toBe(url);
+    }
+  });
+
+  it("ignores devin.ai links in other authors' comments", () => {
+    expect(
+      extractDevinSessionUrl(
+        [{ author: { login: "octocat" }, body: "see https://app.devin.ai/sessions/not-devins" }],
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("falls back to the PR body when Devin has not commented a link", () => {
+    expect(extractDevinSessionUrl([], "Opened by https://app.devin.ai/sessions/from-body")).toBe(
+      "https://app.devin.ai/sessions/from-body",
+    );
+    expect(extractDevinSessionUrl([], "no link here")).toBeNull();
+    expect(extractDevinSessionUrl([], null)).toBeNull();
+  });
+});
+
+describe("extractVercelPreviewLinks", () => {
+  it("extracts per-project Visit Preview links from the Vercel deployment table", () => {
+    const body = [
+      "**The latest updates on your projects.**",
+      "",
+      "| Name | Status | Preview | Comments | Updated (UTC) |",
+      "| :--- | :----- | :------ | :------- | :------ |",
+      "| [**paseo-web**](https://vercel.com/acme/paseo-web) | ✅ Ready ([Inspect](https://vercel.com/acme/paseo-web/abc)) | [Visit Preview](https://paseo-web-git-feature-acme.vercel.app) | 💬 [**Add feedback**](https://vercel.live/open-feedback) | Apr 18, 2026 1:00pm |",
+      "| **docs** | ✅ Ready ([Inspect](https://vercel.com/acme/docs/def)) | [Visit Preview](https://docs-git-feature-acme.vercel.app) | 💬 | Apr 18, 2026 1:01pm |",
+    ].join("\n");
+
+    expect(extractVercelPreviewLinks([{ author: { login: "vercel[bot]" }, body }])).toEqual([
+      {
+        url: "https://paseo-web-git-feature-acme.vercel.app",
+        projectName: "paseo-web",
+      },
+      { url: "https://docs-git-feature-acme.vercel.app", projectName: "docs" },
+    ]);
+  });
+
+  it("falls back to bare vercel.app URLs when there is no deployment table", () => {
+    const body = "Deployed! Preview: https://app-git-fix-acme.vercel.app/some/path?x=1";
+    expect(extractVercelPreviewLinks([{ author: { login: "vercel" }, body }])).toEqual([
+      {
+        url: "https://app-git-fix-acme.vercel.app/some/path?x=1",
+        projectName: null,
+      },
+    ]);
+  });
+
+  it("uses only the latest Vercel-authored comment and ignores other authors", () => {
+    expect(
+      extractVercelPreviewLinks([
+        {
+          author: { login: "octocat" },
+          body: "[Visit Preview](https://not-vercel.example.com)",
+        },
+        {
+          author: { login: "vercel[bot]" },
+          body: "[Visit Preview](https://stale-git-old-acme.vercel.app)",
+        },
+        {
+          author: { login: "vercel[bot]" },
+          body: "[Visit Preview](https://fresh-git-new-acme.vercel.app)",
+        },
+      ]),
+    ).toEqual([{ url: "https://fresh-git-new-acme.vercel.app", projectName: null }]);
+  });
+
+  it("returns no links when Vercel has not commented", () => {
+    expect(extractVercelPreviewLinks([{ author: { login: "octocat" }, body: "LGTM" }])).toEqual([]);
+    expect(extractVercelPreviewLinks([])).toEqual([]);
   });
 });

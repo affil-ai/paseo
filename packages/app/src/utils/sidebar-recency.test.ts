@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
+  SIDEBAR_WORKSPACE_PREVIEW_STEP,
   getFirstSortableTimestamp,
   getVisibleWorkspacesForProject,
   sortWorkspacesByRecency,
@@ -60,7 +61,6 @@ describe("sidebar recency helpers", () => {
     const preview = getVisibleWorkspacesForProject({
       workspaces,
       activeWorkspaceKey: "srv:8",
-      isExpanded: false,
       previewLimit: DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
     });
 
@@ -77,7 +77,23 @@ describe("sidebar recency helpers", () => {
     ]);
   });
 
-  it("shows all workspaces when expanded", () => {
+  it("reveals one more step per grown preview limit", () => {
+    const workspaces = Array.from({ length: 20 }, (_, index) => ({
+      workspaceKey: `srv:${index + 1}`,
+    }));
+
+    const preview = getVisibleWorkspacesForProject({
+      workspaces,
+      activeWorkspaceKey: null,
+      previewLimit: DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT + SIDEBAR_WORKSPACE_PREVIEW_STEP,
+    });
+
+    expect(preview.hasHiddenWorkspaces).toBe(true);
+    expect(preview.visibleWorkspaces).toHaveLength(12);
+    expect(preview.hiddenCount).toBe(8);
+  });
+
+  it("shows all workspaces when the preview limit covers the list", () => {
     const workspaces = Array.from({ length: 8 }, (_, index) => ({
       workspaceKey: `srv:${index + 1}`,
     }));
@@ -85,11 +101,10 @@ describe("sidebar recency helpers", () => {
     const preview = getVisibleWorkspacesForProject({
       workspaces,
       activeWorkspaceKey: null,
-      isExpanded: true,
-      previewLimit: DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT,
+      previewLimit: DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT + SIDEBAR_WORKSPACE_PREVIEW_STEP,
     });
 
-    expect(preview.hasHiddenWorkspaces).toBe(true);
+    expect(preview.hasHiddenWorkspaces).toBe(false);
     expect(preview.hiddenCount).toBe(0);
     expect(preview.visibleWorkspaces).toHaveLength(8);
   });

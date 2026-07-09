@@ -46,6 +46,23 @@ function mockThread(): Thread {
   } as Thread;
 }
 
+function mockThreadWithUser(): Thread {
+  return {
+    ...mockThread(),
+    adapter: {
+      getUser: async (userId: string) =>
+        userId === "U123"
+          ? {
+              userId: "U123",
+              userName: "jane",
+              fullName: "Jane Profile",
+              avatarUrl: "https://example.com/jane.png",
+            }
+          : null,
+    },
+  } as Thread;
+}
+
 function mockMessage(attachments: Attachment[], overrides: Partial<Message> = {}): Message {
   return {
     id: "123.456",
@@ -64,6 +81,21 @@ function mockMessage(attachments: Attachment[], overrides: Partial<Message> = {}
 }
 
 describe("normalizeMessage URLs", () => {
+  it("resolves sender profile images through the Slack adapter", async () => {
+    const attachmentDir = await createTempDir();
+
+    const normalized = await normalizeMessage(mockThreadWithUser(), mockMessage([]), {
+      attachmentDir,
+    });
+
+    expect(normalized.sender).toEqual({
+      userId: "U123",
+      name: "Jane Profile",
+      handle: "jane",
+      avatarUrl: "https://example.com/jane.png",
+    });
+  });
+
   it("preserves full URLs from parsed Chat SDK links", async () => {
     const attachmentDir = await createTempDir();
 

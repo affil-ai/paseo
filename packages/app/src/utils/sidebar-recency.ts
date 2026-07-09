@@ -2,9 +2,13 @@
 // Conductor/T3Code sidebar (getVisibleThreadsForProject + threadSort). Kept as a
 // pure module so the ordering rules are unit-testable without React.
 
-// Default number of workspaces shown per project before "Show N more". Matches
+// Default number of workspaces shown per project before "Show more". Matches
 // the reference DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT = 6.
 export const DEFAULT_SIDEBAR_WORKSPACE_PREVIEW_COUNT = 6;
+
+// How many extra workspaces each "Show more" press reveals. "Show less"
+// collapses back to the default preview count in one step.
+export const SIDEBAR_WORKSPACE_PREVIEW_STEP = 6;
 
 export function toSortableTimestamp(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -68,20 +72,21 @@ export function sortWorkspacesByRecency<
 
 /**
  * Windows a (recency-sorted) workspace list into the preview slice plus hidden
- * remainder. The active/selected workspace is always kept visible even when it
- * falls outside the preview window, so the current selection never disappears
- * behind "Show more". Mirrors the reference getVisibleThreadsForProject.
+ * remainder. `previewLimit` is the current window size — "Show more" grows it
+ * by SIDEBAR_WORKSPACE_PREVIEW_STEP, "Show less" resets it to the default. The
+ * active/selected workspace is always kept visible even when it falls outside
+ * the preview window, so the current selection never disappears behind
+ * "Show more". Mirrors the reference getVisibleThreadsForProject.
  */
 export function getVisibleWorkspacesForProject<T extends { workspaceKey: string }>(input: {
   workspaces: readonly T[];
   activeWorkspaceKey: string | null | undefined;
-  isExpanded: boolean;
   previewLimit: number;
 }): { hasHiddenWorkspaces: boolean; visibleWorkspaces: T[]; hiddenCount: number } {
-  const { activeWorkspaceKey, isExpanded, previewLimit, workspaces } = input;
+  const { activeWorkspaceKey, previewLimit, workspaces } = input;
   const hasHiddenWorkspaces = workspaces.length > previewLimit;
 
-  if (!hasHiddenWorkspaces || isExpanded) {
+  if (!hasHiddenWorkspaces) {
     return { hasHiddenWorkspaces, visibleWorkspaces: [...workspaces], hiddenCount: 0 };
   }
 

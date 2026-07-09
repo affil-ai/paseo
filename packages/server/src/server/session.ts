@@ -1608,6 +1608,8 @@ export class Session {
         return this.checkoutSession.handlePullRequestTimelineRequest(msg);
       case "github_search_request":
         return this.checkoutSession.handleGitHubSearchRequest(msg);
+      case "github.pr.diff.request":
+        return this.checkoutSession.handleGithubPrDiffRequest(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);
       case "stash_pop_request":

@@ -19,6 +19,15 @@ const GITHUB_ENV = {
   GIT_TERMINAL_PROMPT: "0",
 } as const;
 
+// Default page size when the caller does not pass an explicit limit. High
+// enough to cover "every open PR/issue" for typical repos — the dashboard
+// omits the limit on purpose to get the whole open set.
+const GITHUB_LIST_DEFAULT_LIMIT = 200;
+
+// Ceiling on the raw unified diff text returned for a PR. Giant diffs get cut
+// at this size and flagged truncated instead of flooding the WebSocket.
+const MAX_PR_DIFF_CHARS = 3_000_000;
+
 const LabelSchema = z.object({
   name: z.string().optional(),
 });
@@ -33,6 +42,14 @@ const GitHubIssueSummarySchema = z.object({
   updatedAt: z.string().catch(""),
 });
 
+const PullRequestSummaryCommentSchema = z.object({
+  author: z
+    .object({ login: z.string().catch("") })
+    .nullable()
+    .catch(null),
+  body: z.string().catch(""),
+});
+
 const GitHubPullRequestSummarySchema = z.object({
   number: z.number(),
   title: z.string().catch(""),
@@ -44,6 +61,17 @@ const GitHubPullRequestSummarySchema = z.object({
   labels: z.array(LabelSchema).catch([]),
   updatedAt: z.string().catch(""),
   isDraft: z.boolean().catch(false),
+  reviewDecision: z.string().nullable().catch(null),
+  mergeable: z.string().nullable().catch(null),
+  comments: z.array(PullRequestSummaryCommentSchema).catch([]),
+  additions: z.number().nullable().catch(null),
+  deletions: z.number().nullable().catch(null),
+  createdAt: z.string().nullable().catch(null),
+  commits: z.array(z.object({ committedDate: z.string().catch("") })).catch([]),
+  author: z
+    .object({ login: z.string().catch("") })
+    .nullable()
+    .catch(null),
 });
 
 const PullRequestCheckRunNodeSchema = z.object({
@@ -510,6 +538,11 @@ export type GitHubCommandRunner = (
   options: GitHubCommandRunnerOptions,
 ) => Promise<GitHubCommandResult>;
 
+export interface GitHubPullRequestPreviewLink {
+  url: string;
+  projectName: string | null;
+}
+
 export interface GitHubPullRequestSummary {
   number: number;
   title: string;
@@ -521,6 +554,17 @@ export interface GitHubPullRequestSummary {
   labels: string[];
   updatedAt: string;
   isDraft: boolean;
+  reviewDecision: string | null;
+  mergeable: string | null;
+  previewLinks: GitHubPullRequestPreviewLink[];
+  additions: number | null;
+  deletions: number | null;
+  createdAt: string | null;
+  lastCommitAt: string | null;
+  /** PR author login, normalized (gh's `app/` prefix stripped for bots). */
+  authorLogin: string | null;
+  /** Devin session deep link from Devin's PR comment (or the body as fallback). */
+  devinSessionUrl: string | null;
 }
 
 export interface GitHubPullRequestCheckoutTarget {
@@ -715,6 +759,12 @@ export type GetGitHubPullRequestOptions = {
   number: number;
 } & GitHubReadOptions;
 
+export interface GitHubPullRequestDiff {
+  /** Raw unified diff text as returned by `gh pr diff`. */
+  diff: string;
+  truncated: boolean;
+}
+
 export type GetGitHubPullRequestTimelineOptions = {
   cwd: string;
   prNumber: number;
@@ -782,6 +832,15 @@ export interface GitHubSearchResult {
     headRefName?: string | null;
     updatedAt?: string;
     isDraft?: boolean;
+    reviewDecision?: string | null;
+    mergeable?: string | null;
+    previewLinks?: GitHubPullRequestPreviewLink[];
+    additions?: number | null;
+    deletions?: number | null;
+    createdAt?: string | null;
+    lastCommitAt?: string | null;
+    authorLogin?: string | null;
+    devinSessionUrl?: string | null;
   }>;
   githubFeaturesEnabled: boolean;
 }
@@ -806,6 +865,7 @@ export interface GitHubService {
   listPullRequests(options: ListGitHubPullRequestsOptions): Promise<GitHubPullRequestSummary[]>;
   listIssues(options: ListGitHubIssuesOptions): Promise<GitHubIssueSummary[]>;
   getPullRequest(options: GetGitHubPullRequestOptions): Promise<GitHubPullRequestSummary>;
+  getPullRequestDiff(options: GetGitHubPullRequestOptions): Promise<GitHubPullRequestDiff>;
   getPullRequestHeadRef(options: GetGitHubPullRequestOptions): Promise<string>;
   getPullRequestCheckoutTarget?(
     options: GetGitHubPullRequestOptions,
@@ -886,6 +946,8 @@ interface CreateGitHubServiceOptions {
   runner?: GitHubCommandRunner;
   resolveGhPath?: () => Promise<string | null>;
   now?: () => number;
+  /** Resolves the `owner/repo` the origin remote points at. Injectable for tests. */
+  resolveRepo?: (cwd: string) => Promise<string | null>;
 }
 
 interface CommandFailureLike {
@@ -931,6 +993,7 @@ interface ResolvedPullRequestCandidate {
 
 export function createGitHubService(options: CreateGitHubServiceOptions = {}): GitHubService {
   const ttlMs = options.ttlMs ?? DEFAULT_GITHUB_CACHE_TTL_MS;
+  const resolveRepo = options.resolveRepo ?? resolveGitHubRepo;
   const deps: GitHubServiceDependencies = {
     runner: options.runner ?? runGhCommand,
     resolveGhPath: options.resolveGhPath ?? resolveGhPath,
@@ -1104,19 +1167,28 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
       return cached({
         cwd: input.cwd,
         method: "listPullRequests",
-        args: { query: input.query ?? "", limit: input.limit ?? 20 },
+        args: { query: input.query ?? "", limit: input.limit ?? GITHUB_LIST_DEFAULT_LIMIT },
         readOptions: input,
         load: async () => {
+          // Pin to the origin repo: in fork checkouts gh otherwise defaults to
+          // the parent repo and lists upstream PRs instead of the fork's own.
+          const repo = await resolveRepo(input.cwd);
           const stdout = await run(
             [
               "pr",
               "list",
+              ...(repo ? ["--repo", repo] : []),
               "--search",
               input.query ?? "",
               "--json",
-              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft",
+              // NOTE: never request `commits` here. gh's `--json commits` always
+              // pulls a nested authors connection per commit, and GitHub sizes
+              // the query as limit × commits × authors. At GITHUB_LIST_DEFAULT_LIMIT
+              // that blows past GitHub's 500k-node GraphQL ceiling and the whole
+              // `gh pr list` call fails, emptying the dashboard board.
+              "number,title,url,state,body,labels,baseRefName,headRefName,updatedAt,isDraft,reviewDecision,mergeable,comments,additions,deletions,createdAt,author",
               "--limit",
-              String(input.limit ?? 20),
+              String(input.limit ?? GITHUB_LIST_DEFAULT_LIMIT),
             ],
             { cwd: input.cwd },
           );
@@ -1129,19 +1201,21 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
       return cached({
         cwd: input.cwd,
         method: "listIssues",
-        args: { query: input.query ?? "", limit: input.limit ?? 20 },
+        args: { query: input.query ?? "", limit: input.limit ?? GITHUB_LIST_DEFAULT_LIMIT },
         readOptions: input,
         load: async () => {
+          const repo = await resolveRepo(input.cwd);
           const stdout = await run(
             [
               "issue",
               "list",
+              ...(repo ? ["--repo", repo] : []),
               "--search",
               input.query ?? "",
               "--json",
               "number,title,url,state,body,labels,updatedAt",
               "--limit",
-              String(input.limit ?? 20),
+              String(input.limit ?? GITHUB_LIST_DEFAULT_LIMIT),
             ],
             { cwd: input.cwd },
           );
@@ -1168,6 +1242,29 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
             { cwd: input.cwd },
           );
           return parsePullRequestSummary(stdout);
+        },
+      });
+    },
+
+    getPullRequestDiff(input) {
+      return cached({
+        cwd: input.cwd,
+        method: "getPullRequestDiff",
+        args: { number: input.number },
+        readOptions: input,
+        load: async () => {
+          // Same origin pinning as listPullRequests: fork checkouts must diff
+          // the fork's PR, not the parent repo's PR with the same number.
+          const repo = await resolveRepo(input.cwd);
+          const stdout = await run(
+            ["pr", "diff", String(input.number), ...(repo ? ["--repo", repo] : [])],
+            { cwd: input.cwd },
+          );
+          const truncated = stdout.length > MAX_PR_DIFF_CHARS;
+          return {
+            diff: truncated ? stdout.slice(0, MAX_PR_DIFF_CHARS) : stdout,
+            truncated,
+          };
         },
       });
     },
@@ -1450,6 +1547,15 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
             headRefName: item.headRefName,
             updatedAt: item.updatedAt,
             isDraft: item.isDraft,
+            reviewDecision: item.reviewDecision,
+            mergeable: item.mergeable,
+            previewLinks: item.previewLinks,
+            additions: item.additions,
+            deletions: item.deletions,
+            createdAt: item.createdAt,
+            lastCommitAt: item.lastCommitAt,
+            authorLogin: item.authorLogin,
+            devinSessionUrl: item.devinSessionUrl,
           });
         }
       }
@@ -2208,7 +2314,109 @@ function toPullRequestSummary(
     labels: item.labels.map((label) => label.name ?? "").filter((name) => name.length > 0),
     updatedAt: item.updatedAt,
     isDraft: item.isDraft,
+    reviewDecision: item.reviewDecision || null,
+    mergeable: item.mergeable || null,
+    previewLinks: extractVercelPreviewLinks(item.comments),
+    additions: item.additions,
+    deletions: item.deletions,
+    createdAt: item.createdAt || null,
+    lastCommitAt: latestCommitTimestamp(item.commits),
+    authorLogin: normalizeGitHubLogin(item.author?.login),
+    devinSessionUrl: extractDevinSessionUrl(item.comments, item.body),
   };
+}
+
+/**
+ * gh renders GitHub App authors as `app/<slug>` in list JSON and some
+ * surfaces append `[bot]`; strip both so callers compare plain slugs
+ * (`devin-ai-integration`).
+ */
+function normalizeGitHubLogin(login: string | null | undefined): string | null {
+  const trimmed = login?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/^app\//i, "").replace(/\[bot\]$/i, "");
+}
+
+const DEVIN_SESSION_URL_PATTERN = /https:\/\/(?:app\.)?devin\.ai\/[^\s)<>"'`]+/i;
+
+/**
+ * Devin posts the session deep link in a PR comment (its author is the
+ * `devin-ai-integration` app). The first Devin-authored comment with a link
+ * wins; the PR body is a fallback for older/manual formats.
+ */
+export function extractDevinSessionUrl(
+  comments: Array<{ author: { login: string } | null; body: string }>,
+  body: string | null,
+): string | null {
+  for (const comment of comments) {
+    if (normalizeGitHubLogin(comment.author?.login) !== "devin-ai-integration") {
+      continue;
+    }
+    const match = comment.body.match(DEVIN_SESSION_URL_PATTERN);
+    if (match) {
+      return match[0];
+    }
+  }
+  return body?.match(DEVIN_SESSION_URL_PATTERN)?.[0] ?? null;
+}
+
+function latestCommitTimestamp(commits: Array<{ committedDate: string }>): string | null {
+  let latest: string | null = null;
+  for (const commit of commits) {
+    const date = commit.committedDate;
+    if (date && (!latest || date > latest)) {
+      latest = date;
+    }
+  }
+  return latest;
+}
+
+const VISIT_PREVIEW_LINK_PATTERN = /\[Visit Preview\]\((https?:\/\/[^)\s]+)\)/gi;
+const VERCEL_TABLE_ROW_PATTERN = /\|\s*\[?\*\*([^*\]]+)\*\*[^|\n]*\|([^\n]*)/g;
+const VERCEL_PREVIEW_URL_PATTERN = /https?:\/\/[a-z0-9][a-z0-9.-]*\.vercel\.app[^\s)<>"'`]*/gi;
+
+/**
+ * Pulls deployment preview URLs out of the Vercel bot's PR comment. Vercel posts
+ * one comment per PR and keeps editing it, so only the latest Vercel-authored
+ * comment is inspected. Handles the deployment table (per-project "Visit
+ * Preview" links) and falls back to any *.vercel.app URL in the comment.
+ */
+export function extractVercelPreviewLinks(
+  comments: Array<{ author: { login: string } | null; body: string }>,
+): GitHubPullRequestPreviewLink[] {
+  const source = comments.findLast((comment) => {
+    const login = comment.author?.login.toLowerCase() ?? "";
+    return login === "vercel" || login.startsWith("vercel[");
+  })?.body;
+  if (!source) {
+    return [];
+  }
+
+  const links = new Map<string, GitHubPullRequestPreviewLink>();
+  for (const row of source.matchAll(VERCEL_TABLE_ROW_PATTERN)) {
+    const projectName = row[1]?.trim() || null;
+    const preview = row[2]?.match(/\[Visit Preview\]\((https?:\/\/[^)\s]+)\)/i);
+    const url = preview?.[1];
+    if (url) {
+      links.set(url, { url, projectName });
+    }
+  }
+  if (links.size === 0) {
+    for (const match of source.matchAll(VISIT_PREVIEW_LINK_PATTERN)) {
+      const url = match[1];
+      if (url) {
+        links.set(url, { url, projectName: null });
+      }
+    }
+  }
+  if (links.size === 0) {
+    for (const match of source.matchAll(VERCEL_PREVIEW_URL_PATTERN)) {
+      links.set(match[0], { url: match[0], projectName: null });
+    }
+  }
+  return [...links.values()];
 }
 
 function parseIssueSummaries(stdout: string): GitHubIssueSummary[] {

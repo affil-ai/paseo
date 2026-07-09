@@ -50,6 +50,7 @@ import type {
   BranchSuggestionsResponse,
   GitHubSearchResponse,
   GitHubSearchRequest,
+  GithubPrDiffResponse,
   DirectorySuggestionsResponse,
   PaseoWorktreeListResponse,
   PaseoWorktreeArchiveResponse,
@@ -325,6 +326,7 @@ type StashListPayload = StashListResponse["payload"];
 type ValidateBranchPayload = ValidateBranchResponse["payload"];
 type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
+type GithubPrDiffPayload = GithubPrDiffResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type PaseoWorktreeListPayload = PaseoWorktreeListResponse["payload"];
 type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
@@ -3586,6 +3588,21 @@ export class DaemonClient {
         kinds: options.kinds,
       },
       responseType: "github_search_response",
+    });
+  }
+
+  async getPullRequestDiff(
+    options: { cwd: string; number: number },
+    requestId?: string,
+  ): Promise<GithubPrDiffPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "github.pr.diff.request",
+        cwd: options.cwd,
+        number: options.number,
+      },
+      responseType: "github.pr.diff.response",
     });
   }
 

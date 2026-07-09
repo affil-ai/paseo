@@ -1,3 +1,4 @@
+import { getChatStartedByFromLabels, type ChatStartedBy } from "@getpaseo/protocol/agent-labels";
 import type { PrHint } from "@/git/pr-hint";
 import { selectPrHintFromStatus } from "@/git/pr-hint";
 import { type HostProjectListItem } from "@/projects/host-project-model";
@@ -51,6 +52,7 @@ export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
   archiveUnpushedCommitCount: number | null;
   scripts: WorkspaceDescriptor["scripts"];
   hasRunningScripts: boolean;
+  chatStartedBy: ChatStartedBy | null;
 }
 
 export interface SidebarProjectEntry {
@@ -129,6 +131,10 @@ export function createSidebarWorkspaceEntry(input: {
     archiveUnpushedCommitCount: input.workspace.gitRuntime?.aheadOfOrigin ?? null,
     scripts: input.workspace.scripts,
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
+    chatStartedBy: getRootAgentWorkspaceChatStarter({
+      workspace: input.workspace,
+      agents: input.agents,
+    }),
   };
 }
 
@@ -155,8 +161,18 @@ function deriveEffectiveWorkspaceStatus(input: {
     workspace: input.workspace,
     agents: input.agents,
   });
+  const runningSubagentActivity = getRunningSubagentWorkspaceActivity({
+    workspace: input.workspace,
+    agents: input.agents,
+  });
+  if (rootAgentActivity?.status === "attention" && runningSubagentActivity) {
+    return runningSubagentActivity;
+  }
   if (rootAgentActivity && rootAgentActivity.status !== "done") {
     return rootAgentActivity;
+  }
+  if (runningSubagentActivity) {
+    return runningSubagentActivity;
   }
 
   return { status: input.workspace.status, enteredAt: input.workspace.statusEnteredAt };
@@ -200,6 +216,58 @@ function getRootAgentWorkspaceActivity(input: {
     }
   }
   return latest;
+}
+
+function getRunningSubagentWorkspaceActivity(input: {
+  workspace: WorkspaceDescriptor;
+  agents?: Map<string, Agent>;
+}): WorkspaceAgentActivity | null {
+  let latest: WorkspaceAgentActivity | null = null;
+  const agents = input.agents;
+  if (!agents) return null;
+
+  for (const agent of agents.values()) {
+    if (agent.archivedAt || !agent.parentAgentId) continue;
+    if (deriveSidebarStateBucket({ status: agent.status }) !== "running") continue;
+    const rootParent = getRootParentAgent(agent, agents);
+    if (!rootParent || rootParent.archivedAt) continue;
+    if (rootParent.workspaceId !== input.workspace.id) continue;
+    if (!latest || agent.updatedAt > (latest.enteredAt ?? new Date(0))) {
+      latest = { status: "running", enteredAt: agent.updatedAt };
+    }
+  }
+
+  return latest;
+}
+
+function getRootParentAgent(agent: Agent, agents: Map<string, Agent>): Agent | null {
+  let current: Agent | null = agents.get(agent.parentAgentId ?? "") ?? null;
+  const visited = new Set<string>([agent.id]);
+
+  while (current?.parentAgentId) {
+    if (visited.has(current.id)) return null;
+    visited.add(current.id);
+    current = agents.get(current.parentAgentId) ?? null;
+  }
+
+  return current ?? null;
+}
+
+function getRootAgentWorkspaceChatStarter(input: {
+  workspace: WorkspaceDescriptor;
+  agents?: Map<string, Agent>;
+}): ChatStartedBy | null {
+  let latest: { startedBy: ChatStartedBy; createdAt: Date } | null = null;
+  for (const agent of input.agents?.values() ?? []) {
+    if (agent.archivedAt || agent.parentAgentId) continue;
+    if (agent.workspaceId !== input.workspace.id) continue;
+    const startedBy = getChatStartedByFromLabels(agent.labels);
+    if (!startedBy) continue;
+    if (!latest || agent.createdAt > latest.createdAt) {
+      latest = { startedBy, createdAt: agent.createdAt };
+    }
+  }
+  return latest?.startedBy ?? null;
 }
 
 export function buildSidebarWorkspacePlacementModel(input: {

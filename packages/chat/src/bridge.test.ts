@@ -173,6 +173,13 @@ describe("ChatBridge session creation", () => {
         title: "Slack request",
         systemPrompt: "system rules",
         initialPrompt: "Jane: please check this",
+        startedBy: {
+          source: "slack",
+          userId: "U123",
+          name: "Jane Doe",
+          handle: "jane",
+          avatarUrl: "https://example.com/jane.png",
+        },
         thread: thread as never,
       });
 
@@ -182,10 +189,24 @@ describe("ChatBridge session creation", () => {
           initialPrompt: "Jane: please check this",
           labels: expect.objectContaining({
             "paseo.chat-source": "slack",
+            "paseo.chat-started-by-avatar-url": "https://example.com/jane.png",
+            "paseo.chat-started-by-handle": "jane",
+            "paseo.chat-started-by-name": "Jane Doe",
+            "paseo.chat-started-by-source": "slack",
+            "paseo.chat-started-by-user-id": "U123",
             "paseo.chat-thread-id": "slack:D123:111.222",
           }),
         }),
       ]);
+      await expect(store.getSession("slack:D123:111.222")).resolves.toMatchObject({
+        startedBy: {
+          source: "slack",
+          userId: "U123",
+          name: "Jane Doe",
+          handle: "jane",
+          avatarUrl: "https://example.com/jane.png",
+        },
+      });
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }

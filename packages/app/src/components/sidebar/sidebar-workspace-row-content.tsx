@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   Text,
   View,
@@ -131,6 +132,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
       <View style={styles.workspaceRowMain}>
         <WorkspaceStatusIndicator
           bucket={workspace.statusBucket}
+          chatStartedBy={workspace.chatStartedBy}
           workspaceKind={workspace.workspaceKind}
           loading={isLoading}
         />
@@ -184,14 +186,21 @@ function WorkspaceScriptIcon({ kind }: { kind: SidebarWorkspaceScriptIconKind })
 
 function WorkspaceStatusIndicator({
   bucket,
+  chatStartedBy,
   workspaceKind,
   loading = false,
 }: {
   bucket: SidebarWorkspaceEntry["statusBucket"];
+  chatStartedBy: SidebarWorkspaceEntry["chatStartedBy"];
   workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
   loading?: boolean;
 }) {
   const shouldShowSyncedLoader = shouldRenderSyncedStatusLoader({ bucket });
+  const starterAvatarSource = useMemo(
+    () => (chatStartedBy?.avatarUrl ? { uri: chatStartedBy.avatarUrl } : undefined),
+    [chatStartedBy?.avatarUrl],
+  );
+  const starterAvatarLabel = `${chatStartedBy?.name ?? "Slack user"} started this chat`;
 
   if (loading) {
     return (
@@ -221,6 +230,21 @@ function WorkspaceStatusIndicator({
     return (
       <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-attention">
         <View style={styles.standaloneStatusDot} />
+      </View>
+    );
+  }
+
+  if (bucket === "done" && starterAvatarSource) {
+    return (
+      <View
+        style={styles.workspaceStatusDot}
+        testID="workspace-status-indicator-chat-starter-avatar"
+      >
+        <Image
+          source={starterAvatarSource}
+          style={styles.workspaceStarterAvatar}
+          accessibilityLabel={starterAvatarLabel}
+        />
       </View>
     );
   }
@@ -516,6 +540,12 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
+  },
+  workspaceStarterAvatar: {
+    width: 16,
+    height: 16,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
   },
   statusDotOverlay: {
     position: "absolute",

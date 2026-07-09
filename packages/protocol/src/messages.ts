@@ -1761,6 +1761,11 @@ export const BranchSuggestionsRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const GitHubSearchPreviewLinkSchema = z.object({
+  url: z.string(),
+  projectName: z.string().nullable().optional(),
+});
+
 export const GitHubSearchItemSchema = z.object({
   kind: z.enum(["issue", "pr"]),
   number: z.number(),
@@ -1774,6 +1779,17 @@ export const GitHubSearchItemSchema = z.object({
   updatedAt: z.string().optional(),
   // COMPAT(githubSearchIsDraft): added in v0.1.103, drop the optional gate when floor >= v0.1.103.
   isDraft: z.boolean().optional(),
+  // COMPAT(githubSearchPrSignals): added in v0.1.104, drop the optional gates when floor >= v0.1.104.
+  reviewDecision: z.string().nullable().optional(),
+  mergeable: z.string().nullable().optional(),
+  previewLinks: z.array(GitHubSearchPreviewLinkSchema).optional(),
+  additions: z.number().nullable().optional(),
+  deletions: z.number().nullable().optional(),
+  createdAt: z.string().nullable().optional(),
+  lastCommitAt: z.string().nullable().optional(),
+  // COMPAT(githubSearchAuthor): added in v0.1.105, drop the optional gates when floor >= v0.1.105.
+  authorLogin: z.string().nullable().optional(),
+  devinSessionUrl: z.string().nullable().optional(),
 });
 
 export const GitHubSearchKindSchema = z.enum(["github-issue", "github-pr"]);
@@ -1784,6 +1800,13 @@ export const GitHubSearchRequestSchema = z.object({
   query: z.string(),
   limit: z.number().int().min(1).max(50).optional(),
   kinds: z.array(GitHubSearchKindSchema).optional(),
+  requestId: z.string(),
+});
+
+export const GithubPrDiffRequestSchema = z.object({
+  type: z.literal("github.pr.diff.request"),
+  cwd: z.string(),
+  number: z.number().int().positive(),
   requestId: z.string(),
 });
 
@@ -2253,6 +2276,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchRequestSchema,
   BranchSuggestionsRequestSchema,
   GitHubSearchRequestSchema,
+  GithubPrDiffRequestSchema,
   DirectorySuggestionsRequestSchema,
   PaseoWorktreeListRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
@@ -3889,6 +3913,17 @@ export const GitHubSearchResponseSchema = z.object({
   }),
 });
 
+export const GithubPrDiffResponseSchema = z.object({
+  type: z.literal("github.pr.diff.response"),
+  payload: z.object({
+    // Raw unified diff text; null when the fetch failed.
+    diff: z.string().nullable(),
+    truncated: z.boolean().optional(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const DirectorySuggestionsResponseSchema = z.object({
   type: z.literal("directory_suggestions_response"),
   payload: z.object({
@@ -4414,6 +4449,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchResponseSchema,
   BranchSuggestionsResponseSchema,
   GitHubSearchResponseSchema,
+  GithubPrDiffResponseSchema,
   DirectorySuggestionsResponseSchema,
   PaseoWorktreeListResponseSchema,
   PaseoWorktreeArchiveResponseSchema,
@@ -4738,9 +4774,12 @@ export type ValidateBranchResponse = z.infer<typeof ValidateBranchResponseSchema
 export type BranchSuggestionsRequest = z.infer<typeof BranchSuggestionsRequestSchema>;
 export type BranchSuggestionsResponse = z.infer<typeof BranchSuggestionsResponseSchema>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
+export type GitHubSearchPreviewLink = z.infer<typeof GitHubSearchPreviewLinkSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;
 export type GitHubSearchResponse = z.infer<typeof GitHubSearchResponseSchema>;
+export type GithubPrDiffRequest = z.infer<typeof GithubPrDiffRequestSchema>;
+export type GithubPrDiffResponse = z.infer<typeof GithubPrDiffResponseSchema>;
 export type CreatePaseoWorktreeRequest = z.infer<typeof CreatePaseoWorktreeRequestSchema>;
 export type DirectorySuggestionsRequest = z.infer<typeof DirectorySuggestionsRequestSchema>;
 export type DirectorySuggestionsResponse = z.infer<typeof DirectorySuggestionsResponseSchema>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorkspaceDescriptor } from "@/stores/session-store";
+import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
 import type { WorkspaceStructureProject } from "@/projects/workspace-structure";
 import {
   appendMissingOrderKeys,
@@ -8,6 +8,7 @@ import {
   buildSidebarWorkspacePlacementModel,
   buildSidebarProjectsFromStructure,
   computeSidebarOrderUpdates,
+  createSidebarWorkspaceEntry,
   deriveSidebarLoadingState,
   shouldShowSidebarHostLabels,
   type SidebarProjectEntry,
@@ -82,6 +83,43 @@ function workspace(input: {
     diffStat: null,
     scripts: [],
   };
+}
+
+function agent(input: {
+  id: string;
+  workspaceId: string;
+  status?: Agent["status"];
+  labels?: Record<string, string>;
+  parentAgentId?: string | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+  requiresAttention?: boolean;
+  attentionReason?: Agent["attentionReason"];
+}): Agent {
+  return {
+    id: input.id,
+    serverId: "srv",
+    provider: "pi",
+    status: input.status ?? "idle",
+    createdAt: input.createdAt ?? new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: input.updatedAt ?? new Date("2026-01-01T00:00:00.000Z"),
+    lastUserMessageAt: null,
+    lastActivityAt: new Date("2026-01-01T00:00:00.000Z"),
+    capabilities: {},
+    currentModeId: null,
+    availableModes: [],
+    pendingPermissions: [],
+    persistence: null,
+    title: null,
+    cwd: "/repo/project",
+    workspaceId: input.workspaceId,
+    model: null,
+    thinkingOptionId: null,
+    requiresAttention: input.requiresAttention ?? false,
+    attentionReason: input.attentionReason ?? null,
+    parentAgentId: input.parentAgentId ?? null,
+    labels: input.labels ?? {},
+  } as unknown as Agent;
 }
 
 describe("applyStoredOrdering", () => {
@@ -295,6 +333,129 @@ describe("shared sidebar workspace model", () => {
       ],
     );
     expect(model.projectNamesByKey).toEqual(new Map([["getpaseo/paseo", "getpaseo/paseo"]]));
+  });
+});
+
+describe("createSidebarWorkspaceEntry", () => {
+  it("marks a root workspace as running when one of its subagents is running", () => {
+    const entry = createSidebarWorkspaceEntry({
+      serverId: "srv",
+      workspace: workspace({
+        id: "parent-workspace",
+        name: "parent-workspace",
+        projectId: "office",
+        projectDisplayName: "office",
+        status: "done",
+      }),
+      agents: new Map([
+        [
+          "parent",
+          agent({
+            id: "parent",
+            workspaceId: "parent-workspace",
+            status: "idle",
+          }),
+        ],
+        [
+          "child",
+          agent({
+            id: "child",
+            workspaceId: "child-worktree",
+            parentAgentId: "parent",
+            status: "running",
+            updatedAt: new Date("2026-06-01T12:00:00.000Z"),
+          }),
+        ],
+      ]),
+    });
+
+    expect(entry.statusBucket).toBe("running");
+    expect(entry.statusEnteredAt).toEqual(new Date("2026-06-01T12:00:00.000Z"));
+  });
+
+  it("does not mark a root workspace active for non-running subagent attention", () => {
+    const entry = createSidebarWorkspaceEntry({
+      serverId: "srv",
+      workspace: workspace({
+        id: "parent-workspace",
+        name: "parent-workspace",
+        projectId: "office",
+        projectDisplayName: "office",
+        status: "done",
+      }),
+      agents: new Map([
+        [
+          "parent",
+          agent({
+            id: "parent",
+            workspaceId: "parent-workspace",
+            status: "idle",
+          }),
+        ],
+        [
+          "child",
+          agent({
+            id: "child",
+            workspaceId: "child-worktree",
+            parentAgentId: "parent",
+            status: "idle",
+            requiresAttention: true,
+            attentionReason: "finished",
+          }),
+        ],
+      ]),
+    });
+
+    expect(entry.statusBucket).toBe("done");
+  });
+
+  it("derives Slack starter metadata from the workspace root agent", () => {
+    const entry = createSidebarWorkspaceEntry({
+      serverId: "srv",
+      workspace: workspace({
+        id: "office-thread",
+        name: "office-thread",
+        projectId: "office",
+        projectDisplayName: "office",
+      }),
+      agents: new Map([
+        [
+          "agent-child",
+          agent({
+            id: "agent-child",
+            workspaceId: "office-thread",
+            parentAgentId: "agent-office",
+            labels: {
+              "paseo.chat-started-by-source": "slack",
+              "paseo.chat-started-by-user-id": "U-child",
+              "paseo.chat-started-by-name": "Child",
+            },
+          }),
+        ],
+        [
+          "agent-office",
+          agent({
+            id: "agent-office",
+            workspaceId: "office-thread",
+            labels: {
+              "paseo.chat-started-by-source": "slack",
+              "paseo.chat-started-by-user-id": "U123",
+              "paseo.chat-started-by-name": "Jane Doe",
+              "paseo.chat-started-by-handle": "jane",
+              "paseo.chat-started-by-avatar-url": "https://example.com/jane.png",
+            },
+          }),
+        ],
+      ]),
+    });
+
+    expect(entry.chatStartedBy).toEqual({
+      source: "slack",
+      userId: "U123",
+      name: "Jane Doe",
+      handle: "jane",
+      avatarUrl: "https://example.com/jane.png",
+    });
   });
 });
 
