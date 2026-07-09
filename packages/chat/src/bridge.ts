@@ -325,7 +325,9 @@ export class ChatBridge {
       );
       return true;
     }
-    if (normalized.command === "archive" && existing) {
+    const isMentionedArchiveCommand =
+      normalized.command === "archive" && message.isMention === true;
+    if (isMentionedArchiveCommand && existing) {
       await this.client.archiveAgent(getBindingOwnerAgentId(existing));
       await this.store.deleteSession(normalized.externalThreadId);
       await this.reactToArchiveCommand(thread, message);

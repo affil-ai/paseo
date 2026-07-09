@@ -648,7 +648,7 @@ describe("ChatBridge follow-up delivery", () => {
     }
   });
 
-  it("archives on @cto done and reacts to the root Slack message", async () => {
+  it("archives only an exact command that explicitly mentions the bot", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {
       const externalThreadId = "slack:C123:111.222";
@@ -666,11 +666,16 @@ describe("ChatBridge follow-up delivery", () => {
       });
 
       const archivedAgents: string[] = [];
+      const sentMessages: string[] = [];
       const postedMessages: unknown[] = [];
       const reactions: Array<{ messageId: string; emoji: string }> = [];
       const client = {
         archiveAgent: async (agentId: string) => {
           archivedAgents.push(agentId);
+        },
+        fetchAgentTimeline: async () => ({ window: { nextSeq: 1 } }),
+        sendAgentMessage: async (_agentId: string, text: string) => {
+          sentMessages.push(text);
         },
       };
       const bridge = new ChatBridge(
@@ -704,22 +709,47 @@ describe("ChatBridge follow-up delivery", () => {
         }),
         adapter: {},
       };
+      const author = {
+        userId: "U1",
+        userName: "john",
+        fullName: "John",
+        isBot: false,
+        isMe: false,
+      };
+      for (const [id, text] of [
+        ["333.441", "done"],
+        ["333.442", "archive"],
+      ]) {
+        await bridge.handleMessage(
+          thread as never,
+          {
+            id,
+            text,
+            raw: { text, thread_ts: "111.222" },
+            author,
+            attachments: [],
+            links: [],
+            isMention: false,
+          } as never,
+          "subscribed",
+        );
+      }
+
+      expect(archivedAgents).toEqual([]);
+      expect(sentMessages).toHaveLength(2);
+      expect(sentMessages[0]).toContain("John (@john): done");
+      expect(sentMessages[1]).toContain("John (@john): archive");
+      await expect(store.getSession(externalThreadId)).resolves.not.toBeNull();
+
       const message = {
         id: "333.444",
         text: "<@UCTO> done",
         raw: { text: "<@UCTO> done", thread_ts: "111.222" },
-        author: {
-          userId: "U1",
-          userName: "john",
-          fullName: "John",
-          isBot: false,
-          isMe: false,
-        },
+        author,
         attachments: [],
         links: [],
-        isMention: false,
+        isMention: true,
       };
-
       await bridge.handleMessage(thread as never, message as never, "subscribed");
 
       expect(archivedAgents).toEqual([rootAgentId]);
