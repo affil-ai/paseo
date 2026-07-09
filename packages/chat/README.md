@@ -44,6 +44,8 @@ node packages/chat/dist/index.js
 
 Mention the bot in Slack or DM it. Replies in the same thread continue the Office agent. In `PASEO_CHAT_RELAY_MODE=auto`, the bridge automatically relays first/final assistant text to the thread; if the office agent explicitly calls `chat.send` for that same binding, the explicit tool post suppresses the active auto relay for that turn. In `PASEO_CHAT_RELAY_MODE=manual`, assistant text is never auto-posted and the office agent must call `chat.send` to send Slack-visible text and/or files.
 
+To archive the office agent and unlink its thread, explicitly mention the bot with only `done` or `archive` after the mention (for example, `@cto done`). Matching ignores case and surrounding whitespace after mention cleaning. Bare `done` or `archive` replies in a linked thread, `/archive`, and prose such as `archive this` or `done?` do not archive.
+
 Agent-initiated `chat.*` tools call the loopback service, authenticated by the generated `$PASEO_CHAT_STATE_DIR/service-token`, so agents never receive Slack tokens and all posts/uploads still go through Chat SDK. The daemon only exposes `chat.*` tools to agents stamped with the chat office-agent label; coding subagents do not receive those tools.
 
 ## HTTP mode with a tunnel

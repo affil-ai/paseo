@@ -815,6 +815,9 @@ skipping them produces double-posts, loops, or dropped messages. Most are **v1**
   who isn't the bot, ignore it. DMs bypass this.
 - **Ambient-message gate (channels only):** with no existing thread link and no bot mention,
   ignore. In a DM, every message counts as addressed to the bot.
+- **Explicit-mention commands use `message.isMention`.** Chat SDK routes mentions in subscribed
+  threads through `onSubscribedMessage`, not `onNewMention`, so command policy must use the
+  structured message flag rather than callback source or raw Slack mention syntax.
 
 ### Channel vs DM differences — **v1**
 
@@ -1078,8 +1081,11 @@ bridge still posts only the first complete assistant text and final assistant te
   under the real repo's project. The bridge stamps `paseo.chat-thread-id` only on the office
   agent; child grouping comes from `paseo.parent-agent-id`.
 - **Teardown policy → v1.** A thread's office agent is archived (`client.archiveAgent`) and its
-  store entry dropped on an explicit `@bot done` / thread-archive signal or when it reaches a
-  terminal `closed` state. Idle agents are left alive so a later reply can resume them. Archive
+  store entry dropped only when the user explicitly mentions the bot and the entire message after
+  mention cleaning is `done` or `archive` (for example, `@bot done`), or when it reaches a terminal
+  `closed` state. Matching is case/whitespace-insensitive after mention cleaning. Bare commands in
+  linked threads, `/archive`, and extra prose do not archive. Idle agents are left alive so a later
+  reply can resume them. Archive
   cascades to subagents (`agent-lifecycle.md`). **Teardown is also the office brain's capture
   trigger** — before archiving, the office agent writes what was decided/done/learned into its
   memory; see [office-brain.md](office-brain.md).

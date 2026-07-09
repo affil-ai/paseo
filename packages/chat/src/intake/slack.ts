@@ -89,7 +89,7 @@ export function parseCommand(text: string): ThreadCommand {
   if (/^(mute|quiet|stop|shut up|silence)\b/.test(cleaned)) return "mute";
   if (/\b(mute|shut up|stop replying|be quiet)\b/.test(cleaned)) return "mute";
   if (/^(unmute|resume replies)\b/.test(cleaned)) return "unmute";
-  if (cleaned === "/archive") return "archive";
+  if (["done", "archive"].includes(cleaned)) return "archive";
   if (/^↑\s*$/.test(cleaned) || /^up\s*$/.test(cleaned)) return "escape";
   if (/^aside\s*-/.test(cleaned)) return "aside";
   return null;

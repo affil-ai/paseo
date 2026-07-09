@@ -147,8 +147,8 @@ OKF identity is the file path, and `index.md` is regenerated from whatever's the
 
 The compounding loop. Triggered three ways:
 
-- **Automatically at thread teardown.** When a chat-bridge thread closes (`@cto done` / archive
-  — see chat-bridge teardown policy), the office agent writes what was decided/done/learned into
+- **Automatically at thread teardown.** When a chat-bridge thread closes with `@cto done` or
+  `@cto archive` (see chat-bridge teardown policy), the office agent writes what was decided/done/learned into
   the relevant `memory/` pages, sets `resource` to the Slack permalink, and appends an entry to
   `log.md`. This happens for free on every task — it's the primary ingestion path.
   Capture is **attributed**: the chat bridge passes the sender's identity (see
