@@ -632,29 +632,31 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
-  // --- New terminal ---
+  // --- Terminal below ---
+  // Keep the original binding ids so existing user overrides survive the
+  // default shortcut change from Mod+Shift+T to Mod+J.
   {
     id: "workspace-terminal-new-cmd-shift-t-mac",
     action: "workspace.terminal.new",
-    combo: "Cmd+Shift+T",
+    combo: "Cmd+J",
     when: { mac: true, commandCenter: false },
     help: {
       id: "workspace-terminal-new",
       section: "panels",
-      label: "New terminal",
-      keys: ["mod", "shift", "T"],
+      label: "Open terminal below",
+      keys: ["mod", "J"],
     },
   },
   {
     id: "workspace-terminal-new-ctrl-shift-t-non-mac",
     action: "workspace.terminal.new",
-    combo: "Ctrl+Shift+T",
+    combo: "Ctrl+J",
     when: { mac: false, commandCenter: false, terminal: false },
     help: {
       id: "workspace-terminal-new",
       section: "panels",
-      label: "New terminal",
-      keys: ["mod", "shift", "T"],
+      label: "Open terminal below",
+      keys: ["mod", "J"],
     },
   },
 

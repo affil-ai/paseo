@@ -266,6 +266,7 @@ export interface SendMessageOptions {
   messageId?: string;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  userMessageSource?: SendAgentMessageRequest["userMessageSource"];
 }
 
 type AgentConfigOverrides = Partial<Omit<AgentSessionConfig, "provider" | "cwd">>;
@@ -278,6 +279,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   workspaceId?: string;
   initialPrompt?: string;
   clientMessageId?: string;
+  initialMessageSource?: CreateAgentRequestMessage["initialMessageSource"];
   outputSchema?: Record<string, unknown>;
   images?: CreateAgentRequestMessage["images"];
   attachments?: CreateAgentRequestMessage["attachments"];
@@ -2122,6 +2124,9 @@ export class DaemonClient {
       ...(options.workspaceId !== undefined ? { workspaceId: options.workspaceId } : {}),
       ...(options.initialPrompt ? { initialPrompt: options.initialPrompt } : {}),
       ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),
+      ...(options.initialMessageSource
+        ? { initialMessageSource: options.initialMessageSource }
+        : {}),
       ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
       ...(options.images && options.images.length > 0 ? { images: options.images } : {}),
       ...(options.attachments && options.attachments.length > 0
@@ -2519,6 +2524,7 @@ export class DaemonClient {
       ...(messageId ? { messageId } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
+      ...(options?.userMessageSource ? { userMessageSource: options.userMessageSource } : {}),
     });
     const payload = await this.sendRequest({
       requestId,

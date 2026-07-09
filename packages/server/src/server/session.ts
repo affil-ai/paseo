@@ -2510,6 +2510,7 @@ export class Session {
       requestId,
       initialPrompt,
       clientMessageId,
+      initialMessageSource,
       outputSchema,
       git,
       worktree,
@@ -2576,6 +2577,7 @@ export class Session {
           worktreeName,
           initialPrompt,
           clientMessageId,
+          initialMessageSource,
           outputSchema,
           images,
           attachments,
@@ -5517,6 +5519,9 @@ export class Session {
           agentId,
           prompt,
           messageId: msg.messageId,
+          runOptions: msg.userMessageSource
+            ? { userMessageSource: msg.userMessageSource }
+            : undefined,
           logger: this.sessionLogger,
         });
       } catch (error) {

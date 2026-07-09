@@ -1,5 +1,6 @@
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentProviderNotice } from "@getpaseo/protocol/agent-types";
+import type { ChatUserMessageSource } from "@getpaseo/protocol/agent-labels";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { PaseoToolCatalog } from "./tools/types.js";
 
@@ -202,6 +203,7 @@ export interface AgentRunOptions {
   resumeFrom?: AgentPersistenceHandle;
   maxThinkingTokens?: number;
   messageId?: string;
+  userMessageSource?: ChatUserMessageSource;
 }
 
 export interface AgentUsage {
@@ -376,6 +378,7 @@ export type AgentTimelineItem =
       messageId?: string;
       images?: Array<{ data: string; mimeType: string }>;
       attachments?: AgentAttachment[];
+      source?: ChatUserMessageSource;
     }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }

@@ -1,4 +1,5 @@
 import type { AgentAttachment } from "./messages.js";
+import type { ChatUserMessageSource } from "./agent-labels.js";
 
 export type AgentProvider = string;
 
@@ -343,6 +344,7 @@ export type AgentTimelineItem =
       messageId?: string;
       images?: Array<{ data: string; mimeType: string }>;
       attachments?: AgentAttachment[];
+      source?: ChatUserMessageSource;
     }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }

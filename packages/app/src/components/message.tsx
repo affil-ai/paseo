@@ -45,7 +45,6 @@ import {
   Scissors,
   MicVocal,
   FileSymlink,
-  Slack,
   Mail,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -68,7 +67,12 @@ import type { TodoEntry, UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
-import { extractChatToolMessage } from "@/utils/chat-tool-message";
+import {
+  extractChatToolDelivery,
+  type ChatToolDelivery,
+  type ChatToolFile,
+} from "@/utils/chat-tool-message";
+import { SlackIcon } from "@/components/icons/slack-icon";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
@@ -175,7 +179,6 @@ const ThemedTodoCheckIcon = withUnistyles(Check);
 const ThemedFileSymlinkIcon = withUnistyles(FileSymlink);
 const ThemedTriangleAlertIcon = withUnistyles(TriangleAlertIcon);
 const ThemedChevronRightIcon = withUnistyles(ChevronRight);
-const ThemedSlackIcon = withUnistyles(Slack);
 const ThemedSupportIcon = withUnistyles(Mail);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -369,7 +372,6 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     position: "absolute",
     top: theme.spacing[2],
     right: theme.spacing[2],
-    opacity: 0.82,
   },
   text: {
     color: theme.colors.foreground,
@@ -556,7 +558,7 @@ export const UserMessage = memo(function UserMessage({
           {source ? (
             <View style={userMessageStylesheet.sourceBadge} pointerEvents="none">
               {source === "slack" ? (
-                <ThemedSlackIcon size={13} uniProps={foregroundMutedColorMapping} />
+                <SlackIcon size={13} />
               ) : (
                 <ThemedSupportIcon size={13} uniProps={foregroundMutedColorMapping} />
               )}
@@ -1403,33 +1405,112 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
   },
 }));
 
-const chatToolReplyBubbleStylesheet = StyleSheet.create((theme) => ({
-  bubble: {
-    backgroundColor: theme.colors.surface3,
-    borderRadius: theme.borderRadius["2xl"],
-    borderTopLeftRadius: theme.borderRadius.sm,
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[4],
-    paddingTop: theme.spacing[4] + theme.spacing[1],
-    paddingLeft: theme.spacing[6],
+const chatToolDeliveryStylesheet = StyleSheet.create((theme) => ({
+  container: {
+    borderTopWidth: theme.borderWidth[1],
+    borderBottomWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[3],
     minWidth: 0,
     flexShrink: 1,
   },
-  slackSourceBadge: {
-    position: "absolute",
-    top: theme.spacing[2],
-    left: theme.spacing[2],
-    opacity: 0.82,
+  contentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: theme.spacing[2],
+  },
+  content: {
+    flex: 1,
+    minWidth: 0,
+  },
+  files: {
+    marginTop: theme.spacing[3],
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
   },
 }));
 
-function ChatToolReplyBubble({ message }: { message: string }) {
+function isChatToolImage(file: ChatToolFile): boolean {
+  if (file.mimeType?.startsWith("image/")) return true;
+  return /\.(?:avif|gif|jpe?g|png|webp)$/i.test(file.filename);
+}
+
+function ChatToolFilePreview({
+  file,
+  cwd,
+  serverId,
+  client,
+}: {
+  file: ChatToolFile;
+  cwd?: string;
+  serverId?: string;
+  client?: DaemonClient | null;
+}) {
+  const { t } = useTranslation();
+  if (isChatToolImage(file)) {
+    return (
+      <AssistantMarkdownImage
+        source={file.path}
+        alt={file.filename}
+        hasLeadingContent={false}
+        client={client}
+        workspaceRoot={cwd}
+        serverId={serverId}
+      />
+    );
+  }
+  const attachment: AgentAttachment = {
+    type: "uploaded_file",
+    id: `chat-tool:${file.path}`,
+    fileName: file.filename,
+    mimeType: file.mimeType ?? "application/octet-stream",
+    size: 0,
+    path: file.path,
+  };
+  const content = getAgentAttachmentPillContent(attachment, t);
   return (
-    <View style={chatToolReplyBubbleStylesheet.bubble}>
-      <View style={chatToolReplyBubbleStylesheet.slackSourceBadge} pointerEvents="none">
-        <ThemedSlackIcon size={13} uniProps={foregroundMutedColorMapping} />
+    <AttachmentFrame>
+      <AttachmentLabel icon={content.icon} title={content.title} subtitle={content.subtitle} />
+    </AttachmentFrame>
+  );
+}
+
+function ChatToolDeliveryView({
+  delivery,
+  cwd,
+  serverId,
+  client,
+}: {
+  delivery: ChatToolDelivery;
+  cwd?: string;
+  serverId?: string;
+  client?: DaemonClient | null;
+}) {
+  return (
+    <View style={chatToolDeliveryStylesheet.container}>
+      <View style={chatToolDeliveryStylesheet.contentRow}>
+        <SlackIcon size={16} />
+        {delivery.message ? (
+          <View style={chatToolDeliveryStylesheet.content}>
+            <MarkdownRenderer text={delivery.message} enableHtmlish={false} />
+          </View>
+        ) : null}
       </View>
-      <MarkdownRenderer text={message} enableHtmlish={false} />
+      {delivery.files.length > 0 ? (
+        <View style={chatToolDeliveryStylesheet.files}>
+          {delivery.files.map((file) => (
+            <ChatToolFilePreview
+              key={`${file.path}:${file.filename}`}
+              file={file}
+              cwd={cwd}
+              serverId={serverId}
+              client={client}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -3141,6 +3222,8 @@ interface ToolCallProps {
   detail?: ToolCallDetail;
   cwd?: string;
   metadata?: Record<string, unknown>;
+  serverId?: string;
+  client?: DaemonClient | null;
   isLastInSequence?: boolean;
   disableOuterSpacing?: boolean;
   onInlineDetailsHoverChange?: (hovered: boolean) => void;
@@ -3157,6 +3240,8 @@ export const ToolCall = memo(function ToolCall({
   detail,
   cwd,
   metadata,
+  serverId,
+  client,
   isLastInSequence = false,
   disableOuterSpacing,
   onInlineDetailsHoverChange,
@@ -3195,17 +3280,25 @@ export const ToolCall = memo(function ToolCall({
       }),
     [toolName, status, error, effectiveDetail, metadata, cwd],
   );
-  const chatToolMessage = useMemo(
+  const chatToolDelivery = useMemo(
     () =>
-      extractChatToolMessage({
+      extractChatToolDelivery({
         toolName,
         args: args ?? (effectiveDetail?.type === "unknown" ? effectiveDetail.input : undefined),
       }),
     [toolName, args, effectiveDetail],
   );
   const chatToolMessageContent = useMemo(
-    () => (chatToolMessage ? <ChatToolReplyBubble message={chatToolMessage} /> : null),
-    [chatToolMessage],
+    () =>
+      chatToolDelivery && (chatToolDelivery.message || chatToolDelivery.files.length > 0) ? (
+        <ChatToolDeliveryView
+          delivery={chatToolDelivery}
+          cwd={cwd}
+          serverId={serverId}
+          client={client}
+        />
+      ) : null,
+    [chatToolDelivery, client, cwd, serverId],
   );
   const handleOpenFile = useMemo(() => {
     const openFilePath = presentation.openFilePath;
@@ -3318,6 +3411,8 @@ function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   if (previous.detail !== next.detail) return false;
   if (previous.cwd !== next.cwd) return false;
   if (previous.metadata !== next.metadata) return false;
+  if (previous.serverId !== next.serverId) return false;
+  if (previous.client !== next.client) return false;
   if (previous.isLastInSequence !== next.isLastInSequence) return false;
   if (previous.disableOuterSpacing !== next.disableOuterSpacing) return false;
   if (previous.onOpenFilePath !== next.onOpenFilePath) return false;

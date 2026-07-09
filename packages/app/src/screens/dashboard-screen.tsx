@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
   Pressable,
@@ -17,8 +17,7 @@ import {
   CircleX,
   Globe,
   GitPullRequest,
-  PanelRightOpen,
-  Slack,
+  MessageSquareText,
   TriangleAlert,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -55,6 +54,7 @@ import { openExternalUrl } from "@/utils/open-external-url";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { formatTimeAgo } from "@/utils/time";
 import { isWeb } from "@/constants/platform";
+import { SlackIcon } from "@/components/icons/slack-icon";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 
@@ -66,14 +66,14 @@ const COLUMNS: Array<{ id: DashboardPrColumn; label: string }> = [
 
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
-const ThemedSlack = withUnistyles(Slack);
 const ThemedGlobe = withUnistyles(Globe);
-const ThemedPanelRightOpen = withUnistyles(PanelRightOpen);
+const ThemedMessageSquareText = withUnistyles(MessageSquareText);
 const ThemedTriangleAlert = withUnistyles(TriangleAlert);
 const ThemedCircleX = withUnistyles(CircleX);
 
 const mutedIconUniProps = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const dangerIconUniProps = (theme: Theme) => ({ color: theme.colors.statusDanger });
+const blueIconUniProps = (theme: Theme) => ({ color: theme.colors.palette.blue[500] });
 
 // Devin's GitHub App avatar; hoisted so the <Image> source is a stable reference.
 const DEVIN_AVATAR_SOURCE = {
@@ -516,7 +516,7 @@ function PullRequestCard({
     return Number.isNaN(date.getTime()) ? null : formatTimeAgo(date);
   }, [pr.lastCommitAt, pr.createdAt]);
 
-  const hasChipsRow = pr.origin !== null || pr.workspace !== null;
+  const hasChipsRow = pr.workspace !== null;
 
   return (
     <Pressable style={cardStyle} onPress={handlePress} accessibilityRole="button">
@@ -532,6 +532,7 @@ function PullRequestCard({
         <Text style={styles.cardProject} numberOfLines={1}>
           {pr.projectName}
         </Text>
+        {pr.origin ? <SlackOriginIcon origin={pr.origin} /> : null}
         {pr.devin ? <DevinAvatar devin={pr.devin} /> : null}
         <View style={styles.cardTopSpacer} />
         {pr.badge ? <PullRequestBadge badge={pr.badge} /> : null}
@@ -549,7 +550,6 @@ function PullRequestCard({
       </View>
       {hasChipsRow ? (
         <View style={styles.cardChipsRow}>
-          {pr.origin ? <OriginChip origin={pr.origin} /> : null}
           <View style={styles.cardChipsSpacer} />
           {pr.workspace ? (
             <Pressable
@@ -558,7 +558,7 @@ function PullRequestCard({
               accessibilityRole="button"
               accessibilityLabel="Open workspace"
             >
-              <ThemedPanelRightOpen size={14} uniProps={mutedIconUniProps} />
+              <ThemedMessageSquareText size={14} uniProps={blueIconUniProps} />
             </Pressable>
           ) : null}
         </View>
@@ -566,6 +566,34 @@ function PullRequestCard({
       {pr.previewLinks.map((link) => (
         <PreviewLinkRow key={link.url} link={link} />
       ))}
+    </Pressable>
+  );
+}
+
+function SlackOriginIcon({ origin }: { origin: NonNullable<DashboardPullRequest["origin"]> }) {
+  const handlePress = useCallback(
+    (event: { stopPropagation: () => void }) => {
+      event.stopPropagation();
+      if (origin.url) {
+        void openExternalUrl(origin.url);
+      }
+    },
+    [origin.url],
+  );
+  if (!origin.url) {
+    return (
+      <View accessibilityRole="image" accessibilityLabel="Started in Slack">
+        <SlackIcon size={14} />
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="link"
+      accessibilityLabel="Open Slack thread"
+    >
+      <SlackIcon size={14} />
     </Pressable>
   );
 }
@@ -586,6 +614,7 @@ function DevinAvatar({ devin }: { devin: NonNullable<DashboardPullRequest["devin
       <Image
         source={DEVIN_AVATAR_SOURCE}
         style={styles.devinAvatar}
+        resizeMode="contain"
         accessibilityLabel="Authored by Devin"
       />
     );
@@ -596,7 +625,7 @@ function DevinAvatar({ devin }: { devin: NonNullable<DashboardPullRequest["devin
       accessibilityRole="link"
       accessibilityLabel="Open Devin session"
     >
-      <Image source={DEVIN_AVATAR_SOURCE} style={styles.devinAvatar} />
+      <Image source={DEVIN_AVATAR_SOURCE} style={styles.devinAvatar} resizeMode="contain" />
     </Pressable>
   );
 }
@@ -683,53 +712,6 @@ function PullRequestNumberLink({ number, url }: { number: number; url: string })
       {({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
         <Text style={hovered ? styles.cardNumberHovered : styles.cardNumber}>#{number}</Text>
       )}
-    </Pressable>
-  );
-}
-
-function OriginChip({ origin }: { origin: NonNullable<DashboardPullRequest["origin"]> }) {
-  return <LinkChip icon={ThemedSlack} label="Slack" url={origin.url} />;
-}
-
-function LinkChip({
-  icon: Icon,
-  label,
-  url,
-}: {
-  icon: ComponentType<{ size?: number; uniProps?: (theme: Theme) => { color: string } }>;
-  label: string;
-  url: string | null;
-}) {
-  const handlePress = useCallback(
-    (event: { stopPropagation: () => void }) => {
-      event.stopPropagation();
-      if (url) {
-        void openExternalUrl(url);
-      }
-    },
-    [url],
-  );
-  if (!url) {
-    return (
-      <View style={styles.chip}>
-        <Icon size={12} uniProps={mutedIconUniProps} />
-        <Text style={styles.chipText} numberOfLines={1}>
-          {label}
-        </Text>
-      </View>
-    );
-  }
-  return (
-    <Pressable
-      style={chipPressableStyle}
-      onPress={handlePress}
-      accessibilityRole="link"
-      accessibilityLabel={`Open ${label}`}
-    >
-      <Icon size={12} uniProps={mutedIconUniProps} />
-      <Text style={styles.chipText} numberOfLines={1}>
-        {label}
-      </Text>
     </Pressable>
   );
 }
@@ -999,9 +981,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
   },
   devinAvatar: {
-    width: 14,
+    width: 16,
     height: 14,
-    borderRadius: theme.borderRadius.full,
   },
   cardTitle: {
     color: theme.colors.foreground,
@@ -1053,24 +1034,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   cardChipsSpacer: {
     flexGrow: 1,
-  },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-    borderRadius: theme.borderRadius.full,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 2,
-    maxWidth: 160,
-  },
-  chipHovered: {
-    backgroundColor: theme.colors.surface2,
-  },
-  chipText: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
   },
   previewLink: {
     flexDirection: "row",
@@ -1130,10 +1093,6 @@ function columnDotStyle(column: DashboardPrColumn) {
 
 function triggerStyle({ hovered }: { pressed: boolean; hovered: boolean; open: boolean }) {
   return [styles.filterTrigger, hovered && styles.filterTriggerHovered];
-}
-
-function chipPressableStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
-  return [styles.chip, hovered && styles.chipHovered];
 }
 
 function previewLinkStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {

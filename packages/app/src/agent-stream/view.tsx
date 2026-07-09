@@ -48,7 +48,6 @@ import type {
   AgentPermissionAction,
   AgentPermissionResponse,
 } from "@getpaseo/protocol/agent-types";
-import { getChatUserMessageSourceFromLabels } from "@getpaseo/protocol/agent-labels";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
@@ -338,7 +337,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     // Get serverId (fallback to agent's serverId if not provided)
     const resolvedServerId = serverId ?? agent.serverId ?? "";
-    const userMessageSource = getChatUserMessageSourceFromLabels(agent.labels);
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
     const streamHead = useSessionStore((state) =>
@@ -595,11 +593,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             client={client}
             isFirstInGroup={layoutItem.isFirstInUserGroup}
             isLastInGroup={layoutItem.isLastInUserGroup}
-            source={userMessageSource ?? undefined}
+            source={item.source}
           />
         );
       },
-      [agent.capabilities, agentId, client, userMessageSource, resolvedServerId],
+      [agent.capabilities, agentId, client, resolvedServerId],
     );
 
     const renderAssistantMessageItem = useCallback(
@@ -669,6 +667,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               status={data.status}
               detail={data.detail}
               cwd={agent.cwd}
+              serverId={resolvedServerId}
+              client={client}
               metadata={data.metadata}
               isLastInSequence={layoutItem.isLastInToolSequence}
               onOpenFilePath={handleToolCallOpenFile}
@@ -685,12 +685,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             args={data.arguments}
             result={data.result}
             status={data.status}
+            cwd={agent.cwd}
+            serverId={resolvedServerId}
+            client={client}
             isLastInSequence={layoutItem.isLastInToolSequence}
             onOpenFilePath={handleToolCallOpenFile}
           />
         );
       },
-      [agent.cwd, setInlineDetailsExpanded, handleToolCallOpenFile],
+      [agent.cwd, client, handleToolCallOpenFile, resolvedServerId, setInlineDetailsExpanded],
     );
 
     const renderStreamItemContent = useCallback(

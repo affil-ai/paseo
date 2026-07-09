@@ -79,6 +79,7 @@ export interface EmailSessionBridge {
     externalThreadId: string;
     source: "slack" | "support";
     title: string;
+    workspaceTitlePrompt?: string;
     systemPrompt?: string;
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;

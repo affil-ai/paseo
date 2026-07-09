@@ -2459,6 +2459,22 @@ function WorkspaceScreenContent({
 
   const handleCreateTerminal = useStableEvent(createTerminal);
 
+  const handleCreateTerminalBelow = useStableEvent(() => {
+    if (!persistenceKey || !focusedPaneTabState.pane) {
+      createTerminal();
+      return;
+    }
+    const paneId = splitWorkspacePaneEmpty(persistenceKey, {
+      targetPaneId: focusedPaneTabState.pane.id,
+      position: "bottom",
+    });
+    if (!paneId) {
+      createTerminal();
+      return;
+    }
+    createTerminal({ paneId });
+  });
+
   const handleCreateTerminalWithProfile = useCallback(
     (profile: TerminalProfileInput) => {
       createTerminal({ profile });
@@ -2888,7 +2904,7 @@ function WorkspaceScreenContent({
           handleCreateDraftTab();
           return true;
         case "workspace.terminal.new":
-          handleCreateTerminal();
+          handleCreateTerminalBelow();
           return true;
         case "workspace.tab.close-current":
           if (activeTabId) {
@@ -2922,7 +2938,7 @@ function WorkspaceScreenContent({
       activeTabId,
       handleCloseTabById,
       handleCreateDraftTab,
-      handleCreateTerminal,
+      handleCreateTerminalBelow,
       navigateToTabId,
       tabs,
     ],

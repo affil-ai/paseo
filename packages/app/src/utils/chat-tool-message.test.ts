@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { extractChatToolMessage, isChatDeliveryToolName } from "./chat-tool-message";
+import {
+  extractChatToolDelivery,
+  extractChatToolMessage,
+  isChatDeliveryToolName,
+} from "./chat-tool-message";
 
 describe("chat-tool-message", () => {
   it("recognizes chat delivery tool name variants", () => {
@@ -62,5 +66,49 @@ describe("chat-tool-message", () => {
         args: { message: "echo should not render as chat text" },
       }),
     ).toBeUndefined();
+  });
+
+  it("extracts files from chat.send using explicit and path-derived names", () => {
+    expect(
+      extractChatToolDelivery({
+        toolName: "chat.send",
+        args: {
+          message: "Artifacts attached",
+          files: [
+            { path: "/tmp/report.pdf", mimeType: "application/pdf" },
+            { path: "screenshots/final.png", filename: "result.png", mimeType: "image/png" },
+          ],
+        },
+      }),
+    ).toEqual({
+      message: "Artifacts attached",
+      files: [
+        {
+          path: "/tmp/report.pdf",
+          filename: "report.pdf",
+          mimeType: "application/pdf",
+        },
+        {
+          path: "screenshots/final.png",
+          filename: "result.png",
+          mimeType: "image/png",
+        },
+      ],
+    });
+  });
+
+  it("extracts file-only deliveries from nested MCP args", () => {
+    expect(
+      extractChatToolDelivery({
+        toolName: "mcp",
+        args: {
+          tool: "paseo_chat.send",
+          args: JSON.stringify({ files: [{ path: "out/chart.png" }] }),
+        },
+      }),
+    ).toEqual({
+      message: undefined,
+      files: [{ path: "out/chart.png", filename: "chart.png", mimeType: undefined }],
+    });
   });
 });

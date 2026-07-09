@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { PARENT_AGENT_ID_LABEL, type ChatUserMessageSource } from "@getpaseo/protocol/agent-labels";
 import type { TerminalManager } from "../../../terminal/terminal-manager.js";
 import type { CreatePaseoWorktreeInput } from "../../paseo-worktree-service.js";
 import { expandUserPath, resolvePathFromBase } from "../../path-utils.js";
@@ -63,6 +63,7 @@ export interface CreateAgentFromSessionInput {
   worktreeName?: string;
   initialPrompt?: string;
   clientMessageId?: string;
+  initialMessageSource?: ChatUserMessageSource;
   outputSchema?: Record<string, unknown>;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: AgentAttachment[];
@@ -227,10 +228,11 @@ async function resolveSessionCreateAgent(
   const hasPromptContent = Array.isArray(prompt) ? prompt.length > 0 : prompt.length > 0;
   const clientMessageId = normalizeClientMessageId(input.clientMessageId);
   const runOptions: AgentRunOptions | undefined =
-    input.outputSchema || clientMessageId
+    input.outputSchema || clientMessageId || input.initialMessageSource
       ? {
           ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
           ...(clientMessageId ? { messageId: clientMessageId } : {}),
+          ...(input.initialMessageSource ? { userMessageSource: input.initialMessageSource } : {}),
         }
       : undefined;
   const workspaceId = setupContinuation ? createdWorkspaceId : input.workspaceId;

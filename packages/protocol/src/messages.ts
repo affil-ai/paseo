@@ -663,6 +663,8 @@ const ToolCallTimelineItemPayloadSchema: z.ZodType<ToolCallTimelineItem, unknown
 
 // zod-aot 0.20.4 miscompiles this as a nested discriminated union by omitting
 // the inner tool_call branch from the generated outer dispatch.
+const ChatUserMessageSourceSchema = z.enum(["slack", "support"]);
+
 export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknown> = z.union([
   z.object({
     type: z.literal("user_message"),
@@ -670,6 +672,7 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     messageId: z.string().optional(),
     images: z.lazy(() => z.array(ImageAttachmentSchema)).optional(),
     attachments: z.lazy(() => AgentAttachmentsSchema).optional(),
+    source: ChatUserMessageSourceSchema.optional(),
   }),
   z.object({
     type: z.literal("assistant_message"),
@@ -1053,6 +1056,7 @@ export const SendAgentMessageSchema = z.object({
   messageId: z.string().optional(), // Client-provided ID for deduplication
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  userMessageSource: ChatUserMessageSourceSchema.optional(),
 });
 
 // ============================================================================
@@ -1170,6 +1174,7 @@ export const SendAgentMessageRequestSchema = z.object({
   messageId: z.string().optional(), // Client-provided ID for deduplication
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  userMessageSource: ChatUserMessageSourceSchema.optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({
@@ -1288,6 +1293,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   worktreeName: z.string().optional(),
   initialPrompt: z.string().optional(),
   clientMessageId: z.string().optional(),
+  initialMessageSource: ChatUserMessageSourceSchema.optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,

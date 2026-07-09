@@ -235,8 +235,6 @@ describe("normalizeMessage attachments", () => {
     );
 
     expect(normalized.attachments).toEqual([]);
-    expect(normalized.cleanedText).toContain(
-      "Attachments:\n- remote.pdf (application/pdf): https://example.com/remote.pdf",
-    );
+    expect(normalized.cleanedText).toBe("please inspect this");
   });
 });

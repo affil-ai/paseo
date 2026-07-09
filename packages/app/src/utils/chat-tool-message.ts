@@ -40,6 +40,47 @@ function readMessageFromArgs(args: unknown): string | undefined {
   return readMessageFromArgs(args.args);
 }
 
+export interface ChatToolFile {
+  path: string;
+  filename: string;
+  mimeType: string | undefined;
+}
+
+export interface ChatToolDelivery {
+  message: string | undefined;
+  files: ChatToolFile[];
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).findLast((segment) => segment.length > 0) ?? path;
+}
+
+function readFilesFromArgs(args: unknown): ChatToolFile[] {
+  if (typeof args === "string") {
+    const parsed = parseJsonRecord(args);
+    return parsed ? readFilesFromArgs(parsed) : [];
+  }
+  if (!isRecord(args)) {
+    return [];
+  }
+  if (Array.isArray(args.files)) {
+    return args.files.flatMap((file) => {
+      if (!isRecord(file)) return [];
+      const path = readString(file.path);
+      if (!path) return [];
+      return [
+        {
+          path,
+          filename: readString(file.filename) ?? fileNameFromPath(path),
+          mimeType: readString(file.mimeType),
+        },
+      ];
+    });
+  }
+  const inputFiles = readFilesFromArgs(args.input);
+  return inputFiles.length > 0 ? inputFiles : readFilesFromArgs(args.args);
+}
+
 function readRequestedToolName(args: unknown): string | undefined {
   if (typeof args === "string") {
     const parsed = parseJsonRecord(args);
@@ -65,6 +106,13 @@ export function extractChatToolMessage(params: {
   toolName: string;
   args: unknown;
 }): string | undefined {
+  return extractChatToolDelivery(params)?.message;
+}
+
+export function extractChatToolDelivery(params: {
+  toolName: string;
+  args: unknown;
+}): ChatToolDelivery | undefined {
   const requestedToolName = readRequestedToolName(params.args);
   if (
     !isChatDeliveryToolName(params.toolName) &&
@@ -72,5 +120,8 @@ export function extractChatToolMessage(params: {
   ) {
     return undefined;
   }
-  return readMessageFromArgs(params.args);
+  return {
+    message: readMessageFromArgs(params.args),
+    files: readFilesFromArgs(params.args),
+  };
 }

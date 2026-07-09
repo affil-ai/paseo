@@ -1345,4 +1345,74 @@ describe("turn lifecycle events", () => {
       ["native-1", "native-2"],
     );
   });
+
+  it("preserves per-message Slack provenance without labeling Paseo messages", () => {
+    const slackResult = applyStreamEvent({
+      tail: [],
+      head: [],
+      event: {
+        type: "timeline",
+        provider: "pi",
+        item: {
+          type: "user_message",
+          text: "from Slack",
+          messageId: "slack-1",
+          source: "slack",
+        },
+      },
+      timestamp: new Date("2025-01-01T16:00:00Z"),
+      source: "live",
+    });
+    const paseoResult = applyStreamEvent({
+      tail: slackResult.tail,
+      head: slackResult.head,
+      event: {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "user_message", text: "from Paseo", messageId: "paseo-1" },
+      },
+      timestamp: new Date("2025-01-01T16:01:00Z"),
+      source: "live",
+    });
+
+    const userMessages = paseoResult.tail.filter((item) => item.kind === "user_message");
+    expect(userMessages.map((item) => item.source)).toEqual(["slack", undefined]);
+  });
+
+  it("keeps file-only user messages in the stream", () => {
+    const result = applyStreamEvent({
+      tail: [],
+      head: [],
+      event: {
+        type: "timeline",
+        provider: "pi",
+        item: {
+          type: "user_message",
+          text: "",
+          messageId: "file-only",
+          attachments: [
+            {
+              type: "uploaded_file",
+              id: "file-1",
+              fileName: "report.pdf",
+              mimeType: "application/pdf",
+              size: 42,
+              path: "/tmp/report.pdf",
+            },
+          ],
+          source: "slack",
+        },
+      },
+      timestamp: new Date("2025-01-01T16:02:00Z"),
+      source: "live",
+    });
+
+    expect(result.tail).toHaveLength(1);
+    expect(result.tail[0]).toMatchObject({
+      kind: "user_message",
+      id: "file-only",
+      source: "slack",
+      attachments: [{ id: "file-1" }],
+    });
+  });
 });

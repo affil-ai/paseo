@@ -9,6 +9,7 @@ import {
   getParentAgentIdFromLabels,
   isDelegatedAgent,
   PARENT_AGENT_ID_LABEL,
+  type ChatUserMessageSource,
 } from "@getpaseo/protocol/agent-labels";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -546,6 +547,9 @@ export class AgentManager {
   private readonly registry?: AgentStorage;
   private readonly durableTimelineStore?: AgentTimelineStore;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
+  private readonly userMessageSourcesById = new Map<string, ChatUserMessageSource>();
+  private readonly userMessageSourcesByTurnId = new Map<string, ChatUserMessageSource>();
+  private readonly pendingUserMessageSourcesByAgentId = new Map<string, ChatUserMessageSource>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
@@ -1760,6 +1764,21 @@ export class AgentManager {
     agent.pendingReplacement = false;
     agent.lastError = undefined;
 
+    if (options?.messageId && options.userMessageSource) {
+      this.userMessageSourcesById.set(options.messageId, options.userMessageSource);
+      if (this.userMessageSourcesById.size > 1_000) {
+        const oldestMessageId = this.userMessageSourcesById.keys().next().value;
+        if (oldestMessageId) {
+          this.userMessageSourcesById.delete(oldestMessageId);
+        }
+      }
+    }
+    if (options?.userMessageSource) {
+      this.pendingUserMessageSourcesByAgentId.set(agentId, options.userMessageSource);
+    } else {
+      this.pendingUserMessageSourcesByAgentId.delete(agentId);
+    }
+
     const pendingRun = this.foregroundRuns.createPendingRun(agentId);
 
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
@@ -1768,7 +1787,12 @@ export class AgentManager {
       try {
         const result = await agent.session.startTurn(prompt, options);
         turnId = result.turnId;
+        const pendingSource = this.pendingUserMessageSourcesByAgentId.get(agentId);
+        if (pendingSource) {
+          this.userMessageSourcesByTurnId.set(turnId, pendingSource);
+        }
       } catch (error) {
+        this.pendingUserMessageSourcesByAgentId.delete(agentId);
         const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
         await this.handleStreamEvent(agent, {
           type: "turn_failed",
@@ -3002,6 +3026,13 @@ export class AgentManager {
       this.finalizeForegroundTurn(agent, eventTurnId);
     }
 
+    if (!options?.fromHistory && isTurnTerminalEvent(event)) {
+      if (eventTurnId) {
+        this.userMessageSourcesByTurnId.delete(eventTurnId);
+      }
+      this.pendingUserMessageSourcesByAgentId.delete(agent.id);
+    }
+
     if (!options?.fromHistory && flags.shouldDispatchEvent) {
       this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
     }
@@ -3169,8 +3200,9 @@ export class AgentManager {
     flags: StreamEventFlags;
   }): Promise<void> {
     const { agent, event, options, flags } = params;
+    const item = this.resolveUserMessageSource(agent.id, event.item, event.turnId);
 
-    if (event.item.type === "user_message" && isSystemInjectedEnvelope(event.item.text)) {
+    if (item.type === "user_message" && isSystemInjectedEnvelope(item.text)) {
       flags.shouldDispatchEvent = false;
       flags.shouldNotifyWaiters = false;
       return;
@@ -3179,7 +3211,7 @@ export class AgentManager {
     if (options?.fromHistory) {
       this.recordTimeline(
         agent.id,
-        event.item,
+        item,
         event.timestamp ? { timestamp: event.timestamp } : undefined,
       );
       flags.shouldDispatchEvent = false;
@@ -3187,13 +3219,28 @@ export class AgentManager {
       return;
     }
 
-    this.recordAndDispatchTimelineItem(agent.id, event.item, event.provider, event.turnId);
-    if (event.item.type === "user_message") {
+    this.recordAndDispatchTimelineItem(agent.id, item, event.provider, event.turnId);
+    if (item.type === "user_message") {
       agent.lastUserMessageAt = new Date();
       this.emitState(agent);
     }
     flags.shouldDispatchEvent = false;
     flags.shouldNotifyWaiters = true;
+  }
+
+  private resolveUserMessageSource(
+    agentId: string,
+    item: AgentTimelineItem,
+    turnId?: string,
+  ): AgentTimelineItem {
+    if (item.type !== "user_message" || item.source) {
+      return item;
+    }
+    const source =
+      (item.messageId ? this.userMessageSourcesById.get(item.messageId) : undefined) ??
+      (turnId ? this.userMessageSourcesByTurnId.get(turnId) : undefined) ??
+      this.pendingUserMessageSourcesByAgentId.get(agentId);
+    return source ? { ...item, source } : item;
   }
 
   private onStreamTurnCompleted(params: {

@@ -196,6 +196,7 @@ export interface PaseoAgentSendOptions {
   messageId?: string;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  userMessageSource?: SendAgentMessageRequest["userMessageSource"];
 }
 
 export type PaseoAgentUpdate = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];

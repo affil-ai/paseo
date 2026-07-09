@@ -21,7 +21,6 @@ export interface NormalizedMessage {
   sender: SenderIdentity;
   images: Array<{ data: string; mimeType: string }>;
   attachments: AgentAttachment[];
-  attachmentText: string;
 }
 
 function slackMessageThreadTs(message: Message): string | null {
@@ -139,10 +138,6 @@ function sanitizeFileName(value: string): string {
   return name.length > 0 && name !== "." && name !== ".." ? name : "attachment";
 }
 
-function attachmentLabel(attachment: Attachment): string {
-  return `${attachment.name ?? attachment.url ?? "attachment"}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}${attachment.url ? `: ${attachment.url}` : ""}`;
-}
-
 function appendPreservedLinks(text: string, links: Message["links"]): string {
   const urls: string[] = [];
   const seen = new Set<string>();
@@ -196,7 +191,6 @@ export async function normalizeMessage(
 ): Promise<NormalizedMessage> {
   const images: Array<{ data: string; mimeType: string }> = [];
   const attachments: AgentAttachment[] = [];
-  const attachmentLines: string[] = [];
   for (const attachment of message.attachments ?? []) {
     const image = await attachmentToImage(attachment);
     if (image) {
@@ -213,14 +207,8 @@ export async function normalizeMessage(
       attachments.push(uploadedFile);
       continue;
     }
-
-    attachmentLines.push(`- ${attachmentLabel(attachment)}`);
   }
-  const attachmentText =
-    attachmentLines.length > 0 ? `Attachments:\n${attachmentLines.join("\n")}` : "";
-  const visibleText = [await normalizeMentionsForPrompt(thread, message), attachmentText]
-    .filter(Boolean)
-    .join("\n\n");
+  const visibleText = await normalizeMentionsForPrompt(thread, message);
   const cleanedText = appendPreservedLinks(visibleText, message.links);
   const externalThreadId = encodeThreadId(thread, message);
   return {
@@ -231,7 +219,6 @@ export async function normalizeMessage(
     sender: await resolveSender(thread, message),
     images,
     attachments,
-    attachmentText,
   };
 }
 

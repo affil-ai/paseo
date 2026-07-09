@@ -1,4 +1,5 @@
 import type { AgentProvider, ToolCallDetail } from "@getpaseo/protocol/agent-types";
+import type { ChatUserMessageSource } from "@getpaseo/protocol/agent-labels";
 import type { AgentAttachment, AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { extractTaskEntriesFromToolCall } from "../utils/tool-call-parsers";
@@ -64,6 +65,7 @@ export interface UserMessageItem {
   optimistic?: true;
   images?: UserMessageImageAttachment[];
   attachments?: AgentAttachment[];
+  source?: ChatUserMessageSource;
 }
 
 export interface OptimisticUserMessageInput {
@@ -72,6 +74,7 @@ export interface OptimisticUserMessageInput {
   timestamp: Date;
   images?: UserMessageImageAttachment[];
   attachments?: AgentAttachment[];
+  source?: ChatUserMessageSource;
 }
 
 export type OptimisticUserMessagePlacement = "tail" | "active-head";
@@ -204,6 +207,7 @@ function buildUserMessageItem(input: {
   optimistic?: UserMessageItem | null;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: AgentAttachment[];
+  source?: ChatUserMessageSource;
 }): UserMessageItem {
   if (input.optimistic) {
     return {
@@ -217,6 +221,7 @@ function buildUserMessageItem(input: {
       ...(input.optimistic.attachments && input.optimistic.attachments.length > 0
         ? { attachments: input.optimistic.attachments }
         : {}),
+      ...(input.source ? { source: input.source } : {}),
     };
   }
 
@@ -237,6 +242,7 @@ function buildUserMessageItem(input: {
     ...(input.attachments && input.attachments.length > 0
       ? { attachments: input.attachments }
       : {}),
+    ...(input.source ? { source: input.source } : {}),
   };
 }
 
@@ -298,9 +304,10 @@ function appendUserMessage(
   messageId?: string,
   images?: Array<{ data: string; mimeType: string }>,
   attachments?: AgentAttachment[],
+  messageSource?: ChatUserMessageSource,
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
-  if (!hasContent) {
+  if (!hasContent && !images?.length && !attachments?.length) {
     return state;
   }
 
@@ -318,6 +325,7 @@ function appendUserMessage(
     optimistic,
     images,
     attachments,
+    source: messageSource,
   });
 
   if (optimisticIndex >= 0) {
@@ -783,6 +791,7 @@ function reduceTimelineEvent(
           item.messageId,
           item.images,
           item.attachments,
+          item.source,
         ),
       );
     case "assistant_message":

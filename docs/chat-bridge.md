@@ -79,6 +79,11 @@ Slack input should match the app's default send behavior:
 - Pi allows only one active provider turn at a time, so the daemon/provider interrupt path must
   acknowledge cancellation before starting the replacement turn; otherwise `A Pi turn is already
 active` can leave the agent in an error state.
+- External-source provenance belongs on each `user_message` timeline item, not on the agent as a
+  rendering shortcut. An office agent can receive turns from Slack and Paseo in the same timeline;
+  only Slack-originated turns show the Slack mark.
+- Slack files are passed as native agent attachments. Do not append file names, MIME types, or URLs
+  to the visible user-message text as a second attachment representation.
 
 ## Hard constraint: Chat SDK is the _only_ Slack client
 

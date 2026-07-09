@@ -3,7 +3,7 @@ import { Text, TextInput, View, type PressableStateCallbackType } from "react-na
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Check, MessageSquare } from "lucide-react-native";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
-import type { AgentProvider } from "@getpaseo/protocol/agent-types";
+import type { AgentModelDefinition, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +42,11 @@ interface ChatRepositoryDraft extends Record<string, unknown> {
   projectId: string;
   projectRootPath: string;
   projectDisplayName: string;
+}
+
+interface ChatDefaultOption {
+  id: string;
+  label: string;
 }
 
 const ROW_WITH_BORDER_STYLE = [settingsStyles.row, settingsStyles.rowBorder];
@@ -227,9 +232,11 @@ function ProviderRow({
 }: {
   draft: ChatDefaultsDraft;
   setDraft: (draft: ChatDefaultsDraft) => void;
-  providers: AgentProvider[];
+  providers: ProviderSnapshotEntry[];
 }) {
-  const label = draft.provider || "Provider";
+  const label =
+    providers.find((entry) => entry.provider === draft.provider)?.label ??
+    (draft.provider || "Provider");
   return (
     <View style={ROW_WITH_BORDER_STYLE}>
       <View style={settingsStyles.rowContent}>
@@ -245,9 +252,9 @@ function ProviderRow({
         <DropdownMenuContent side="bottom" align="end" width={220}>
           {providers.map((provider) => (
             <ProviderMenuItem
-              key={provider}
+              key={provider.provider}
               provider={provider}
-              selected={draft.provider === provider}
+              selected={draft.provider === provider.provider}
               draft={draft}
               setDraft={setDraft}
             />
@@ -264,17 +271,99 @@ function ProviderMenuItem({
   draft,
   setDraft,
 }: {
-  provider: AgentProvider;
+  provider: ProviderSnapshotEntry;
   selected: boolean;
   draft: ChatDefaultsDraft;
   setDraft: (draft: ChatDefaultsDraft) => void;
 }) {
   const handleSelect = useCallback(() => {
-    setDraft({ ...draft, provider });
+    const model = resolveDefaultModel(provider.models ?? []);
+    setDraft({
+      ...draft,
+      provider: provider.provider,
+      model: model?.id ?? "",
+      modeId: provider.defaultModeId ?? provider.modes?.[0]?.id ?? "",
+      thinkingOptionId: model?.defaultThinkingOptionId ?? model?.thinkingOptions?.[0]?.id ?? "",
+    });
   }, [draft, provider, setDraft]);
   return (
     <DropdownMenuItem selected={selected} onSelect={handleSelect}>
-      {provider}
+      {provider.label ?? provider.provider}
+    </DropdownMenuItem>
+  );
+}
+
+function resolveDefaultModel(models: readonly AgentModelDefinition[]): AgentModelDefinition | null {
+  return models.find((model) => model.isDefault) ?? models[0] ?? null;
+}
+
+function includeCurrentOption(
+  options: ChatDefaultOption[],
+  currentId: string,
+): ChatDefaultOption[] {
+  if (!currentId || options.some((option) => option.id === currentId)) {
+    return options;
+  }
+  return [...options, { id: currentId, label: currentId }];
+}
+
+function SelectSettingRow({
+  label,
+  hint,
+  value,
+  options,
+  onSelect,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  options: ChatDefaultOption[];
+  onSelect: (value: string) => void;
+}) {
+  const selectedLabel = options.find((option) => option.id === value)?.label ?? value;
+  return (
+    <View style={ROW_WITH_BORDER_STYLE}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{label}</Text>
+        <Text style={settingsStyles.rowHint}>{hint}</Text>
+      </View>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          style={triggerStyle}
+          accessibilityLabel={`Select ${label.toLowerCase()}`}
+        >
+          <Text style={styles.triggerText} numberOfLines={1}>
+            {selectedLabel}
+          </Text>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="end" width={280}>
+          {options.map((option) => (
+            <SelectSettingMenuItem
+              key={option.id || "__default__"}
+              option={option}
+              selected={value === option.id}
+              onSelect={onSelect}
+            />
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </View>
+  );
+}
+
+function SelectSettingMenuItem({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: ChatDefaultOption;
+  selected: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const handleSelect = useCallback(() => onSelect(option.id), [onSelect, option.id]);
+  return (
+    <DropdownMenuItem selected={selected} onSelect={handleSelect}>
+      {option.label}
     </DropdownMenuItem>
   );
 }
@@ -426,11 +515,11 @@ function EmailIntakeSection({
 export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
   const { config, patchConfig } = useDaemonConfig(serverId);
   const providersSnapshot = useProvidersSnapshot(serverId, { cwd: null });
-  const providerIds = useMemo(
+  const providers = useMemo(
     () =>
-      (providersSnapshot.entries ?? [])
-        .filter((entry) => entry.status !== "unavailable")
-        .map((entry) => entry.provider),
+      (providersSnapshot.entries ?? []).filter(
+        (entry) => entry.enabled && entry.status !== "unavailable",
+      ),
     [providersSnapshot.entries],
   );
   const [draft, setDraft] = useState<ChatDefaultsDraft>(() => defaultsFromConfig(config));
@@ -438,6 +527,49 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
   const committedDraft = useMemo(() => defaultsFromConfig(config), [config]);
   const normalizedDraft = useMemo(() => normalizeDraft(draft), [draft]);
   const hasChanges = JSON.stringify(normalizedDraft) !== JSON.stringify(committedDraft);
+  const selectedProvider = providers.find((entry) => entry.provider === draft.provider) ?? null;
+  const modelOptions = useMemo(
+    () =>
+      includeCurrentOption(
+        [
+          { id: "", label: "Provider default" },
+          ...(selectedProvider?.models ?? []).map((model) => ({
+            id: model.id,
+            label: model.label,
+          })),
+        ],
+        draft.model,
+      ),
+    [draft.model, selectedProvider?.models],
+  );
+  const modeOptions = useMemo(
+    () =>
+      includeCurrentOption(
+        [
+          { id: "", label: "Provider default" },
+          ...(selectedProvider?.modes ?? []).map((mode) => ({ id: mode.id, label: mode.label })),
+        ],
+        draft.modeId,
+      ),
+    [draft.modeId, selectedProvider?.modes],
+  );
+  const effectiveModel =
+    selectedProvider?.models?.find((model) => model.id === draft.model) ??
+    resolveDefaultModel(selectedProvider?.models ?? []);
+  const thinkingOptions = useMemo(
+    () =>
+      includeCurrentOption(
+        [
+          { id: "", label: "Model default" },
+          ...(effectiveModel?.thinkingOptions ?? []).map((option) => ({
+            id: option.id,
+            label: option.label,
+          })),
+        ],
+        draft.thinkingOptionId,
+      ),
+    [draft.thinkingOptionId, effectiveModel?.thinkingOptions],
+  );
 
   useEffect(() => {
     setDraft(defaultsFromConfig(config));
@@ -455,8 +587,16 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
     void handleSave();
   }, [handleSave]);
   const handleModelChange = useCallback(
-    (model: string) => setDraft((current) => ({ ...current, model })),
-    [],
+    (model: string) => {
+      const selectedModel = selectedProvider?.models?.find((entry) => entry.id === model) ?? null;
+      setDraft((current) => ({
+        ...current,
+        model,
+        thinkingOptionId:
+          selectedModel?.defaultThinkingOptionId ?? selectedModel?.thinkingOptions?.[0]?.id ?? "",
+      }));
+    },
+    [selectedProvider?.models],
   );
   const handleModeIdChange = useCallback(
     (modeId: string) => setDraft((current) => ({ ...current, modeId })),
@@ -485,27 +625,27 @@ export function ChatOfficePage({ serverId }: ChatOfficePageProps) {
       <SettingsSection title="Office chat" trailing={saveButton}>
         <View style={settingsStyles.card}>
           <ChatRepositoryRow serverId={serverId} config={config} patchConfig={patchConfig} />
-          <ProviderRow draft={draft} setDraft={setDraft} providers={providerIds} />
-          <TextSettingRow
+          <ProviderRow draft={draft} setDraft={setDraft} providers={providers} />
+          <SelectSettingRow
             label="Default model"
-            hint="Exact model id passed to the provider."
+            hint="Model used for new office chats."
             value={draft.model}
-            placeholder="openrouter/anthropic/claude-fable-5"
-            onChangeText={handleModelChange}
+            options={modelOptions}
+            onSelect={handleModelChange}
           />
-          <TextSettingRow
+          <SelectSettingRow
             label="Default mode"
-            hint="Provider mode id for new office chat sessions."
+            hint="Changes the agent workflow and tool behavior, such as plan versus code."
             value={draft.modeId}
-            placeholder="Provider default"
-            onChangeText={handleModeIdChange}
+            options={modeOptions}
+            onSelect={handleModeIdChange}
           />
-          <TextSettingRow
+          <SelectSettingRow
             label="Thinking"
-            hint="Optional thinking or reasoning level."
+            hint="Controls the selected model's reasoning effort; higher levels can be slower."
             value={draft.thinkingOptionId}
-            placeholder="high"
-            onChangeText={handleThinkingOptionIdChange}
+            options={thinkingOptions}
+            onSelect={handleThinkingOptionIdChange}
           />
         </View>
       </SettingsSection>

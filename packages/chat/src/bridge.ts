@@ -353,6 +353,11 @@ export class ChatBridge {
     await this.client.sendAgentMessage(
       pendingAsk.officeAgentId,
       `Answer to chat ask ${pendingAsk.requestId} from ${normalized.sender.name}:\n\n${normalized.cleanedText}`,
+      {
+        images: normalized.images,
+        attachments: normalized.attachments,
+        userMessageSource: "slack",
+      },
     );
     return true;
   }
@@ -407,6 +412,7 @@ export class ChatBridge {
         {
           images: input.normalized.images,
           attachments: input.normalized.attachments,
+          userMessageSource: "slack",
         },
       )
       .catch((error) => {
@@ -446,6 +452,7 @@ export class ChatBridge {
         {
           images: input.normalized.images,
           attachments: input.normalized.attachments,
+          userMessageSource: "slack",
         },
       );
       await this.store.markEventProcessed(input.normalized.eventId);
@@ -484,6 +491,7 @@ export class ChatBridge {
     externalThreadId: string;
     source: "slack" | "support";
     title: string;
+    workspaceTitlePrompt?: string;
     systemPrompt?: string;
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;
@@ -494,7 +502,10 @@ export class ChatBridge {
   }) {
     const workspaceResult = await this.client.createWorkspace({
       source: { kind: "directory", path: this.config.officeRepoPath },
-      title: input.title,
+      firstAgentContext: {
+        prompt: input.workspaceTitlePrompt ?? input.title,
+        attachments: input.attachments ?? [],
+      },
     });
     if (!workspaceResult.workspace)
       throw new Error(workspaceResult.error ?? "Failed to create workspace");
@@ -509,6 +520,8 @@ export class ChatBridge {
       ...(this.config.modeId ? { modeId: this.config.modeId } : {}),
       ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
       initialPrompt: input.initialPrompt,
+      clientMessageId: randomUUID(),
+      initialMessageSource: input.source,
       images: input.images ?? [],
       attachments: input.attachments ?? [],
       labels: {
@@ -574,6 +587,7 @@ export class ChatBridge {
       externalThreadId: normalized.externalThreadId,
       source: "slack",
       title,
+      workspaceTitlePrompt: normalized.cleanedText,
       systemPrompt: assembleExternalIntakeSystemPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,

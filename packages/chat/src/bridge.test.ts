@@ -135,10 +135,12 @@ describe("ChatBridge session creation", () => {
     try {
       const store = new ThreadSessionStore(stateDir);
       const createAgentCalls: unknown[] = [];
+      const createWorkspaceCalls: unknown[] = [];
       const client = {
-        createWorkspace: async () => ({
-          workspace: { id: "workspace-1" },
-        }),
+        createWorkspace: async (input: unknown) => {
+          createWorkspaceCalls.push(input);
+          return { workspace: { id: "workspace-1" } };
+        },
         createAgent: async (input: unknown) => {
           createAgentCalls.push(input);
           return { id: "agent-1" };
@@ -171,6 +173,7 @@ describe("ChatBridge session creation", () => {
         externalThreadId: "slack:D123:111.222",
         source: "slack",
         title: "Slack request",
+        workspaceTitlePrompt: "please check this",
         systemPrompt: "system rules",
         initialPrompt: "Jane: please check this",
         startedBy: {
@@ -187,6 +190,8 @@ describe("ChatBridge session creation", () => {
         expect.objectContaining({
           systemPrompt: "system rules",
           initialPrompt: "Jane: please check this",
+          clientMessageId: expect.any(String),
+          initialMessageSource: "slack",
           labels: expect.objectContaining({
             "paseo.chat-source": "slack",
             "paseo.chat-started-by-avatar-url": "https://example.com/jane.png",
@@ -197,6 +202,15 @@ describe("ChatBridge session creation", () => {
             "paseo.chat-thread-id": "slack:D123:111.222",
           }),
         }),
+      ]);
+      expect(createWorkspaceCalls).toEqual([
+        {
+          source: { kind: "directory", path: "/tmp/office" },
+          firstAgentContext: {
+            prompt: "please check this",
+            attachments: [],
+          },
+        },
       ]);
       await expect(store.getSession("slack:D123:111.222")).resolves.toMatchObject({
         startedBy: {
