@@ -93,7 +93,6 @@ import {
   getVisibleWorkspacesForProject,
   getWorkspaceRecencyTimestamp,
 } from "@/utils/sidebar-recency";
-import { formatCompactTimeAgo } from "@/utils/time";
 import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
@@ -109,6 +108,8 @@ import {
   SidebarWorkspaceTrailingActionOverlay,
   SidebarWorkspaceTrailingActionSlot,
 } from "@/components/sidebar/sidebar-workspace-row-content";
+import { getPrBadgeTone, type PrBadgeTone } from "@/components/sidebar/sidebar-workspace-pr-hints";
+import { WorkspaceRecencyLabel } from "@/components/sidebar/workspace-recency-label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -186,8 +187,10 @@ const syncedLoaderColorMapping = (theme: Theme) => ({
       : theme.colors.palette.amber[500],
 });
 
-function getPrIconUniMapping(state: PrHint["state"]) {
-  switch (state) {
+function getPrIconUniMapping(tone: PrBadgeTone) {
+  switch (tone) {
+    case "muted":
+      return foregroundMutedColorMapping;
     case "merged":
       return purpleColorMapping;
     case "open":
@@ -331,7 +334,9 @@ export function PrBadge({ hint }: { hint: PrHint }) {
   const handleHoverOut = useCallback(() => setIsHovered(false), []);
 
   const textStyle = isHovered ? prBadgeTextHoveredCombined : prBadgeStyles.text;
-  const iconUniProps = isHovered ? foregroundColorMapping : getPrIconUniMapping(hint.state);
+  const iconUniProps = isHovered
+    ? foregroundColorMapping
+    : getPrIconUniMapping(getPrBadgeTone(hint));
 
   return (
     <Pressable
@@ -695,10 +700,8 @@ function WorkspaceRowRightGroup({
     activityAt: workspace.activityAt,
     statusEnteredAt: workspace.statusEnteredAt?.toISOString() ?? null,
   });
-  const recencyLabel = Number.isFinite(recencyMs)
-    ? formatCompactTimeAgo(new Date(recencyMs))
-    : null;
-  const shouldRenderActionSlot = Boolean(onArchive || recencyLabel);
+  const hasRecency = Number.isFinite(recencyMs);
+  const shouldRenderActionSlot = Boolean(onArchive || hasRecency);
 
   return (
     <>
@@ -708,12 +711,10 @@ function WorkspaceRowRightGroup({
       {shouldRenderActionSlot ? (
         <SidebarWorkspaceTrailingActionSlot>
           <SidebarWorkspaceTrailingActionBase
-            visible={Boolean(recencyLabel && !showActionsInSlot && !showShortcut)}
+            visible={Boolean(hasRecency && !showActionsInSlot && !showShortcut)}
           >
-            {recencyLabel ? (
-              <Text style={styles.workspaceRecencyLabel} numberOfLines={1}>
-                {recencyLabel}
-              </Text>
+            {hasRecency ? (
+              <WorkspaceRecencyLabel timestampMs={recencyMs} style={styles.workspaceRecencyLabel} />
             ) : null}
           </SidebarWorkspaceTrailingActionBase>
           <SidebarWorkspaceTrailingActionOverlay visible={showActionsInSlot}>

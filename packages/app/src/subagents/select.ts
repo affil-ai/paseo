@@ -18,6 +18,12 @@ export interface SubagentRow {
   createdAt: Agent["createdAt"];
 }
 
+export interface SubagentHoverCardDetails extends SubagentRow {
+  cwd: Agent["cwd"];
+  model: Agent["model"];
+  prHint: ReturnType<typeof selectPrHintFromStatus>;
+}
+
 type SessionStoreSnapshot = ReturnType<typeof useSessionStore.getState>;
 
 interface SelectSubagentsParams {
@@ -156,6 +162,37 @@ export function selectSubagentsForWorkspace(
   return agents.map(toSubagentRow);
 }
 
+export function selectSubagentHoverCardDetailsForWorkspace(
+  state: SessionStoreSnapshot,
+  params: SelectWorkspaceSubagentsParams,
+  pendingArchiveIds: ReadonlySet<string>,
+): SubagentHoverCardDetails[] {
+  const agents = collectWorkspaceSubagentAgents(state, params, pendingArchiveIds);
+  if (agents.length === 0) {
+    return [];
+  }
+
+  const workspaces = state.sessions[params.serverId]?.workspaces;
+  return agents.map((agent) => {
+    const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+      workspaces,
+      workspaceId: agent.workspaceId,
+    });
+    const descriptor = workspaceKey ? workspaces?.get(workspaceKey) : null;
+    return {
+      id: agent.id,
+      provider: agent.provider,
+      title: agent.title,
+      status: agent.status,
+      requiresAttention: agent.requiresAttention,
+      createdAt: agent.createdAt,
+      cwd: agent.cwd,
+      model: agent.model,
+      prHint: selectPrHintFromStatus(descriptor?.githubRuntime?.pullRequest),
+    };
+  });
+}
+
 const EMPTY_SUBAGENT_PR_TABS: SubagentPrTabInput[] = [];
 
 // PR tab inputs for a workspace's subagents: one entry per scoped subagent that
@@ -281,6 +318,17 @@ export function useSubagentsForWorkspace(params: SelectWorkspaceSubagentsParams)
   return useStoreWithEqualityFn(
     useSessionStore,
     (state) => selectSubagentsForWorkspace(state, params, pendingArchiveIds),
+    equal,
+  );
+}
+
+export function useSubagentHoverCardDetailsForWorkspace(
+  params: SelectWorkspaceSubagentsParams,
+): SubagentHoverCardDetails[] {
+  const pendingArchiveIds = usePendingArchiveAgentIds(params.serverId);
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => selectSubagentHoverCardDetailsForWorkspace(state, params, pendingArchiveIds),
     equal,
   );
 }

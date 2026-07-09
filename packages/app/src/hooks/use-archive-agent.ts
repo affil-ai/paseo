@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useSessionStore } from "@/stores/session-store";
 import { agentHistoryQueryKey, allAgentHistoryQueryRootKey } from "./agent-history-query-key";
+import { invalidateClosedWorkspaceChatsQueries } from "./closed-workspace-chats";
 
 export const ARCHIVE_AGENT_PENDING_QUERY_KEY = ["archive-agent-pending"] as const;
 const EMPTY_PENDING_ARCHIVE_AGENT_IDS = new Set<string>();
@@ -440,12 +441,13 @@ export function useArchiveAgent() {
       });
       return context;
     },
-    onSuccess: (result, input) => {
+    onSuccess: async (result, input) => {
       markAgentArchivedInStore({
         serverId: input.serverId,
         agentId: input.agentId,
         archivedAt: result.archivedAt,
       });
+      await invalidateClosedWorkspaceChatsQueries(queryClient, input.serverId);
     },
     onError: (_error, input, context) => {
       if (!context) {

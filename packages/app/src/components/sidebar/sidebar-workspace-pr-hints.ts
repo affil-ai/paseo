@@ -1,6 +1,15 @@
 import type { SubagentPrTabInput } from "@/git/explorer-pr-tabs";
 import type { PrHint } from "@/git/pr-hint";
 
+export type PrBadgeTone = "muted" | PrHint["state"];
+
+export function getPrBadgeTone(hint: PrHint): PrBadgeTone {
+  if (hint.state === "open" && hint.isDraft) {
+    return "muted";
+  }
+  return hint.state;
+}
+
 export function collectWorkspaceRowPrHints(input: {
   workspacePrHint: PrHint | null;
   subagentPrs: readonly SubagentPrTabInput[];

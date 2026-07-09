@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { SubagentPrTabInput } from "@/git/explorer-pr-tabs";
 import type { PrHint } from "@/git/pr-hint";
-import { collectWorkspaceRowPrHints } from "./sidebar-workspace-pr-hints";
+import { collectWorkspaceRowPrHints, getPrBadgeTone } from "./sidebar-workspace-pr-hints";
 
 function hint(number: number): PrHint {
   return {
     number,
     url: `https://github.com/affil-ai/paseo/pull/${number}`,
     state: "open",
+    isDraft: false,
   };
 }
 
@@ -42,5 +43,15 @@ describe("collectWorkspaceRowPrHints", () => {
     });
 
     expect(result.map((entry) => entry.number)).toEqual([20, 25]);
+  });
+
+  it("uses the muted PR tone for an open draft", () => {
+    expect(getPrBadgeTone({ ...hint(20), isDraft: true })).toBe("muted");
+    expect(getPrBadgeTone(hint(21))).toBe("open");
+  });
+
+  it("keeps terminal PR states stronger than a stale draft bit", () => {
+    expect(getPrBadgeTone({ ...hint(20), state: "merged", isDraft: true })).toBe("merged");
+    expect(getPrBadgeTone({ ...hint(21), state: "closed", isDraft: true })).toBe("closed");
   });
 });

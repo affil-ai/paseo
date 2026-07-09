@@ -237,7 +237,7 @@ function WorkspaceTabRowExtras({
     () => resolveTerminalProfiles(config?.terminalProfiles),
     [config?.terminalProfiles],
   );
-  const { chats: closedChats } = useClosedWorkspaceChats({
+  const { chats: closedChats, isLoading: isLoadingClosedChats } = useClosedWorkspaceChats({
     serverId: normalizedServerId,
     workspaceId: normalizedWorkspaceId,
     enabled: menuOpen,
@@ -280,7 +280,14 @@ function WorkspaceTabRowExtras({
             <Text style={styles.newTabTooltipText}>{t("workspace.tabs.actions.moreActions")}</Text>
           </TooltipContent>
         </Tooltip>
-        <DropdownMenuContent side="bottom" align="end" offset={4} minWidth={200}>
+        <DropdownMenuContent
+          side="bottom"
+          align="end"
+          offset={4}
+          minWidth={200}
+          maxHeight={400}
+          scrollable
+        >
           <PinnableMenuItem
             testID="workspace-new-tab-menu-agent"
             target={DRAFT_TARGET}
@@ -305,19 +312,25 @@ function WorkspaceTabRowExtras({
               onSelect={onCreateBrowser}
             />
           ) : null}
-          {closedChats.length > 0 ? (
+          {closedChats.length > 0 || isLoadingClosedChats ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>{t("workspace.tabs.actions.closedChatsMenu")}</DropdownMenuLabel>
-              {closedChats.map((chat) => (
-                <ClosedChatMenuItem
-                  key={chat.id}
-                  agentId={chat.id}
-                  title={chat.title}
-                  provider={chat.provider}
-                  onReopen={onReopenClosedChat}
-                />
-              ))}
+              {isLoadingClosedChats && closedChats.length === 0 ? (
+                <View style={styles.closedChatsLoading}>
+                  <ThemedActivityIndicator size="small" uniProps={mutedColorMapping} />
+                </View>
+              ) : (
+                closedChats.map((chat) => (
+                  <ClosedChatMenuItem
+                    key={chat.id}
+                    agentId={chat.id}
+                    title={chat.title}
+                    provider={chat.provider}
+                    onReopen={onReopenClosedChat}
+                  />
+                ))
+              )}
             </>
           ) : null}
         </DropdownMenuContent>
@@ -1334,6 +1347,11 @@ const styles = StyleSheet.create((theme) => ({
   terminalProfileIconWrapper: {
     width: 14,
     height: 14,
+  },
+  closedChatsLoading: {
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
   },
 }));
 

@@ -2,6 +2,7 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   resolveWorkspacePrCwdForIdentity,
+  selectSubagentHoverCardDetailsForWorkspace,
   selectSubagentPrTabsForWorkspace,
   selectSubagentsForParent,
   selectSubagentsForWorkspace,
@@ -473,6 +474,43 @@ describe("selectSubagentsForWorkspace", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual(["child-active"]);
+  });
+});
+
+describe("selectSubagentHoverCardDetailsForWorkspace", () => {
+  it("adds hover-only cwd, model, and PR details without widening SubagentRow", () => {
+    setAgents([
+      makeAgent({ id: "office-agent", workspaceId: "ws-office" }),
+      makeAgent({
+        id: "child-a",
+        parentAgentId: "office-agent",
+        workspaceId: "ws-worktree-a",
+        cwd: "/repo/worktrees/child-a",
+        model: "gpt-5.4",
+      }),
+    ]);
+    setWorkspaces([
+      makeWorkspace({ id: "ws-office", cwd: "/repo/office" }),
+      makeWorkspace({ id: "ws-worktree-a", cwd: "/repo/worktrees/child-a", prNumber: 1942 }),
+    ]);
+
+    const details = selectSubagentHoverCardDetailsForWorkspace(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, workspaceId: "ws-office" },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(details).toHaveLength(1);
+    expect(details[0]).toMatchObject({
+      id: "child-a",
+      cwd: "/repo/worktrees/child-a",
+      model: "gpt-5.4",
+      prHint: {
+        number: 1942,
+        url: "https://github.com/acme/app/pull/1942",
+        state: "open",
+      },
+    });
   });
 });
 

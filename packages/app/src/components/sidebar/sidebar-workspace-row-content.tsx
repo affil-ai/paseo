@@ -32,7 +32,11 @@ import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { useSubagentPrTabsForWorkspace } from "@/subagents";
-import { collectWorkspaceRowPrHints } from "./sidebar-workspace-pr-hints";
+import {
+  collectWorkspaceRowPrHints,
+  getPrBadgeTone,
+  type PrBadgeTone,
+} from "./sidebar-workspace-pr-hints";
 
 const DEFAULT_STATUS_DOT_SIZE = 7;
 const EMPHASIZED_STATUS_DOT_SIZE = 9;
@@ -336,7 +340,9 @@ function PrBadge({ hint }: { hint: PrHint }) {
     () => (isHovered ? [prBadgeStyles.text, prBadgeStyles.textHovered] : prBadgeStyles.text),
     [isHovered],
   );
-  const iconUniProps = isHovered ? foregroundColorMapping : getPrIconUniMapping(hint.state);
+  const iconUniProps = isHovered
+    ? foregroundColorMapping
+    : getPrIconUniMapping(getPrBadgeTone(hint));
 
   const handlePressIn = useCallback((event: GestureResponderEvent) => event.stopPropagation(), []);
   const handleHoverIn = useCallback(() => setIsHovered(true), []);
@@ -382,8 +388,10 @@ function ChecksBadge({ checks }: { checks: PrHint["checks"] }) {
   );
 }
 
-function getPrIconUniMapping(state: PrHint["state"]) {
-  switch (state) {
+function getPrIconUniMapping(tone: PrBadgeTone) {
+  switch (tone) {
+    case "muted":
+      return foregroundMutedColorMapping;
     case "merged":
       return purpleColorMapping;
     case "open":

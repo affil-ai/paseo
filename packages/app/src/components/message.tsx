@@ -111,6 +111,7 @@ import {
 import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import { persistAttachmentFromBytes, persistAttachmentFromDataUrl } from "@/attachments/service";
+import { stripStructuredAttachmentMetadata } from "@/attachments/user-message-text";
 import {
   AttachmentFrame,
   AttachmentLabel,
@@ -484,7 +485,11 @@ export const UserMessage = memo(function UserMessage({
   const [lightboxMetadata, setLightboxMetadata] = useState<AttachmentMetadata | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
-  const hasText = message.trim().length > 0;
+  const displayMessage = useMemo(
+    () => stripStructuredAttachmentMetadata(message, attachments),
+    [attachments, message],
+  );
+  const hasText = displayMessage.trim().length > 0;
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
   const showTrailingRow = hasText && (isCompact || isNative || isHovered);
@@ -497,7 +502,7 @@ export const UserMessage = memo(function UserMessage({
 
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
-  const getMessageContent = useCallback(() => message, [message]);
+  const getMessageContent = useCallback(() => displayMessage, [displayMessage]);
   const handleRewind = useCallback(
     (input: { mode: RewindMode; rewoundText: string }) => {
       return rewindMutation.rewindAgent(input);
@@ -596,7 +601,7 @@ export const UserMessage = memo(function UserMessage({
           ) : null}
           {hasText ? (
             <Text selectable style={userMessageStylesheet.text}>
-              {message}
+              {displayMessage}
             </Text>
           ) : null}
         </View>
@@ -607,7 +612,7 @@ export const UserMessage = memo(function UserMessage({
               <RewindMenu
                 capabilities={capabilities}
                 isPending={rewindMutation.isPending}
-                rewoundText={message}
+                rewoundText={displayMessage}
                 onRewind={handleRewind}
               />
             ) : null}

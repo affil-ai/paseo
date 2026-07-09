@@ -866,8 +866,11 @@ replies route via `onSubscribedMessage`. The subscription set is persisted (our
   _it_ calls `create_worktree` (Paseo's worktree workflow handles branch creation, base-ref
   refresh, and any repo setup). The bridge does not pass `worktreeSlug` or `baseBranch` at
   intake.
-- **Thread title seed:** derive the office agent's workspace/agent title from the first line of
-  the message (cap ~120 chars); follow-ups keep the original title.
+- **Thread title seed:** derive the office agent's title from the first line of the message (cap
+  ~120 chars) so the tab has an immediate label. The directory workspace starts with that same
+  provisional title, then the daemon's metadata-generation model replaces it with a concise,
+  task-shaped title generated from the full cleaned initial message and structured attachments.
+  Follow-ups do not retitle either one.
 
 ### Deep links — **v1**
 

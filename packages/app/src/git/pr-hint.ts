@@ -2,6 +2,7 @@ export interface PrHint {
   url: string;
   number: number;
   state: "open" | "merged" | "closed";
+  isDraft: boolean;
   checks?: Array<{ name: string; status: string; url: string | null }>;
   checksStatus?: "none" | "pending" | "success" | "failure";
   reviewDecision?: "approved" | "changes_requested" | "pending" | null;
@@ -11,6 +12,7 @@ interface PrStatusLike {
   url: string;
   state: string;
   isMerged: boolean;
+  isDraft?: boolean;
   checks?: Array<{ name: string; status: string; url: string | null }>;
   checksStatus?: string;
   reviewDecision?: string | null;
@@ -50,6 +52,7 @@ export function selectPrHintFromStatus(status: PrStatusLike | null | undefined):
     url: status.url,
     number,
     state,
+    isDraft: status.isDraft ?? false,
     checks: status.checks,
     checksStatus: status.checksStatus as PrHint["checksStatus"],
     reviewDecision: status.reviewDecision as PrHint["reviewDecision"],

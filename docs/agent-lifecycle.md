@@ -58,6 +58,9 @@ These are two distinct concepts that used to be conflated:
 | **Archive** (lifecycle)    | Global     | Explicit lifecycle gesture |
 
 Closing a tab on a **root agent** still archives — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against archiving a running agent by accident.
+Archived root agents remain recoverable from the workspace tab bar's **Closed chats** section. The
+menu loads the complete paginated agent history for that exact `workspaceId`; selecting an entry
+unarchives the agent and reopens its tab.
 
 Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The agent stays unarchived and stays in its parent's track. The user can re-open the tab from the track at any time. This is implemented in `handleCloseAgentTab` (`packages/app/src/screens/workspace/workspace-screen.tsx`).
 

@@ -8,16 +8,18 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Dimensions, Text, View } from "react-native";
+import { Dimensions, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useTranslation } from "react-i18next";
 import { FadeIn, FadeOut } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   Check,
+  Bot,
   CircleCheck,
   CircleDot,
   CircleX,
   Copy,
+  Cpu,
   ExternalLink,
   Folder,
   GitBranch,
@@ -41,6 +43,11 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
 import { useHosts } from "@/runtime/host-runtime";
+import {
+  useSubagentHoverCardDetailsForWorkspace,
+  type SubagentHoverCardDetails,
+} from "@/subagents";
+import { resolveRowLabel } from "@/subagents/track-presentation";
 
 interface Rect {
   x: number;
@@ -214,7 +221,12 @@ function WorkspaceHoverCardContent({
 }): ReactElement | null {
   const { t } = useTranslation();
   const cwdDisplay = shortenPath(workspace.workspaceDirectory);
+  const subagents = useSubagentHoverCardDetailsForWorkspace({
+    serverId: workspace.serverId,
+    workspaceId: workspace.workspaceId,
+  });
   const bottomSheetInternal = useBottomSheetModalInternal(true);
+  const { height: windowHeight } = useWindowDimensions();
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
@@ -265,6 +277,10 @@ function WorkspaceHoverCardContent({
     }),
     [position?.x, position?.y],
   );
+  const cardStyle = useMemo(
+    () => [styles.card, { maxHeight: Math.max(180, windowHeight - 16) }],
+    [windowHeight],
+  );
 
   return (
     <Portal hostName={bottomSheetInternal?.hostName}>
@@ -278,50 +294,55 @@ function WorkspaceHoverCardContent({
           accessibilityRole="menu"
           accessibilityLabel={t("workspace.hoverCard.scriptsAccessibility")}
           testID="workspace-hover-card"
-          style={styles.card}
+          style={cardStyle}
           frameStyle={frameStyle}
         >
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle} testID="hover-card-workspace-name">
-              {workspace.name}
-            </Text>
-          </View>
-          <HostRow serverId={workspace.serverId} />
-          {workspace.currentBranch ? (
-            <CopyableInfoRow
-              icon={ThemedGitBranch}
-              value={workspace.currentBranch}
-              copyValue={workspace.currentBranch}
-              copyLabel={t("workspace.hoverCard.copyBranchName")}
-              testID="hover-card-workspace-branch"
-            />
-          ) : null}
-          {cwdDisplay ? (
-            <CopyableInfoRow
-              icon={ThemedFolder}
-              value={cwdDisplay}
-              copyValue={workspace.workspaceDirectory ?? ""}
-              copyLabel={t("workspace.hoverCard.copyPath")}
-              testID="hover-card-workspace-cwd"
-            />
-          ) : null}
-          {prHint || workspace.diffStat ? (
-            <View style={styles.cardMetaRow}>
-              {workspace.diffStat ? (
-                <DiffStat
-                  additions={workspace.diffStat.additions}
-                  deletions={workspace.diffStat.deletions}
-                />
-              ) : null}
-              {prHint ? <PrBadge hint={prHint} /> : null}
+          <ScrollView
+            showsVerticalScrollIndicator={subagents.length > 0}
+            contentContainerStyle={styles.cardScrollContent}
+          >
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle} testID="hover-card-workspace-name">
+                {workspace.name}
+              </Text>
             </View>
-          ) : null}
-          {prHint?.checks && prHint.checks.length > 0 ? (
-            <>
-              <View style={styles.separator} />
+            <HostRow serverId={workspace.serverId} />
+            {workspace.currentBranch ? (
+              <CopyableInfoRow
+                icon={ThemedGitBranch}
+                value={workspace.currentBranch}
+                copyValue={workspace.currentBranch}
+                copyLabel={t("workspace.hoverCard.copyBranchName")}
+                testID="hover-card-workspace-branch"
+              />
+            ) : null}
+            {cwdDisplay ? (
+              <CopyableInfoRow
+                icon={ThemedFolder}
+                value={cwdDisplay}
+                copyValue={workspace.workspaceDirectory ?? ""}
+                copyLabel={t("workspace.hoverCard.copyPath")}
+                testID="hover-card-workspace-cwd"
+              />
+            ) : null}
+            {prHint || workspace.diffStat ? (
+              <View style={styles.cardMetaRow}>
+                {workspace.diffStat ? (
+                  <DiffStat
+                    additions={workspace.diffStat.additions}
+                    deletions={workspace.diffStat.deletions}
+                  />
+                ) : null}
+                {prHint ? <PrBadge hint={prHint} /> : null}
+              </View>
+            ) : null}
+            {prHint?.checks && prHint.checks.length > 0 ? (
               <ChecksSummaryPressable checks={prHint.checks} url={prHint.url} />
-            </>
-          ) : null}
+            ) : null}
+            {subagents.map((subagent) => (
+              <SubagentDetailsSection key={subagent.id} subagent={subagent} />
+            ))}
+          </ScrollView>
         </FloatingSurface>
       </View>
     </Portal>
@@ -331,6 +352,72 @@ function WorkspaceHoverCardContent({
 const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedFolder = withUnistyles(Folder);
 const ThemedServer = withUnistyles(Server);
+const ThemedBot = withUnistyles(Bot);
+const ThemedCpu = withUnistyles(Cpu);
+
+function SubagentDetailsSection({ subagent }: { subagent: SubagentHoverCardDetails }) {
+  const { t } = useTranslation();
+  const title = resolveRowLabel(subagent.title) ?? t("common.states.loading");
+  const cwdDisplay = shortenPath(subagent.cwd);
+  const providerAndStatus = `${subagent.provider} · ${formatAgentStatus(subagent)}`;
+  const prHint = subagent.prHint;
+
+  return (
+    <View testID={`hover-card-subagent-${subagent.id}`}>
+      <View style={styles.agentSeparator} />
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {title}
+        </Text>
+      </View>
+      <InfoRow
+        icon={ThemedBot}
+        value={providerAndStatus}
+        testID={`hover-card-subagent-status-${subagent.id}`}
+      />
+      {subagent.model ? (
+        <InfoRow
+          icon={ThemedCpu}
+          value={subagent.model}
+          testID={`hover-card-subagent-model-${subagent.id}`}
+        />
+      ) : null}
+      {cwdDisplay ? (
+        <CopyableInfoRow
+          icon={ThemedFolder}
+          value={cwdDisplay}
+          copyValue={subagent.cwd}
+          copyLabel={t("workspace.hoverCard.copyPath")}
+          testID={`hover-card-subagent-cwd-${subagent.id}`}
+        />
+      ) : null}
+      {prHint ? (
+        <View style={styles.cardMetaRow}>
+          <PrBadge hint={prHint} />
+        </View>
+      ) : null}
+      {prHint?.checks && prHint.checks.length > 0 ? (
+        <ChecksSummaryPressable checks={prHint.checks} url={prHint.url} />
+      ) : null}
+    </View>
+  );
+}
+
+function formatAgentStatus(agent: Pick<SubagentHoverCardDetails, "status" | "requiresAttention">) {
+  if (agent.requiresAttention) return "Needs attention";
+  switch (agent.status) {
+    case "initializing":
+      return "Initializing";
+    case "running":
+      return "Running";
+    case "idle":
+      return "Idle";
+    case "error":
+      return "Error";
+    case "closed":
+      return "Closed";
+  }
+}
 
 type CardInfoIcon = React.ComponentType<React.ComponentProps<typeof ThemedGitBranch>>;
 
@@ -559,14 +646,17 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: 1,
     borderColor: theme.colors.borderAccent,
     borderRadius: theme.borderRadius.lg,
-    paddingTop: theme.spacing[2],
     width: HOVER_CARD_WIDTH,
+    overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 8,
     zIndex: 1000,
+  },
+  cardScrollContent: {
+    paddingTop: theme.spacing[2],
   },
   cardHeader: {
     flexDirection: "row",
@@ -606,8 +696,9 @@ const styles = StyleSheet.create((theme) => ({
   cardInfoTextHovered: {
     color: theme.colors.foreground,
   },
-  separator: {
+  agentSeparator: {
     height: 1,
+    marginBottom: theme.spacing[2],
     backgroundColor: theme.colors.border,
   },
   listRowHovered: {

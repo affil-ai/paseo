@@ -1,10 +1,12 @@
-export type { SubagentRow } from "./select";
+export type { SubagentHoverCardDetails, SubagentRow } from "./select";
 export {
+  selectSubagentHoverCardDetailsForWorkspace,
   selectSubagentsForParent,
   selectSubagentsForWorkspace,
   selectSubagentPrTabsForWorkspace,
   selectWorkspaceOwnPrIdentity,
   resolveWorkspacePrCwdForIdentity,
+  useSubagentHoverCardDetailsForWorkspace,
   useSubagentsForParent,
   useSubagentsForWorkspace,
   useSubagentPrTabsForWorkspace,
