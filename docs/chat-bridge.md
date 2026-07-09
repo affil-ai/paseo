@@ -1078,8 +1078,11 @@ bridge still posts only the first complete assistant text and final assistant te
   under the real repo's project. The bridge stamps `paseo.chat-thread-id` only on the office
   agent; child grouping comes from `paseo.parent-agent-id`.
 - **Teardown policy → v1.** A thread's office agent is archived (`client.archiveAgent`) and its
-  store entry dropped on an explicit `@bot done` / thread-archive signal or when it reaches a
-  terminal `closed` state. Idle agents are left alive so a later reply can resume them. Archive
+  store entry dropped on an exact standalone `done` (for example, `@bot done`) or `archive`
+  command, with legacy `/archive` compatibility, or when it reaches a terminal `closed` state.
+  Slack can intercept `/archive` in threads, so `done` is the primary command. Command matching is
+  case/whitespace-insensitive after mention cleaning and does not match prose. Idle agents are left
+  alive so a later reply can resume them. Archive
   cascades to subagents (`agent-lifecycle.md`). **Teardown is also the office brain's capture
   trigger** — before archiving, the office agent writes what was decided/done/learned into its
   memory; see [office-brain.md](office-brain.md).

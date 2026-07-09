@@ -24,14 +24,17 @@ describe("parseCommand", () => {
     expect(parseCommand("please mute this thread")).toBe("mute");
   });
 
-  it("only treats exact /archive as the archive command", () => {
+  it("treats exact done and archive aliases as the archive command", () => {
+    expect(parseCommand("done")).toBe("archive");
+    expect(parseCommand(" DONE ")).toBe("archive");
+    expect(parseCommand("<@U123> done")).toBe("archive");
+    expect(parseCommand("archive")).toBe("archive");
+    expect(parseCommand(" ARCHIVE ")).toBe("archive");
     expect(parseCommand("/archive")).toBe("archive");
-    expect(parseCommand(" /archive ")).toBe("archive");
-    expect(parseCommand("/ARCHIVE")).toBe("archive");
+    expect(parseCommand(" /ARCHIVE ")).toBe("archive");
 
-    expect(parseCommand("done")).toBeNull();
     expect(parseCommand("done?")).toBeNull();
-    expect(parseCommand("archive")).toBeNull();
+    expect(parseCommand("we are done")).toBeNull();
     expect(parseCommand("archive this")).toBeNull();
     expect(parseCommand("/archive now")).toBeNull();
     expect(parseCommand("/archive?")).toBeNull();

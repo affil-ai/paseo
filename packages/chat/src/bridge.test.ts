@@ -648,7 +648,7 @@ describe("ChatBridge follow-up delivery", () => {
     }
   });
 
-  it("archives only on /archive and reacts to the root Slack message", async () => {
+  it("archives on @cto done and reacts to the root Slack message", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
     try {
       const externalThreadId = "slack:C123:111.222";
@@ -706,8 +706,8 @@ describe("ChatBridge follow-up delivery", () => {
       };
       const message = {
         id: "333.444",
-        text: "/archive",
-        raw: { text: "/archive", thread_ts: "111.222" },
+        text: "<@UCTO> done",
+        raw: { text: "<@UCTO> done", thread_ts: "111.222" },
         author: {
           userId: "U1",
           userName: "john",

@@ -55,7 +55,9 @@ optional multi-repo routing are explicitly v2 and out of scope here.
   message.
 - **Chat SDK is the only Slack client** — no raw Slack Web API calls.
 - **State is file-backed** under `$PASEO_HOME/chat-bridge/` — no database.
-- **Teardown** (`@cto done` / archive) is the office brain's capture trigger.
+- **Teardown** uses exact standalone `done` (for example, `@cto done`) or `archive`; legacy
+  `/archive` remains compatible but Slack may intercept it in threads. These commands are the office
+  brain's capture trigger.
 
 ## Out of scope (v1)
 
