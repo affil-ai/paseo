@@ -268,6 +268,23 @@ The thread is the continuity unit. Each new thread gets a fresh office agent wit
 context window, so two parallel Slack threads never bleed into each other. Replies in a thread
 continue that thread's agent (`sendAgentMessage`).
 
+### Deferred: multiple conversations per agent
+
+The supported product workflow is currently **one inbound Slack thread = one office agent = one
+primary chat binding**. We do not have a current use case that requires one office agent to
+participate in multiple subscribed conversations, so do not add per-turn conversation provenance
+or automatic multi-binding routing yet.
+
+The store and outbound chat tools can represent multiple bindings for one agent, but that is an
+implementation capability rather than a supported product workflow. When more than one binding
+exists, callers must pass an explicit `conversationId`; an unqualified `current` destination is
+intentionally ambiguous.
+
+If a real multi-conversation workflow emerges, carry the originating binding as trusted per-turn
+provenance and make `chat.send` with `current` resolve against that source binding automatically.
+Do not make the model infer routing from user-authored prompt text. Track the implementation in a
+linked issue when the use case exists.
+
 ### How t3code concepts map onto Paseo
 
 t3code is built on Effect-TS with its own orchestration engine; Paseo has the daemon. The
