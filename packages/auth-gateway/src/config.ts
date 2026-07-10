@@ -18,6 +18,12 @@ const AuthGatewayConfigSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
+  GITHUB_CLIENT_ID: z.string().min(1).optional(),
+  GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
+  GITHUB_APP_ID: z.string().min(1).optional(),
+  GITHUB_APP_INSTALLATION_ID: z.string().min(1).optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
+  PASEO_OFFICE_SHARED_SECRET: z.string().min(32).optional(),
   PASEO_AUTH_SESSION_HOURS: z.coerce.number().int().min(1).max(168).default(12),
 });
 

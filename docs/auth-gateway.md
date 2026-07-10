@@ -32,6 +32,12 @@ containers on a private network and publish only the gateway's port.
 | `BETTER_AUTH_SECRET`              | At least 32 random characters                      |
 | `GOOGLE_CLIENT_ID`                | Google OAuth web client ID                         |
 | `GOOGLE_CLIENT_SECRET`            | Google OAuth web client secret                     |
+| `GITHUB_CLIENT_ID`                | GitHub App client ID for account linking           |
+| `GITHUB_CLIENT_SECRET`            | GitHub App client secret                           |
+| `GITHUB_APP_ID`                   | App ID used to mint installation tokens            |
+| `GITHUB_APP_INSTALLATION_ID`      | Installation ID for the organization               |
+| `GITHUB_APP_PRIVATE_KEY`          | PEM text (or base64 PEM) for installation auth     |
+| `PASEO_OFFICE_SHARED_SECRET`      | Internal identity/token broker bearer secret       |
 | `PORT`                            | Gateway listen port; defaults to `8080`            |
 
 The Google OAuth client needs this authorized redirect URI:
@@ -40,8 +46,46 @@ The Google OAuth client needs this authorized redirect URI:
 <PASEO_AUTH_PUBLIC_URL>/api/auth/callback/google
 ```
 
+When GitHub linking is configured, the GitHub App needs this callback URL:
+
+```text
+<PASEO_AUTH_PUBLIC_URL>/api/auth/callback/github
+```
+
+Google remains the login gate. GitHub is an explicitly linked secondary identity at
+`/auth/account`; a GitHub account cannot create a Paseo account on its own.
+
 `hd` is enforced against Google's verified hosted-domain claim. The gateway does not
 trust a user-entered email suffix.
+
+## Multiplayer commit attribution
+
+The gateway maps a linked Better Auth user to the GitHub account row. Slack senders are
+matched to that same user by the email returned by Chat SDK. The daemon asks the internal
+identity endpoint for the co-author address before each turn. Linked users receive their
+GitHub ID-based noreply address; unlinked users use the configured fallback
+(`vivek@affil.ai` in the Affil deployment).
+
+The daemon installs a managed `commit-msg` hook through process-scoped Git configuration.
+It does not write hooks into project repositories. Each agent process already has a stable
+`PASEO_AGENT_ID`, so the hook reads the attribution for the human who initiated the active
+turn. Delegated child agents inherit their parent's current attribution. A later turn from
+another Paseo or Slack user replaces the attribution before that turn starts.
+
+Configure the daemon with:
+
+| Variable                          | Purpose                                                 |
+| --------------------------------- | ------------------------------------------------------- |
+| `PASEO_IDENTITY_RESOLVER_URL`     | Gateway `/api/office/identity/resolve` URL              |
+| `PASEO_IDENTITY_RESOLVER_SECRET`  | Same value as `PASEO_OFFICE_SHARED_SECRET`              |
+| `PASEO_GITHUB_APP_TOKEN_URL`      | Gateway `/api/office/github/token` URL                  |
+| `PASEO_GITHUB_APP_TOKEN_SECRET`   | Same value as `PASEO_OFFICE_SHARED_SECRET`              |
+| `PASEO_ATTRIBUTION_DEFAULT_EMAIL` | Commit fallback when the requester has no linked GitHub |
+| `PASEO_GITHUB_BOT_NAME`           | Commit author, normally `office-of-the-cto[bot]`        |
+| `PASEO_GITHUB_BOT_EMAIL`          | GitHub noreply address for the app bot account          |
+
+The GitHub App requires repository Contents write and Pull requests write. Installation
+tokens are short lived and brokered on demand; the private key remains in the gateway.
 
 ## Container
 

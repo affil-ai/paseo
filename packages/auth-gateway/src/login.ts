@@ -86,6 +86,43 @@ export function sendLogoutPage(response: ServerResponse): void {
 </html>`);
 }
 
+export function sendAccountPage(
+  response: ServerResponse,
+  user: { name: string; email: string },
+  github: { login?: string } | null,
+  githubLinkingEnabled: boolean,
+): void {
+  const nonce = randomBytes(18).toString("base64url");
+  response.statusCode = 200;
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.setHeader(
+    "content-security-policy",
+    `default-src 'none'; connect-src 'self'; font-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  );
+  response.setHeader("referrer-policy", "no-referrer");
+  response.setHeader("x-content-type-options", "nosniff");
+  const status = github?.login
+    ? `Connected as <strong>@${escapeHtml(github.login)}</strong>`
+    : "No GitHub account connected";
+  let action = "";
+  if (!github?.login) {
+    action = githubLinkingEnabled
+      ? '<button type="button" id="github-link">Connect GitHub</button>'
+      : '<p class="muted">GitHub linking is not configured.</p>';
+  }
+  response.end(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paseo account</title><style>
+@font-face{font-family:InterVariable;src:url('/auth/assets/inter.woff2')}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;font-family:InterVariable,system-ui;background:#fff;color:#1a1a1e}.card{width:min(100%,420px);display:grid;gap:20px}.wordmark{color:#20744a}h1,p{margin:0}.muted{color:#71717a}.identity{padding:16px;border:1px solid #e4e4e7;border-radius:12px;display:grid;gap:6px}button,a.button{display:inline-flex;justify-content:center;min-height:40px;align-items:center;border:0;border-radius:10px;padding:8px 14px;background:#20744a;color:#fff;text-decoration:none;font:inherit;cursor:pointer}.actions{display:flex;gap:12px;flex-wrap:wrap}@media(prefers-color-scheme:dark){body{background:#181b1a;color:#fafafa}.identity{border-color:#3f3f46}.muted{color:#a1a1aa}}
+</style></head><body><main class="card"><p class="wordmark">Paseo</p><h1>Account</h1>
+<section class="identity"><strong>${escapeHtml(user.name)}</strong><span class="muted">${escapeHtml(user.email)}</span></section>
+<section class="identity"><strong>GitHub</strong><span>${status}</span>${action}</section>
+<div class="actions"><a class="button" href="/">Back to Paseo</a><a href="/auth/logout">Sign out</a></div>
+<p id="error" class="muted" role="alert"></p></main>
+<script nonce="${nonce}">const button=document.querySelector('#github-link');button?.addEventListener('click',async()=>{button.disabled=true;const response=await fetch('/api/auth/link-social',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider:'github',callbackURL:'/auth/account'})});const payload=await response.json();if(response.ok&&typeof payload.url==='string'){location.assign(payload.url);return}button.disabled=false;document.querySelector('#error').textContent='Unable to start GitHub linking.'});</script>
+</body></html>`);
+}
+
 function normalizeReturnTo(value: string | null): string {
   if (!value?.startsWith("/") || value.startsWith("//")) {
     return "/";

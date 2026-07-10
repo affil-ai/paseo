@@ -91,6 +91,9 @@ All Slack interaction goes through Chat SDK (`chat` + `@chat-adapter/slack`). Th
 must **never** call the Slack Web API directly or hold a raw `SLACK_BOT_TOKEN` fetch path.
 Everything we need is native to Chat SDK:
 
+The Slack app should grant `users:read.email`. `adapter.getUser()` then supplies the sender email
+used to match the Slack identity to the Better Auth user; the bridge does not call Slack directly.
+
 | Need                       | Chat SDK API (use this)                                              |
 | -------------------------- | -------------------------------------------------------------------- |
 | Listen for mentions/DMs    | `bot.onNewMention`, `bot.onDirectMessage`, `bot.onSubscribedMessage` |

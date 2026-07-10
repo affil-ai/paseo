@@ -7,6 +7,7 @@ import type { Attachment, Message, Thread, UserInfo } from "chat";
 export interface SenderIdentity {
   userId: string;
   name: string;
+  email?: string;
   handle?: string;
   avatarUrl?: string;
 }
@@ -107,6 +108,7 @@ export async function resolveSender(thread: Thread, message: Message): Promise<S
   return {
     userId: author.userId,
     name: user?.fullName || author.fullName || handle,
+    ...(user?.email ? { email: user.email } : {}),
     handle,
     ...(user?.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };

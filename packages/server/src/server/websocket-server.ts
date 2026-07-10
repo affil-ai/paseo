@@ -91,6 +91,7 @@ interface PendingConnection {
   connectionLogger: pino.Logger;
   helloTimeout: ReturnType<typeof setTimeout> | null;
   identity: WebSocketConnectionIdentity;
+  authenticatedUser: { name: string; email: string } | null;
 }
 
 interface WebSocketConnectionIdentity {
@@ -931,6 +932,7 @@ export class VoiceAssistantWebSocketServer {
       connectionLogger,
       helloTimeout: null,
       identity,
+      authenticatedUser: extractAuthenticatedUser(request),
     };
     const timeout = setTimeout(() => {
       if (this.pendingConnections.get(ws) !== pending) {
@@ -970,12 +972,15 @@ export class VoiceAssistantWebSocketServer {
     appVersion: string | null;
     clientCapabilities: Record<string, unknown> | null;
     connectionLogger: pino.Logger;
+    authenticatedUser: { name: string; email: string } | null;
   }): SessionConnection {
-    const { ws, clientId, appVersion, clientCapabilities, connectionLogger } = params;
+    const { ws, clientId, appVersion, clientCapabilities, connectionLogger, authenticatedUser } =
+      params;
     let connection: SessionConnection | null = null;
 
     const session = new Session({
       clientId,
+      authenticatedUser,
       appVersion,
       clientCapabilities,
       onMessage: (msg) => {
@@ -1184,6 +1189,7 @@ export class VoiceAssistantWebSocketServer {
       appVersion: message.appVersion ?? null,
       clientCapabilities: message.capabilities ?? null,
       connectionLogger,
+      authenticatedUser: pending.authenticatedUser,
     });
     this.sessions.set(ws, connection);
     this.externalSessionsByKey.set(clientId, connection);
@@ -2125,6 +2131,23 @@ function extractSocketRequestMetadata(request: unknown): SocketRequestMetadata {
     ...(userAgent ? { userAgent } : {}),
     ...(remoteAddress ? { remoteAddress } : {}),
   };
+}
+
+function extractAuthenticatedUser(request: unknown): { name: string; email: string } | null {
+  if (!request || typeof request !== "object") return null;
+  const headers = (request as { headers?: Record<string, unknown> }).headers;
+  const email = headers?.["x-paseo-authenticated-user-email"];
+  const encodedName = headers?.["x-paseo-authenticated-user-name-b64"];
+  if (typeof email !== "string" || !email.includes("@")) return null;
+  let name = email;
+  if (typeof encodedName === "string") {
+    try {
+      name = Buffer.from(encodedName, "base64url").toString("utf8").trim() || email;
+    } catch {
+      name = email;
+    }
+  }
+  return { name, email: email.trim().toLowerCase() };
 }
 
 interface HostAuthority {

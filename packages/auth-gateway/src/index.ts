@@ -12,6 +12,10 @@ async function main(): Promise<void> {
     publicUrl: config.PASEO_AUTH_PUBLIC_URL,
     resolveSession: auth.resolveSession,
     handleAuthRequest: auth.handleRequest,
+    resolveIdentity: auth.resolveIdentity,
+    getGitHubAppToken: auth.getGitHubAppToken,
+    githubLinkingEnabled: auth.githubLinkingEnabled,
+    officeSharedSecret: config.PASEO_OFFICE_SHARED_SECRET,
   });
 
   let isClosing = false;

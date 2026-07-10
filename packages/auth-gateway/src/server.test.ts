@@ -94,6 +94,10 @@ describe("auth gateway", () => {
       response.end(
         JSON.stringify({
           email: request.headers["x-paseo-authenticated-user-email"],
+          name: Buffer.from(
+            String(request.headers["x-paseo-authenticated-user-name-b64"] ?? ""),
+            "base64url",
+          ).toString("utf8"),
           legacyEmail: request.headers["cf-access-authenticated-user-email"],
           cookie: request.headers.cookie ?? null,
         }),
@@ -122,9 +126,78 @@ describe("auth gateway", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       email: "user@example.com",
+      name: "Example User",
       legacyEmail: "user@example.com",
       cookie: null,
     });
+  });
+
+  it("resolves an internal identity only with the shared service secret", async () => {
+    const upstream = createServer((_request, response) => response.end("paseo"));
+    const upstreamUrl = await listen(upstream);
+    const gateway = createAuthGateway({
+      upstreamUrl,
+      publicUrl: "https://paseo.example.com",
+      resolveSession: async () => null,
+      handleAuthRequest: (_request, response) => response.end(),
+      officeSharedSecret: "a-shared-service-secret-that-is-long-enough",
+      resolveIdentity: async (email) => ({
+        name: "Jenny",
+        email,
+        githubAccountId: "123",
+        githubLogin: "jenny",
+        commitEmail: "123+jenny@users.noreply.github.com",
+      }),
+    });
+    const gatewayUrl = await listen(gateway);
+
+    const unauthorized = await fetch(`${gatewayUrl}/api/office/identity/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "jenny@example.com" }),
+    });
+    const authorized = await fetch(`${gatewayUrl}/api/office/identity/resolve`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer a-shared-service-secret-that-is-long-enough",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "jenny@example.com" }),
+    });
+
+    expect(unauthorized.status).toBe(401);
+    expect(authorized.status).toBe(200);
+    expect(await authorized.json()).toMatchObject({
+      githubLogin: "jenny",
+      commitEmail: "123+jenny@users.noreply.github.com",
+    });
+  });
+
+  it("renders the current account and linked GitHub identity", async () => {
+    const upstream = createServer((_request, response) => response.end("paseo"));
+    const upstreamUrl = await listen(upstream);
+    const gateway = createAuthGateway({
+      upstreamUrl,
+      publicUrl: "https://paseo.example.com",
+      resolveSession: async () => ({ name: "Jenny", email: "jenny@example.com" }),
+      handleAuthRequest: (_request, response) => response.end(),
+      githubLinkingEnabled: true,
+      resolveIdentity: async (email) => ({
+        name: "Jenny",
+        email,
+        githubAccountId: "123",
+        githubLogin: "jenny",
+        commitEmail: "123+jenny@users.noreply.github.com",
+      }),
+    });
+    const gatewayUrl = await listen(gateway);
+
+    const response = await fetch(`${gatewayUrl}/auth/account`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("jenny@example.com");
+    expect(html).toContain("@jenny");
   });
 
   it("renders a responsive Google login page without accepting an external return URL", async () => {

@@ -27,6 +27,7 @@ import type {
 } from "../terminal/terminal-manager.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
+import type { MessageAttribution } from "@getpaseo/protocol/agent-types";
 import type { BinaryFrame } from "@getpaseo/protocol/binary-frames/index";
 import { CursorError } from "./pagination/cursor.js";
 import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
@@ -426,6 +427,7 @@ type AgentMcpTransportFactory = () => Promise<unknown>;
 
 export interface SessionOptions {
   clientId: string;
+  authenticatedUser?: { name: string; email: string } | null;
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
@@ -563,6 +565,7 @@ export class Session {
   private readonly sessionLogger: pino.Logger;
   private readonly paseoHome: string;
   private readonly worktreesRoot: string | undefined;
+  private readonly authenticatedUser: { name: string; email: string } | null;
 
   private agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
@@ -617,6 +620,7 @@ export class Session {
   constructor(options: SessionOptions) {
     const {
       clientId,
+      authenticatedUser,
       appVersion,
       clientCapabilities,
       onMessage,
@@ -664,6 +668,7 @@ export class Session {
       daemonRuntimeConfig,
       getWebSocketRuntimeMetrics,
     } = options;
+    this.authenticatedUser = authenticatedUser ?? null;
     this.clientId = clientId;
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
@@ -2511,6 +2516,7 @@ export class Session {
       initialPrompt,
       clientMessageId,
       initialMessageSource,
+      initialAttribution,
       outputSchema,
       git,
       worktree,
@@ -2578,6 +2584,7 @@ export class Session {
           initialPrompt,
           clientMessageId,
           initialMessageSource,
+          initialAttribution: this.resolveMessageAttribution(initialAttribution),
           outputSchema,
           images,
           attachments,
@@ -5501,6 +5508,7 @@ export class Session {
 
     try {
       const agentId = resolved.agentId;
+      const attribution = this.resolveMessageAttribution(msg.attribution);
 
       const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
@@ -5519,9 +5527,13 @@ export class Session {
           agentId,
           prompt,
           messageId: msg.messageId,
-          runOptions: msg.userMessageSource
-            ? { userMessageSource: msg.userMessageSource }
-            : undefined,
+          runOptions:
+            msg.userMessageSource || attribution
+              ? {
+                  ...(msg.userMessageSource ? { userMessageSource: msg.userMessageSource } : {}),
+                  ...(attribution ? { attribution } : {}),
+                }
+              : undefined,
           logger: this.sessionLogger,
         });
       } catch (error) {
@@ -5587,6 +5599,19 @@ export class Session {
         },
       });
     }
+  }
+
+  private resolveMessageAttribution(
+    supplied: MessageAttribution | undefined,
+  ): MessageAttribution | undefined {
+    if (this.authenticatedUser) {
+      return {
+        source: "paseo",
+        name: this.authenticatedUser.name,
+        email: this.authenticatedUser.email,
+      };
+    }
+    return supplied;
   }
 
   private async handleWaitForFinish(
