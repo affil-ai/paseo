@@ -1,5 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createPiEmailClassifier, type PiPromptInput } from "./email-classifier.js";
+import { createPiEmailClassifier, runPiPrompt, type PiPromptInput } from "./email-classifier.js";
 import type { ResendReceivedEmail } from "./email-resend.js";
 
 const email: ResendReceivedEmail = {
@@ -113,5 +116,17 @@ describe("createPiEmailClassifier", () => {
       confidence: 0,
       reason: "Classifier failed: pi unavailable; failed open.",
     });
+  });
+
+  it("rejects a Pi startup failure without an unhandled rejection", async () => {
+    await expect(
+      runPiPrompt({
+        command: process.execPath,
+        cwd: join(tmpdir(), `missing-pi-cwd-${randomUUID()}`),
+        model: "test-model",
+        prompt: "test prompt",
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
