@@ -29,10 +29,7 @@ function startEmailIntakes(input: {
   bridge: ChatBridge;
 }): EmailIntakes {
   const classifier = input.config.emailClassifier
-    ? createDefaultEmailClassifier({
-        ...input.config.emailClassifier,
-        cwd: input.config.officeRepoPath,
-      })
+    ? createDefaultEmailClassifier(input.config.emailClassifier)
     : undefined;
   const emailIntake = input.config.email
     ? new EmailIntakeBridge({

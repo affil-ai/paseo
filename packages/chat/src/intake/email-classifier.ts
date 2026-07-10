@@ -310,8 +310,11 @@ export async function runPiPrompt(input: PiPromptInput): Promise<string> {
   }, timeoutMs);
 
   try {
-    await sendRpcCommand({ type: "prompt", message: input.prompt }, Math.min(timeoutMs, 30_000));
-    return await agentEnd;
+    const [, text] = await Promise.all([
+      sendRpcCommand({ type: "prompt", message: input.prompt }, Math.min(timeoutMs, 30_000)),
+      agentEnd,
+    ]);
+    return text;
   } finally {
     clearTimeout(overallTimer);
     for (const pendingRequest of pending.values()) {
