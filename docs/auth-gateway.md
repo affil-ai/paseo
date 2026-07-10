@@ -67,3 +67,5 @@ tokens encrypted, and exposes unauthenticated `GET /healthz` for the container p
 
 Better Auth routes live under `/api/auth/*`. Keep this path and `/auth/*` on the gateway;
 do not route them to the daemon.
+
+Users can end the current browser session at `/auth/logout`.

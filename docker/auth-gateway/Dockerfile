@@ -14,8 +14,7 @@ RUN set -eux; \
 FROM ${NODE_IMAGE}
 
 ENV NODE_ENV=production \
-    PORT=8080 \
-    PASEO_AUTH_DATABASE_PATH=/data/auth.sqlite
+    PORT=8080
 
 RUN set -eux; \
     apt-get update; \
