@@ -337,6 +337,16 @@ export interface CompactionTimelineItem {
   preTokens?: number;
 }
 
+export interface MessageAttribution {
+  source: "paseo" | "slack";
+  userId?: string;
+  name: string;
+  email?: string;
+  githubLogin?: string;
+  githubAccountId?: string;
+  commitEmail?: string;
+}
+
 export type AgentTimelineItem =
   | {
       type: "user_message";
@@ -345,6 +355,7 @@ export type AgentTimelineItem =
       images?: Array<{ data: string; mimeType: string }>;
       attachments?: AgentAttachment[];
       source?: ChatUserMessageSource;
+      attribution?: MessageAttribution;
     }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }

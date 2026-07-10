@@ -4,6 +4,7 @@ import { findExecutable } from "../executable-resolution/executable-resolution.j
 import { resolveGitHubRemote } from "../utils/github-remote.js";
 import { runGitCommand } from "../utils/run-git-command.js";
 import { execCommand } from "../utils/spawn.js";
+import { getConfiguredGitHubAppToken } from "./github-app-token.js";
 
 const DEFAULT_GITHUB_CACHE_TTL_MS = 30_000;
 const CHECK_ANNOTATION_PAGE_MAX = 20;
@@ -1832,9 +1833,14 @@ async function runGhCommand(
   args: string[],
   options: GitHubCommandRunnerOptions,
 ): Promise<GitHubCommandResult> {
+  const appToken = await getConfiguredGitHubAppToken();
   return execCommand("gh", args, {
     cwd: options.cwd,
-    envOverlay: { ...GITHUB_ENV, ...options.envOverlay },
+    envOverlay: {
+      ...GITHUB_ENV,
+      ...(appToken ? { GH_TOKEN: appToken } : {}),
+      ...options.envOverlay,
+    },
     maxBuffer: 10 * 1024 * 1024,
   });
 }

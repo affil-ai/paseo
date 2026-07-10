@@ -60,6 +60,15 @@ function trimNonEmpty(value: string): string {
   return value.trim();
 }
 
+function slackAttribution(sender: { userId: string; name: string; email?: string }) {
+  return {
+    source: "slack" as const,
+    userId: sender.userId,
+    name: sender.name,
+    ...(sender.email ? { email: sender.email } : {}),
+  };
+}
+
 function isSystemErrorAssistantText(text: string): boolean {
   return text.trimStart().startsWith("[System Error]");
 }
@@ -359,6 +368,7 @@ export class ChatBridge {
         images: normalized.images,
         attachments: normalized.attachments,
         userMessageSource: "slack",
+        attribution: slackAttribution(normalized.sender),
       },
     );
     return true;
@@ -415,6 +425,7 @@ export class ChatBridge {
           images: input.normalized.images,
           attachments: input.normalized.attachments,
           userMessageSource: "slack",
+          attribution: slackAttribution(input.normalized.sender),
         },
       )
       .catch((error) => {
@@ -455,6 +466,7 @@ export class ChatBridge {
           images: input.normalized.images,
           attachments: input.normalized.attachments,
           userMessageSource: "slack",
+          attribution: slackAttribution(input.normalized.sender),
         },
       );
       await this.store.markEventProcessed(input.normalized.eventId);
@@ -524,6 +536,7 @@ export class ChatBridge {
       initialPrompt: input.initialPrompt,
       clientMessageId: randomUUID(),
       initialMessageSource: input.source,
+      ...(input.startedBy ? { initialAttribution: slackAttribution(input.startedBy) } : {}),
       images: input.images ?? [],
       attachments: input.attachments ?? [],
       labels: {
@@ -606,6 +619,7 @@ export class ChatBridge {
         source: "slack",
         userId: normalized.sender.userId,
         name: normalized.sender.name,
+        ...(normalized.sender.email ? { email: normalized.sender.email } : {}),
         ...(normalized.sender.handle ? { handle: normalized.sender.handle } : {}),
         ...(normalized.sender.avatarUrl ? { avatarUrl: normalized.sender.avatarUrl } : {}),
       },

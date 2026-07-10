@@ -284,6 +284,7 @@ import type {
   ProviderStatus,
   AgentRuntimeInfo,
   AgentTimelineItem,
+  MessageAttribution,
   AgentProviderNotice,
   ToolCallDetail,
   ToolCallTimelineItem,
@@ -665,6 +666,16 @@ const ToolCallTimelineItemPayloadSchema: z.ZodType<ToolCallTimelineItem, unknown
 // the inner tool_call branch from the generated outer dispatch.
 const ChatUserMessageSourceSchema = z.enum(["slack", "support"]);
 
+export const MessageAttributionSchema: z.ZodType<MessageAttribution> = z.object({
+  source: z.enum(["paseo", "slack"]),
+  userId: z.string().optional(),
+  name: z.string(),
+  email: z.email().optional(),
+  githubLogin: z.string().optional(),
+  githubAccountId: z.string().optional(),
+  commitEmail: z.email().optional(),
+});
+
 export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknown> = z.union([
   z.object({
     type: z.literal("user_message"),
@@ -673,6 +684,7 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     images: z.lazy(() => z.array(ImageAttachmentSchema)).optional(),
     attachments: z.lazy(() => AgentAttachmentsSchema).optional(),
     source: ChatUserMessageSourceSchema.optional(),
+    attribution: MessageAttributionSchema.optional(),
   }),
   z.object({
     type: z.literal("assistant_message"),
@@ -1057,6 +1069,7 @@ export const SendAgentMessageSchema = z.object({
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
   userMessageSource: ChatUserMessageSourceSchema.optional(),
+  attribution: MessageAttributionSchema.optional(),
 });
 
 // ============================================================================
@@ -1175,6 +1188,7 @@ export const SendAgentMessageRequestSchema = z.object({
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
   userMessageSource: ChatUserMessageSourceSchema.optional(),
+  attribution: MessageAttributionSchema.optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({
@@ -1294,6 +1308,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   initialPrompt: z.string().optional(),
   clientMessageId: z.string().optional(),
   initialMessageSource: ChatUserMessageSourceSchema.optional(),
+  initialAttribution: MessageAttributionSchema.optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,

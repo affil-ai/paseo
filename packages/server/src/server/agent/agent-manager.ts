@@ -38,6 +38,7 @@ import {
   type AgentStreamEvent,
   type AgentTimelineItem,
   type AgentUsage,
+  type MessageAttribution,
   type AgentRuntimeInfo,
   type ImportedTimelineEntry,
   type ImportableProviderSession,
@@ -67,6 +68,7 @@ import { isSystemInjectedEnvelope } from "./agent-prompt.js";
 import { stripInternalPaseoMcpServer, withRuntimeMcpServers } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import type { PaseoToolCatalogFactory } from "./tools/types.js";
+import type { AgentAttributionService } from "./agent-attribution.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -101,6 +103,24 @@ interface TimeoutOptions {
 
 function formatProviderList(providers: readonly string[]): string {
   return providers.length > 0 ? providers.join(", ") : "none";
+}
+
+function resolveAttributionService(options: AgentManagerOptions): AgentAttributionService | null {
+  return options.attributionService ?? null;
+}
+
+function trimOldestMapEntry<K, V>(map: Map<K, V>, maximumSize: number): void {
+  if (map.size <= maximumSize) return;
+  const oldestKey = map.keys().next().value;
+  if (oldestKey !== undefined) map.delete(oldestKey);
+}
+
+function setOrDelete<K, V>(map: Map<K, V>, key: K, value: V | undefined): void {
+  if (value === undefined) {
+    map.delete(key);
+    return;
+  }
+  map.set(key, value);
 }
 
 function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
@@ -235,6 +255,7 @@ export interface AgentManagerOptions {
   appendSystemPrompt?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
+  attributionService?: AgentAttributionService;
   logger: Logger;
 }
 
@@ -550,6 +571,10 @@ export class AgentManager {
   private readonly userMessageSourcesById = new Map<string, ChatUserMessageSource>();
   private readonly userMessageSourcesByTurnId = new Map<string, ChatUserMessageSource>();
   private readonly pendingUserMessageSourcesByAgentId = new Map<string, ChatUserMessageSource>();
+  private readonly messageAttributionsById = new Map<string, MessageAttribution>();
+  private readonly messageAttributionsByTurnId = new Map<string, MessageAttribution>();
+  private readonly pendingAttributionsByAgentId = new Map<string, MessageAttribution>();
+  private readonly attributionService: AgentAttributionService | null;
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
@@ -575,6 +600,7 @@ export class AgentManager {
     this.mcpServers = enabledMcpServersFromConnections(options?.mcpConnections);
     this.configurePaseoTools(options);
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
+    this.attributionService = resolveAttributionService(options);
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
     this.rescueTimeouts = {
       reloadSessionCloseMs:
@@ -952,6 +978,10 @@ export class AgentManager {
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
     const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
+    const parentAgentId = getParentAgentIdFromLabels(options.labels);
+    if (parentAgentId) {
+      await this.attributionService?.inheritForChild(parentAgentId, resolvedAgentId);
+    }
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(config, resolvedAgentId);
     this.requireEnabledProvider(storedConfig.provider);
     const client = await this.requireAvailableClient({
@@ -1764,20 +1794,7 @@ export class AgentManager {
     agent.pendingReplacement = false;
     agent.lastError = undefined;
 
-    if (options?.messageId && options.userMessageSource) {
-      this.userMessageSourcesById.set(options.messageId, options.userMessageSource);
-      if (this.userMessageSourcesById.size > 1_000) {
-        const oldestMessageId = this.userMessageSourcesById.keys().next().value;
-        if (oldestMessageId) {
-          this.userMessageSourcesById.delete(oldestMessageId);
-        }
-      }
-    }
-    if (options?.userMessageSource) {
-      this.pendingUserMessageSourcesByAgentId.set(agentId, options.userMessageSource);
-    } else {
-      this.pendingUserMessageSourcesByAgentId.delete(agentId);
-    }
+    this.trackPendingRunMetadata(agentId, options);
 
     const pendingRun = this.foregroundRuns.createPendingRun(agentId);
 
@@ -1785,12 +1802,10 @@ export class AgentManager {
       let turnId: string;
       let turnStream: ReturnType<ForegroundRunState["createTurnStream"]> | null = null;
       try {
+        await this.writeActiveAttribution(agentId, options?.attribution);
         const result = await agent.session.startTurn(prompt, options);
         turnId = result.turnId;
-        const pendingSource = this.pendingUserMessageSourcesByAgentId.get(agentId);
-        if (pendingSource) {
-          this.userMessageSourcesByTurnId.set(turnId, pendingSource);
-        }
+        this.trackTurnMetadata(agentId, turnId);
       } catch (error) {
         this.pendingUserMessageSourcesByAgentId.delete(agentId);
         const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
@@ -1840,6 +1855,33 @@ export class AgentManager {
     }.call(this);
 
     return streamForwarder;
+  }
+
+  private trackPendingRunMetadata(agentId: string, options: AgentRunOptions | undefined): void {
+    if (options?.messageId && options.userMessageSource) {
+      this.userMessageSourcesById.set(options.messageId, options.userMessageSource);
+      trimOldestMapEntry(this.userMessageSourcesById, 1_000);
+    }
+    setOrDelete(this.pendingUserMessageSourcesByAgentId, agentId, options?.userMessageSource);
+    if (options?.messageId && options.attribution) {
+      this.messageAttributionsById.set(options.messageId, options.attribution);
+      trimOldestMapEntry(this.messageAttributionsById, 1_000);
+    }
+    setOrDelete(this.pendingAttributionsByAgentId, agentId, options?.attribution);
+  }
+
+  private async writeActiveAttribution(
+    agentId: string,
+    attribution: MessageAttribution | undefined,
+  ): Promise<void> {
+    if (attribution) await this.attributionService?.setForAgent(agentId, attribution);
+  }
+
+  private trackTurnMetadata(agentId: string, turnId: string): void {
+    const source = this.pendingUserMessageSourcesByAgentId.get(agentId);
+    if (source) this.userMessageSourcesByTurnId.set(turnId, source);
+    const attribution = this.pendingAttributionsByAgentId.get(agentId);
+    if (attribution) this.messageAttributionsByTurnId.set(turnId, attribution);
   }
 
   private finalizeForegroundTurn(agent: ActiveManagedAgent, turnId?: string): void {
@@ -3029,8 +3071,10 @@ export class AgentManager {
     if (!options?.fromHistory && isTurnTerminalEvent(event)) {
       if (eventTurnId) {
         this.userMessageSourcesByTurnId.delete(eventTurnId);
+        this.messageAttributionsByTurnId.delete(eventTurnId);
       }
       this.pendingUserMessageSourcesByAgentId.delete(agent.id);
+      this.pendingAttributionsByAgentId.delete(agent.id);
     }
 
     if (!options?.fromHistory && flags.shouldDispatchEvent) {
@@ -3233,14 +3277,24 @@ export class AgentManager {
     item: AgentTimelineItem,
     turnId?: string,
   ): AgentTimelineItem {
-    if (item.type !== "user_message" || item.source) {
+    if (item.type !== "user_message") {
       return item;
     }
     const source =
       (item.messageId ? this.userMessageSourcesById.get(item.messageId) : undefined) ??
       (turnId ? this.userMessageSourcesByTurnId.get(turnId) : undefined) ??
       this.pendingUserMessageSourcesByAgentId.get(agentId);
-    return source ? { ...item, source } : item;
+    const attribution =
+      item.attribution ??
+      (item.messageId ? this.messageAttributionsById.get(item.messageId) : undefined) ??
+      (turnId ? this.messageAttributionsByTurnId.get(turnId) : undefined) ??
+      this.pendingAttributionsByAgentId.get(agentId);
+    const resolvedSource = item.source ?? source;
+    return {
+      ...item,
+      ...(resolvedSource ? { source: resolvedSource } : {}),
+      ...(attribution ? { attribution } : {}),
+    };
   }
 
   private onStreamTurnCompleted(params: {
@@ -3824,6 +3878,7 @@ export class AgentManager {
       env: {
         ...env,
         PASEO_AGENT_ID: agentId,
+        ...this.attributionService?.getLaunchEnvironment(agentId),
       },
     };
     if (

@@ -126,6 +126,13 @@ Enables remote access when the daemon is behind a firewall.
 
 See [SECURITY.md](../SECURITY.md) for the full threat model.
 
+### `packages/auth-gateway` — Optional shared-host authentication
+
+An opt-in Better Auth reverse proxy for organizations that publish one daemon to multiple
+trusted operators. It authenticates HTTP requests and WebSocket upgrades before proxying
+them to a private daemon. It is a deployment boundary, not a tenant-isolation layer; see
+[auth-gateway.md](auth-gateway.md).
+
 ### `packages/desktop` — Desktop app (Electron)
 
 Electron wrapper for macOS, Linux, and Windows.

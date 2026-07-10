@@ -11,6 +11,7 @@ Required:
   - `SLACK_BOT_TOKEN=xoxb-...`
   - Socket mode: `SLACK_APP_TOKEN=xapp-...`
   - HTTP mode: `SLACK_SIGNING_SECRET=...`
+  - Add the `users:read.email` bot scope so Chat SDK can match Slack senders to Better Auth users.
 
 Optional:
 

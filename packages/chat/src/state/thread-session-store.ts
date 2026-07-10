@@ -22,6 +22,7 @@ const ChatStarterSchema = z.object({
   source: z.enum(["slack", "support"]),
   userId: z.string().min(1),
   name: z.string().min(1),
+  email: z.email().optional(),
   handle: z.string().min(1).optional(),
   avatarUrl: z.string().min(1).optional(),
 });

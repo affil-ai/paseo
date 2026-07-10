@@ -31,7 +31,8 @@
     "packages/website",
     "packages/desktop",
     "packages/cli",
-    "packages/chat"
+    "packages/chat",
+    "packages/auth-gateway"
   ],
   "scripts": {
     "dev": "npm run dev:server",
@@ -113,7 +114,8 @@
     "release:patch": "npm run release:check && npm run version:all:patch && npm run release:publish && npm run release:push",
     "release:minor": "npm run release:check && npm run version:all:minor && npm run release:publish && npm run release:push",
     "release:major": "npm run release:check && npm run version:all:major && npm run release:publish && npm run release:push",
-    "build:chat": "npm run build:client && npm run build --workspace=@getpaseo/chat"
+    "build:chat": "npm run build:client && npm run build --workspace=@getpaseo/chat",
+    "build:auth-gateway": "npm run build --workspace=@getpaseo/auth-gateway"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14",

@@ -64,6 +64,7 @@ export interface CreateAgentFromSessionInput {
   initialPrompt?: string;
   clientMessageId?: string;
   initialMessageSource?: ChatUserMessageSource;
+  initialAttribution?: AgentRunOptions["attribution"];
   outputSchema?: Record<string, unknown>;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: AgentAttachment[];
@@ -228,11 +229,12 @@ async function resolveSessionCreateAgent(
   const hasPromptContent = Array.isArray(prompt) ? prompt.length > 0 : prompt.length > 0;
   const clientMessageId = normalizeClientMessageId(input.clientMessageId);
   const runOptions: AgentRunOptions | undefined =
-    input.outputSchema || clientMessageId || input.initialMessageSource
+    input.outputSchema || clientMessageId || input.initialMessageSource || input.initialAttribution
       ? {
           ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
           ...(clientMessageId ? { messageId: clientMessageId } : {}),
           ...(input.initialMessageSource ? { userMessageSource: input.initialMessageSource } : {}),
+          ...(input.initialAttribution ? { attribution: input.initialAttribution } : {}),
         }
       : undefined;
   const workspaceId = setupContinuation ? createdWorkspaceId : input.workspaceId;
