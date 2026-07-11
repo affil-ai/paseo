@@ -15,6 +15,9 @@ x-paseo-image: &paseo-image
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      PASEO_UID: ${PASEO_UID:-1000}
+      PASEO_GID: ${PASEO_GID:-1000}
   restart: unless-stopped
 
 x-paseo-common-env: &paseo-common-env

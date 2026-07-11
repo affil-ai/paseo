@@ -29,6 +29,9 @@ RUN set -eux; \
 
 FROM ${NODE_IMAGE}
 
+ARG PASEO_UID=1000
+ARG PASEO_GID=1000
+
 ENV HOME=/home/paseo \
     PASEO_HOME=/home/paseo/.paseo \
     PASEO_LISTEN=0.0.0.0:6767 \
@@ -78,17 +81,17 @@ ENV NPM_CONFIG_PREFIX=/home/paseo/.local \
     PATH=/home/paseo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN set -eux; \
-    existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
+    existing_group="$(getent group "$PASEO_GID" | cut -d: -f1 || true)"; \
     if [ -n "$existing_group" ] && [ "$existing_group" != "paseo" ]; then \
       groupmod --new-name paseo "$existing_group"; \
     elif [ -z "$existing_group" ]; then \
-      groupadd --gid 1000 paseo; \
+      groupadd --gid "$PASEO_GID" paseo; \
     fi; \
-    existing_user="$(getent passwd 1000 | cut -d: -f1 || true)"; \
+    existing_user="$(getent passwd "$PASEO_UID" | cut -d: -f1 || true)"; \
     if [ -n "$existing_user" ] && [ "$existing_user" != "paseo" ]; then \
       usermod --login paseo --gid paseo --home /home/paseo --shell /bin/bash "$existing_user"; \
     elif [ -z "$existing_user" ]; then \
-      useradd --uid 1000 --gid paseo --create-home --home-dir /home/paseo --shell /bin/bash paseo; \
+      useradd --uid "$PASEO_UID" --gid paseo --create-home --home-dir /home/paseo --shell /bin/bash paseo; \
     fi; \
     mkdir -p \
       /workspace \
