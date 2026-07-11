@@ -502,6 +502,55 @@ describe("createSidebarWorkspaceEntry", () => {
       handle: "jane",
       avatarUrl: "https://example.com/jane.png",
     });
+    expect(entry.workspaceOrigin).toBe("slack");
+  });
+
+  it("derives support and schedule origins from workspace root agents", () => {
+    const supportEntry = createSidebarWorkspaceEntry({
+      serverId: "srv",
+      workspace: workspace({
+        id: "support-thread",
+        name: "support-thread",
+        projectId: "office",
+        projectDisplayName: "office",
+      }),
+      agents: new Map([
+        [
+          "support-agent",
+          agent({
+            id: "support-agent",
+            workspaceId: "support-thread",
+            labels: {
+              "paseo.chat-started-by-source": "support",
+              "paseo.chat-started-by-user-id": "customer@example.com",
+              "paseo.chat-started-by-name": "Customer",
+            },
+          }),
+        ],
+      ]),
+    });
+    const scheduleEntry = createSidebarWorkspaceEntry({
+      serverId: "srv",
+      workspace: workspace({
+        id: "scheduled-workspace",
+        name: "scheduled-workspace",
+        projectId: "project",
+        projectDisplayName: "project",
+      }),
+      agents: new Map([
+        [
+          "scheduled-agent",
+          agent({
+            id: "scheduled-agent",
+            workspaceId: "scheduled-workspace",
+            labels: { "paseo.schedule-id": "schedule-1" },
+          }),
+        ],
+      ]),
+    });
+
+    expect(supportEntry.workspaceOrigin).toBe("support");
+    expect(scheduleEntry.workspaceOrigin).toBe("schedule");
   });
 });
 

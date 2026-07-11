@@ -41,6 +41,7 @@ function workspace(input: {
     scripts: [],
     hasRunningScripts: false,
     chatStartedBy: null,
+    workspaceOrigin: null,
   };
 }
 

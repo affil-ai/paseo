@@ -54,6 +54,7 @@ export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
   scripts: WorkspaceDescriptor["scripts"];
   hasRunningScripts: boolean;
   chatStartedBy: ChatStartedBy | null;
+  workspaceOrigin: "slack" | "support" | "schedule" | null;
 }
 
 export interface SidebarProjectEntry {
@@ -108,6 +109,10 @@ export function createSidebarWorkspaceEntry(input: {
 }): SidebarWorkspaceEntry {
   const projectKey = input.workspace.project?.projectKey ?? input.workspace.projectId;
   const effectiveStatus = deriveEffectiveWorkspaceStatus(input);
+  const origin = getRootAgentWorkspaceOrigin({
+    workspace: input.workspace,
+    agents: input.agents,
+  });
   return {
     workspaceKey: `${input.serverId}:${input.workspace.id}`,
     serverId: input.serverId,
@@ -132,10 +137,8 @@ export function createSidebarWorkspaceEntry(input: {
     archiveUnpushedCommitCount: input.workspace.gitRuntime?.aheadOfOrigin ?? null,
     scripts: input.workspace.scripts,
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
-    chatStartedBy: getRootAgentWorkspaceChatStarter({
-      workspace: input.workspace,
-      agents: input.agents,
-    }),
+    chatStartedBy: origin?.chatStartedBy ?? null,
+    workspaceOrigin: origin?.origin ?? null,
   };
 }
 
@@ -254,21 +257,32 @@ function getRootParentAgent(agent: Agent, agents: Map<string, Agent>): Agent | n
   return current ?? null;
 }
 
-function getRootAgentWorkspaceChatStarter(input: {
+function getRootAgentWorkspaceOrigin(input: {
   workspace: WorkspaceDescriptor;
   agents?: Map<string, Agent>;
-}): ChatStartedBy | null {
-  let latest: { startedBy: ChatStartedBy; createdAt: Date } | null = null;
+}): {
+  origin: SidebarWorkspaceEntry["workspaceOrigin"];
+  chatStartedBy: ChatStartedBy | null;
+} | null {
+  let latest: {
+    origin: Exclude<SidebarWorkspaceEntry["workspaceOrigin"], null>;
+    chatStartedBy: ChatStartedBy | null;
+    createdAt: Date;
+  } | null = null;
   for (const agent of input.agents?.values() ?? []) {
     if (agent.archivedAt || agent.parentAgentId) continue;
     if (agent.workspaceId !== input.workspace.id) continue;
     const startedBy = getChatStartedByFromLabels(agent.labels);
-    if (!startedBy) continue;
+    const scheduleId = agent.labels?.["paseo.schedule-id"];
+    const origin =
+      startedBy?.source ??
+      (typeof scheduleId === "string" && scheduleId.trim().length > 0 ? "schedule" : null);
+    if (!origin) continue;
     if (!latest || agent.createdAt > latest.createdAt) {
-      latest = { startedBy, createdAt: agent.createdAt };
+      latest = { origin, chatStartedBy: startedBy, createdAt: agent.createdAt };
     }
   }
-  return latest?.startedBy ?? null;
+  return latest ? { origin: latest.origin, chatStartedBy: latest.chatStartedBy } : null;
 }
 
 export function buildSidebarWorkspacePlacementModel(input: {

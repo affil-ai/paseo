@@ -128,6 +128,7 @@ export default {
         },
       ],
       "expo-audio",
+      "expo-video",
       [
         "expo-build-properties",
         {

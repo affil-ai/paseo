@@ -122,6 +122,8 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
+import { MessageVideo } from "@/components/message-video";
+import { getChatToolFilePreviewKind } from "@/utils/chat-tool-file-preview";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
 import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
 export type { InlinePathTarget } from "@/assistant-file-links";
@@ -137,6 +139,7 @@ interface UserMessageProps {
   timestamp: number;
   capabilities?: AgentCapabilityFlags;
   client?: DaemonClient | null;
+  workspaceRoot?: string;
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
   disableOuterSpacing?: boolean;
@@ -474,6 +477,7 @@ export const UserMessage = memo(function UserMessage({
   timestamp,
   capabilities,
   client,
+  workspaceRoot,
   isFirstInGroup = true,
   isLastInGroup = true,
   disableOuterSpacing,
@@ -584,6 +588,25 @@ export const UserMessage = memo(function UserMessage({
           {hasAttachments ? (
             <View style={attachmentPreviewContainerStyle}>
               {attachments.map((attachment, index) => {
+                if (
+                  attachment.type === "uploaded_file" &&
+                  getChatToolFilePreviewKind({
+                    filename: attachment.fileName,
+                    mimeType: attachment.mimeType,
+                  }) === "video"
+                ) {
+                  return (
+                    <MessageVideo
+                      key={`${attachment.type}:${attachment.id}`}
+                      source={attachment.path}
+                      filename={attachment.fileName}
+                      mimeType={attachment.mimeType}
+                      client={client}
+                      workspaceRoot={workspaceRoot}
+                      serverId={serverId}
+                    />
+                  );
+                }
                 const content = getAgentAttachmentPillContent(attachment, t);
                 return (
                   <AttachmentFrame
@@ -1437,11 +1460,6 @@ const chatToolDeliveryStylesheet = StyleSheet.create((theme) => ({
   },
 }));
 
-function isChatToolImage(file: ChatToolFile): boolean {
-  if (file.mimeType?.startsWith("image/")) return true;
-  return /\.(?:avif|gif|jpe?g|png|webp)$/i.test(file.filename);
-}
-
 function ChatToolFilePreview({
   file,
   cwd,
@@ -1454,12 +1472,25 @@ function ChatToolFilePreview({
   client?: DaemonClient | null;
 }) {
   const { t } = useTranslation();
-  if (isChatToolImage(file)) {
+  const previewKind = getChatToolFilePreviewKind(file);
+  if (previewKind === "image") {
     return (
       <AssistantMarkdownImage
         source={file.path}
         alt={file.filename}
         hasLeadingContent={false}
+        client={client}
+        workspaceRoot={cwd}
+        serverId={serverId}
+      />
+    );
+  }
+  if (previewKind === "video") {
+    return (
+      <MessageVideo
+        source={file.path}
+        filename={file.filename}
+        mimeType={file.mimeType}
         client={client}
         workspaceRoot={cwd}
         serverId={serverId}

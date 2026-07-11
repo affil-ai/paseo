@@ -33,6 +33,7 @@ function ws(
     scripts: [],
     hasRunningScripts: false,
     chatStartedBy: null,
+    workspaceOrigin: null,
     workspaceKey: input.workspaceKey,
   };
 }

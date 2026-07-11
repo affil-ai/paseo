@@ -11,11 +11,13 @@ import {
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   CircleAlert,
+  CalendarClock,
   ExternalLink,
   Folder,
   FolderGit2,
   GitPullRequest,
   Globe,
+  Mail,
   Monitor,
   SquareTerminal,
 } from "lucide-react-native";
@@ -68,6 +70,8 @@ const ThemedFolder = withUnistyles(Folder);
 const ThemedFolderGit2 = withUnistyles(FolderGit2);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
+const ThemedCalendarClock = withUnistyles(CalendarClock);
+const ThemedMail = withUnistyles(Mail);
 
 type SidebarWorkspaceScriptIconKind = "service" | "command";
 
@@ -151,6 +155,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         <WorkspaceStatusIndicator
           bucket={workspace.statusBucket}
           chatStartedBy={workspace.chatStartedBy}
+          workspaceOrigin={workspace.workspaceOrigin}
           workspaceKind={workspace.workspaceKind}
           loading={isLoading}
         />
@@ -209,20 +214,17 @@ function WorkspaceScriptIcon({ kind }: { kind: SidebarWorkspaceScriptIconKind })
 function WorkspaceStatusIndicator({
   bucket,
   chatStartedBy,
+  workspaceOrigin,
   workspaceKind,
   loading = false,
 }: {
   bucket: SidebarWorkspaceEntry["statusBucket"];
   chatStartedBy: SidebarWorkspaceEntry["chatStartedBy"];
+  workspaceOrigin: SidebarWorkspaceEntry["workspaceOrigin"];
   workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
   loading?: boolean;
 }) {
   const shouldShowSyncedLoader = shouldRenderSyncedStatusLoader({ bucket });
-  const starterAvatarSource = useMemo(
-    () => (chatStartedBy?.avatarUrl ? { uri: chatStartedBy.avatarUrl } : undefined),
-    [chatStartedBy?.avatarUrl],
-  );
-  const starterAvatarLabel = `${chatStartedBy?.name ?? "Slack user"} started this chat`;
 
   if (loading) {
     return (
@@ -256,23 +258,8 @@ function WorkspaceStatusIndicator({
     );
   }
 
-  if (bucket === "done" && starterAvatarSource) {
-    return (
-      <View
-        style={styles.workspaceStatusDot}
-        testID="workspace-status-indicator-chat-starter-avatar"
-      >
-        <Image
-          source={starterAvatarSource}
-          style={styles.workspaceStarterAvatar}
-          accessibilityLabel={starterAvatarLabel}
-        />
-      </View>
-    );
-  }
-
   if (bucket === "done") {
-    return <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-done" />;
+    return <DoneWorkspaceStatusIndicator chatStartedBy={chatStartedBy} origin={workspaceOrigin} />;
   }
 
   let KindIcon: typeof ThemedMonitor;
@@ -300,6 +287,57 @@ function WorkspaceStatusIndicator({
       ) : null}
     </View>
   );
+}
+
+function DoneWorkspaceStatusIndicator({
+  chatStartedBy,
+  origin,
+}: {
+  chatStartedBy: SidebarWorkspaceEntry["chatStartedBy"];
+  origin: SidebarWorkspaceEntry["workspaceOrigin"];
+}) {
+  const starterAvatarSource = useMemo(
+    () =>
+      origin === "slack" && chatStartedBy?.avatarUrl ? { uri: chatStartedBy.avatarUrl } : undefined,
+    [chatStartedBy?.avatarUrl, origin],
+  );
+  if (starterAvatarSource) {
+    return (
+      <View
+        style={styles.workspaceStatusDot}
+        testID="workspace-status-indicator-chat-starter-avatar"
+      >
+        <Image
+          source={starterAvatarSource}
+          style={styles.workspaceStarterAvatar}
+          accessibilityLabel={`${chatStartedBy?.name ?? "Slack user"} started this chat`}
+        />
+      </View>
+    );
+  }
+  if (origin === "support") {
+    return (
+      <View
+        style={styles.workspaceStatusDot}
+        accessibilityLabel="Started from support email"
+        testID="workspace-status-indicator-support"
+      >
+        <ThemedMail size={14} uniProps={foregroundMutedColorMapping} />
+      </View>
+    );
+  }
+  if (origin === "schedule") {
+    return (
+      <View
+        style={styles.workspaceStatusDot}
+        accessibilityLabel="Started by a schedule"
+        testID="workspace-status-indicator-schedule"
+      >
+        <ThemedCalendarClock size={14} uniProps={foregroundMutedColorMapping} />
+      </View>
+    );
+  }
+  return <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-done" />;
 }
 
 function StatusDotOverlay({

@@ -591,13 +591,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             timestamp={item.timestamp.getTime()}
             capabilities={agent.capabilities}
             client={client}
+            workspaceRoot={workspaceRoot}
             isFirstInGroup={layoutItem.isFirstInUserGroup}
             isLastInGroup={layoutItem.isLastInUserGroup}
             source={item.source}
           />
         );
       },
-      [agent.capabilities, agentId, client, resolvedServerId],
+      [agent.capabilities, agentId, client, resolvedServerId, workspaceRoot],
     );
 
     const renderAssistantMessageItem = useCallback(
