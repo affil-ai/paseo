@@ -804,6 +804,8 @@ export const ptBR: TranslationResources = {
       closeSidebar: "Fechar barra lateral",
     },
     sections: {
+      pinned: "Fixados",
+      projects: "Projetos",
       sessions: "Histórico",
       dashboard: "Dashboard",
       schedules: "Agendamentos",
@@ -854,6 +856,8 @@ export const ptBR: TranslationResources = {
         rename: "Renomear workspace",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "Fixar",
+        unpin: "Desafixar",
         archive: "Arquivar",
         archiveWorktree: "Arquivar worktree",
         hideFromSidebar: "Ocultar da barra lateral",

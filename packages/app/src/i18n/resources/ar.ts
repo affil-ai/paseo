@@ -786,6 +786,8 @@ export const ar: TranslationResources = {
       closeSidebar: "إغلاق الشريط الجانبي",
     },
     sections: {
+      pinned: "المثبتة",
+      projects: "المشاريع",
       sessions: "السجل",
       dashboard: "Dashboard",
       schedules: "الجداول",
@@ -836,6 +838,8 @@ export const ar: TranslationResources = {
         rename: "إعادة تسمية مساحة العمل",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "تثبيت",
+        unpin: "إلغاء التثبيت",
         archive: "أرشيف",
         archiveWorktree: "أرشفة شجرة العمل",
         hideFromSidebar: "إخفاء من الشريط الجانبي",

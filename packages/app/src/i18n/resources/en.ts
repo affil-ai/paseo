@@ -793,6 +793,8 @@ export const en = {
       closeSidebar: "Close sidebar",
     },
     sections: {
+      pinned: "Pinned",
+      projects: "Projects",
       sessions: "History",
       dashboard: "Dashboard",
       schedules: "Schedules",
@@ -843,6 +845,8 @@ export const en = {
         rename: "Rename workspace",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "Pin",
+        unpin: "Unpin",
         archive: "Archive",
         archiveWorktree: "Archive worktree",
         hideFromSidebar: "Hide from sidebar",

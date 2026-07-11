@@ -780,6 +780,8 @@ export const zhCN: TranslationResources = {
       closeSidebar: "关闭侧边栏",
     },
     sections: {
+      pinned: "已固定",
+      projects: "项目",
       sessions: "历史",
       dashboard: "Dashboard",
       schedules: "计划",
@@ -828,6 +830,8 @@ export const zhCN: TranslationResources = {
         rename: "重命名 workspace",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "固定",
+        unpin: "取消固定",
         archive: "归档",
         archiveWorktree: "归档 worktree",
         hideFromSidebar: "从侧边栏隐藏",

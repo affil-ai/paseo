@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text, Pressable, ScrollView, type PressableStateCallbackType } from "react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
@@ -29,6 +29,7 @@ import {
   Copy,
   Archive,
   Pencil,
+  Pin,
   Star,
 } from "lucide-react-native";
 import { DiffStat } from "@/components/diff-stat";
@@ -61,6 +62,7 @@ import {
   SidebarWorkspaceTrailingActionSlot,
 } from "@/components/sidebar/sidebar-workspace-row-content";
 import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sections-store";
+import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 
 // Themed icon wrappers
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -82,6 +84,7 @@ const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedPin = withUnistyles(Pin);
 const ThemedStar = withUnistyles(Star);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
@@ -90,6 +93,7 @@ const markAsReadLeadingIcon = (
 );
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
+const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const chatRepositoryLeadingIcon = <ThemedStar size={14} uniProps={foregroundMutedColorMapping} />;
 
 interface StatusWorkspaceListProps {
@@ -100,6 +104,7 @@ interface StatusWorkspaceListProps {
   onWorkspacePress?: () => void;
   hostLabelByServerId: ReadonlyMap<string, string>;
   showHostLabels: boolean;
+  listHeaderComponent?: ReactNode;
 }
 
 export function SidebarStatusWorkspaceList({
@@ -110,6 +115,7 @@ export function SidebarStatusWorkspaceList({
   onWorkspacePress,
   hostLabelByServerId,
   showHostLabels,
+  listHeaderComponent,
 }: StatusWorkspaceListProps) {
   const groups = useMemo(
     () => buildStatusGroups(workspaces, projectNamesByKey),
@@ -138,6 +144,7 @@ export function SidebarStatusWorkspaceList({
           showsVerticalScrollIndicator={false}
           testID="sidebar-status-list-scroll"
         >
+          {listHeaderComponent}
           <StatusGroupList
             groups={groups}
             collapsedStatusGroupKeys={collapsedStatusGroupKeys}
@@ -156,6 +163,7 @@ export function SidebarStatusWorkspaceList({
           showsVerticalScrollIndicator={false}
           testID="sidebar-status-list-scroll"
         >
+          {listHeaderComponent}
           <StatusGroupList
             groups={groups}
             collapsedStatusGroupKeys={collapsedStatusGroupKeys}
@@ -379,6 +387,10 @@ function StatusWorkspaceRowWithMenu({
   const toast = useToast();
   const [isHidingWorkspace, setIsHidingWorkspace] = useState(false);
   const [isRenameOpen, setIsRenameOpen] = useState(false);
+  const isPinned = useSidebarOrderStore((state) =>
+    state.pinnedWorkspaceKeys.includes(workspace.workspaceKey),
+  );
+  const toggleWorkspacePinned = useSidebarOrderStore((state) => state.toggleWorkspacePinned);
   const workspaceDirectory = resolveWorkspaceDirectory({
     workspaceDirectory: workspace.workspaceDirectory,
   });
@@ -472,6 +484,9 @@ function StatusWorkspaceRowWithMenu({
   const handleToggleChatRepository = useCallback(() => {
     chatRepositoryMutation.mutate(!(workspace.chatRepository ?? false));
   }, [chatRepositoryMutation, workspace.chatRepository]);
+  const handleTogglePin = useCallback(() => {
+    toggleWorkspacePinned(workspace.workspaceKey);
+  }, [toggleWorkspacePinned, workspace.workspaceKey]);
 
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
   const { hasClearableAttention, clearAttention } = useClearWorkspaceAttention({
@@ -520,6 +535,8 @@ function StatusWorkspaceRowWithMenu({
         onCopyPath={handleCopyPath}
         onRename={handleOpenRename}
         onToggleChatRepository={handleToggleChatRepository}
+        isPinned={isPinned}
+        onTogglePin={handleTogglePin}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         archiveShortcutKeys={selected ? archiveShortcutKeys : null}
       />
@@ -553,6 +570,8 @@ function StatusWorkspaceRowInner({
   onCopyPath,
   onRename,
   onToggleChatRepository,
+  isPinned,
+  onTogglePin,
   onMarkAsRead,
   archiveShortcutKeys,
 }: {
@@ -571,6 +590,8 @@ function StatusWorkspaceRowInner({
   onCopyPath?: () => void;
   onRename?: () => void;
   onToggleChatRepository?: () => void;
+  isPinned: boolean;
+  onTogglePin: () => void;
   onMarkAsRead?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
 }) {
@@ -624,6 +645,8 @@ function StatusWorkspaceRowInner({
                     onCopyBranchName={onCopyBranchName}
                     onRename={onRename}
                     onToggleChatRepository={onToggleChatRepository}
+                    isPinned={isPinned}
+                    onTogglePin={onTogglePin}
                     onMarkAsRead={onMarkAsRead}
                     onArchive={onArchive}
                     archiveLabel={archiveLabel}
@@ -649,6 +672,8 @@ function StatusWorkspaceActionSlot({
   onCopyBranchName,
   onRename,
   onToggleChatRepository,
+  isPinned,
+  onTogglePin,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -663,6 +688,8 @@ function StatusWorkspaceActionSlot({
   onCopyBranchName?: () => void;
   onRename?: () => void;
   onToggleChatRepository?: () => void;
+  isPinned: boolean;
+  onTogglePin: () => void;
   onMarkAsRead?: () => void;
   onArchive?: () => void;
   archiveLabel?: string;
@@ -689,6 +716,8 @@ function StatusWorkspaceActionSlot({
             onCopyBranchName={onCopyBranchName}
             onRename={onRename}
             onToggleChatRepository={onToggleChatRepository}
+            isPinned={isPinned}
+            onTogglePin={onTogglePin}
             onMarkAsRead={onMarkAsRead}
             onArchive={onArchive}
             archiveLabel={archiveLabel}
@@ -709,6 +738,8 @@ function StatusKebabMenu({
   onCopyBranchName,
   onRename,
   onToggleChatRepository,
+  isPinned,
+  onTogglePin,
   onMarkAsRead,
   onArchive,
   archiveLabel,
@@ -722,6 +753,8 @@ function StatusKebabMenu({
   onCopyBranchName?: () => void;
   onRename?: () => void;
   onToggleChatRepository?: () => void;
+  isPinned: boolean;
+  onTogglePin: () => void;
   onMarkAsRead?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
@@ -729,6 +762,7 @@ function StatusKebabMenu({
   archivePendingLabel?: string;
   archiveShortcutKeys?: ShortcutKey[][] | null;
 }) {
+  const { t } = useTranslation();
   const archiveTrailing = useMemo(
     () => (archiveShortcutKeys ? <Shortcut chord={archiveShortcutKeys} /> : null),
     [archiveShortcutKeys],
@@ -750,6 +784,13 @@ function StatusKebabMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" width={260}>
+        <DropdownMenuItem
+          testID={`sidebar-workspace-menu-pin-${workspaceKey}`}
+          leading={pinLeadingIcon}
+          onSelect={onTogglePin}
+        >
+          {t(isPinned ? "sidebar.workspace.actions.unpin" : "sidebar.workspace.actions.pin")}
+        </DropdownMenuItem>
         {onCopyPath ? (
           <DropdownMenuItem
             testID={`sidebar-workspace-menu-copy-path-${workspaceKey}`}

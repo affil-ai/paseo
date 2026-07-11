@@ -5,10 +5,12 @@ import { createJSONStorage, persist } from "zustand/middleware";
 interface SidebarOrderStoreState {
   projectOrder: string[];
   workspaceOrderByProject: Record<string, string[]>;
+  pinnedWorkspaceKeys: string[];
   getProjectOrder: () => string[];
   setProjectOrder: (keys: string[]) => void;
   getWorkspaceOrder: (projectKey: string) => string[];
   setWorkspaceOrder: (projectKey: string, keys: string[]) => void;
+  toggleWorkspacePinned: (workspaceKey: string) => void;
 }
 
 interface SidebarOrderPersistedState {
@@ -16,6 +18,7 @@ interface SidebarOrderPersistedState {
   workspaceOrderByProject?: Record<string, string[]>;
   projectOrderByServerId?: Record<string, string[]>;
   workspaceOrderByServerAndProject?: Record<string, string[]>;
+  pinnedWorkspaceKeys?: string[];
 }
 
 interface SidebarWorkspaceOrderScope {
@@ -70,11 +73,12 @@ function normalizeLegacyWorkspaceKey(serverId: string, rawWorkspaceKey: string):
 export function migrateSidebarOrderState(persistedState: unknown): {
   projectOrder: string[];
   workspaceOrderByProject: Record<string, string[]>;
+  pinnedWorkspaceKeys: string[];
 } {
   const state = persistedState as SidebarOrderPersistedState | undefined;
 
   if (!state) {
-    return { projectOrder: [], workspaceOrderByProject: {} };
+    return { projectOrder: [], workspaceOrderByProject: {}, pinnedWorkspaceKeys: [] };
   }
 
   const projectOrder = normalizeKeys(state.projectOrder ?? []);
@@ -103,7 +107,20 @@ export function migrateSidebarOrderState(persistedState: unknown): {
     workspaceOrderByProject[scope.projectKey] = merged;
   }
 
-  return { projectOrder, workspaceOrderByProject };
+  return {
+    projectOrder,
+    workspaceOrderByProject,
+    pinnedWorkspaceKeys: normalizeKeys(state.pinnedWorkspaceKeys ?? []),
+  };
+}
+
+export function togglePinnedWorkspace(keys: string[], workspaceKey: string): string[] {
+  const normalizedKey = workspaceKey.trim();
+  if (!normalizedKey) return keys;
+  if (keys.includes(normalizedKey)) {
+    return keys.filter((key) => key !== normalizedKey);
+  }
+  return [...keys, normalizedKey];
 }
 
 export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
@@ -111,6 +128,7 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
     (set, get) => ({
       projectOrder: [],
       workspaceOrderByProject: {},
+      pinnedWorkspaceKeys: [],
       getProjectOrder: () => get().projectOrder,
       setProjectOrder: (keys) => {
         const normalized = normalizeKeys(keys);
@@ -132,6 +150,10 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
           },
         }));
       },
+      toggleWorkspacePinned: (workspaceKey) =>
+        set((state) => ({
+          pinnedWorkspaceKeys: togglePinnedWorkspace(state.pinnedWorkspaceKeys, workspaceKey),
+        })),
     }),
     {
       name: "sidebar-project-workspace-order",
@@ -139,8 +161,9 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
       partialize: (state) => ({
         projectOrder: state.projectOrder,
         workspaceOrderByProject: state.workspaceOrderByProject,
+        pinnedWorkspaceKeys: state.pinnedWorkspaceKeys,
       }),
-      version: 1,
+      version: 2,
       migrate: migrateSidebarOrderState,
     },
   ),

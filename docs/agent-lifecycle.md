@@ -66,6 +66,10 @@ Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-onl
 
 The asymmetry is intentional: a subagent's home is the parent's track, not the tab. Tabs are ephemeral viewing slots; the track is the persistent record of the parent's children.
 
+## Sidebar pins
+
+Pinning a workspace is a per-client navigation preference, not daemon state. The app persists ordered cross-host workspace keys in `sidebar-order-store.ts`, renders available pinned workspaces once above the normal project or status groups, and removes those rows from their original group to avoid duplicates. A pin remains persisted when its host is filtered or temporarily unavailable, so changing host filters does not silently discard the preference.
+
 ## Workspace activity
 
 Agent lifecycle status stays literal: a parent agent is `idle` when its own turn is idle, even if a child is running.

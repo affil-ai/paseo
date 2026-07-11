@@ -798,6 +798,8 @@ export const ja: TranslationResources = {
       closeSidebar: "サイドバーを閉じる",
     },
     sections: {
+      pinned: "ピン留め",
+      projects: "プロジェクト",
       sessions: "履歴",
       dashboard: "Dashboard",
       schedules: "スケジュール",
@@ -848,6 +850,8 @@ export const ja: TranslationResources = {
         rename: "ワークスペースの名前を変更",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "ピン留め",
+        unpin: "ピン留めを解除",
         archive: "アーカイブ",
         archiveWorktree: "ワークツリーをアーカイブ",
         hideFromSidebar: "サイドバーから非表示",

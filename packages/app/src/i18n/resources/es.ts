@@ -813,6 +813,8 @@ export const es: TranslationResources = {
       closeSidebar: "Cerrar barra lateral",
     },
     sections: {
+      pinned: "Fijados",
+      projects: "Proyectos",
       sessions: "Historial",
       dashboard: "Dashboard",
       schedules: "Horarios",
@@ -863,6 +865,8 @@ export const es: TranslationResources = {
         rename: "Cambiar nombre del espacio de trabajo",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "Fijar",
+        unpin: "Desfijar",
         archive: "Archivo",
         archiveWorktree: "Árbol de trabajo de archivo",
         hideFromSidebar: "Ocultar de la barra lateral",

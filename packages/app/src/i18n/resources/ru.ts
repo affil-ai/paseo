@@ -805,6 +805,8 @@ export const ru: TranslationResources = {
       closeSidebar: "Закрыть боковую панель",
     },
     sections: {
+      pinned: "Закреплённые",
+      projects: "Проекты",
       sessions: "История",
       dashboard: "Dashboard",
       schedules: "Расписания",
@@ -855,6 +857,8 @@ export const ru: TranslationResources = {
         rename: "Переименовать рабочую область",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
+        pin: "Закрепить",
+        unpin: "Открепить",
         archive: "Архив",
         archiveWorktree: "Архив рабочего дерева",
         hideFromSidebar: "Скрыть с боковой панели",
