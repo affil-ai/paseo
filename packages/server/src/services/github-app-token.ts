@@ -5,7 +5,10 @@ export async function getConfiguredGitHubAppToken(
 ): Promise<string | null> {
   const url = env.PASEO_GITHUB_APP_TOKEN_URL;
   const secret = env.PASEO_GITHUB_APP_TOKEN_SECRET;
-  if (!url || !secret) return null;
+  if (!url && !secret) return null;
+  if (!url || !secret) {
+    throw new Error("GitHub App token broker configuration is incomplete");
+  }
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
 
   const response = await fetch(url, {

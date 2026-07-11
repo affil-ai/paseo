@@ -17,6 +17,7 @@ export class AgentAttributionService {
   private readonly attributionDir: string;
   private readonly hooksDir: string;
   private readonly binDir: string;
+  private readonly githubConfigDir: string;
   private readonly logger: Logger;
   private readonly env: NodeJS.ProcessEnv;
 
@@ -24,6 +25,7 @@ export class AgentAttributionService {
     this.attributionDir = join(options.paseoHome, "attribution", "agents");
     this.hooksDir = join(options.paseoHome, "attribution", "git-hooks");
     this.binDir = join(options.paseoHome, "attribution", "bin");
+    this.githubConfigDir = join(options.paseoHome, "attribution", "gh-config");
     this.logger = options.logger.child({ module: "agent-attribution" });
     this.env = options.env ?? process.env;
   }
@@ -41,6 +43,8 @@ export class AgentAttributionService {
     ];
 
     if (this.env.PASEO_GITHUB_APP_TOKEN_URL && this.env.PASEO_GITHUB_APP_TOKEN_SECRET) {
+      await mkdir(this.githubConfigDir, { recursive: true, mode: 0o700 });
+      this.env.GH_CONFIG_DIR = this.githubConfigDir;
       const helperPath = join(this.hooksDir, "github-credential");
       await this.writeExecutable(helperPath, GITHUB_CREDENTIAL_HELPER);
       entries.push(["user.name", this.env.PASEO_GITHUB_BOT_NAME ?? "office-of-the-cto[bot]"]);
@@ -48,6 +52,7 @@ export class AgentAttributionService {
         "user.email",
         this.env.PASEO_GITHUB_BOT_EMAIL ?? "office-of-the-cto[bot]@users.noreply.github.com",
       ]);
+      entries.push(["credential.helper", ""]);
       entries.push(["credential.https://github.com.helper", helperPath]);
     }
     appendGitConfigEnvironment(this.env, entries);
@@ -57,6 +62,7 @@ export class AgentAttributionService {
     return {
       PASEO_AGENT_ATTRIBUTION_FILE: this.fileForAgent(agentId),
       PATH: `${this.binDir}${delimiter}${this.env.PATH ?? ""}`,
+      ...(this.env.GH_CONFIG_DIR ? { GH_CONFIG_DIR: this.env.GH_CONFIG_DIR } : {}),
     };
   }
 
@@ -185,15 +191,21 @@ for await (const chunk of process.stdin) input += chunk;
 if (process.argv[2] === "get" && input.includes("host=github.com")) {
   const url = process.env.PASEO_GITHUB_APP_TOKEN_URL;
   const secret = process.env.PASEO_GITHUB_APP_TOKEN_SECRET;
-  if (url && secret) {
-    const response = await fetch(url, { headers: { authorization: \`Bearer \${secret}\` } });
-    if (response.ok) {
-      const value = await response.json();
-      if (typeof value.token === "string") {
-        process.stdout.write(\`username=x-access-token\\npassword=\${value.token}\\n\\n\`);
-      }
-    }
+  if (!url || !secret) {
+    process.stderr.write("GitHub App token broker is not configured\\n");
+    process.exit(1);
   }
+  const response = await fetch(url, { headers: { authorization: \`Bearer \${secret}\` } });
+  if (!response.ok) {
+    process.stderr.write(\`GitHub App token broker returned \${response.status}\\n\`);
+    process.exit(1);
+  }
+  const value = await response.json();
+  if (typeof value.token !== "string") {
+    process.stderr.write("GitHub App token broker returned an invalid response\\n");
+    process.exit(1);
+  }
+  process.stdout.write(\`username=x-access-token\\npassword=\${value.token}\\n\\n\`);
 }
 `;
 
@@ -212,12 +224,22 @@ if (!realGh) { process.stderr.write("gh executable not found\\n"); process.exit(
 const url = process.env.PASEO_GITHUB_APP_TOKEN_URL;
 const secret = process.env.PASEO_GITHUB_APP_TOKEN_SECRET;
 let token = "";
-if (url && secret) {
-  const response = await fetch(url, { headers: { authorization: \`Bearer \${secret}\` } });
-  if (response.ok) {
-    const value = await response.json();
-    if (typeof value.token === "string") token = value.token;
+if (url || secret) {
+  if (!url || !secret) {
+    process.stderr.write("GitHub App token broker configuration is incomplete\\n");
+    process.exit(1);
   }
+  const response = await fetch(url, { headers: { authorization: \`Bearer \${secret}\` } });
+  if (!response.ok) {
+    process.stderr.write(\`GitHub App token broker returned \${response.status}\\n\`);
+    process.exit(1);
+  }
+  const value = await response.json();
+  if (typeof value.token !== "string") {
+    process.stderr.write("GitHub App token broker returned an invalid response\\n");
+    process.exit(1);
+  }
+  token = value.token;
 }
 const result = spawnSync(realGh, process.argv.slice(2), {
   stdio: "inherit",

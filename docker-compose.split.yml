@@ -5,9 +5,11 @@
 # - your chat/webhook host -> paseo-chat-bridge:8787
 # - paseo-daemon should stay private on the Docker network.
 #
-# The daemon and chat bridge share /home/paseo so daemon-owned chat tools can
-# read the chat bridge service token. Slack/API credentials stay in the bridge
-# process environment.
+# The daemon and chat bridge use separate homes. They share only $PASEO_HOME so
+# daemon-owned chat tools can read the bridge service token and the bridge can
+# read persisted chat settings. Agent CLI, GitHub, SSH, and browser credentials
+# remain in the daemon home. Slack/API credentials stay in the bridge process
+# environment.
 x-paseo-image: &paseo-image
   image: ${PASEO_IMAGE:-paseo-split:latest}
   build:
@@ -77,7 +79,8 @@ services:
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
     volumes:
-      - ${PASEO_HOME_HOST:-./paseo-home}:/home/paseo
+      - ${PASEO_CHAT_HOME_HOST:-./paseo-chat-home}:/home/paseo
+      - ${PASEO_STATE_HOST:-./paseo-home/.paseo}:/home/paseo/.paseo
     expose:
       - "8787"
       - "8788"

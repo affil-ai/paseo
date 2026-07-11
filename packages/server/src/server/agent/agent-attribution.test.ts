@@ -30,6 +30,19 @@ describe("AgentAttributionService", () => {
       env,
     });
     await service.initialize();
+    const launchEnvironment = service.getLaunchEnvironment("agent-one");
+    expect(launchEnvironment.GH_CONFIG_DIR).toBe(
+      join(directory, "home", "attribution", "gh-config"),
+    );
+    const gitConfigEntries = Array.from(
+      { length: Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10) },
+      (_, index) => [env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`]],
+    );
+    expect(gitConfigEntries).toContainEqual(["credential.helper", ""]);
+    expect(gitConfigEntries).toContainEqual([
+      "credential.https://github.com.helper",
+      join(directory, "home", "attribution", "git-hooks", "github-credential"),
+    ]);
     await service.setForAgent("agent-one", {
       source: "slack",
       userId: "U123",
@@ -40,7 +53,7 @@ describe("AgentAttributionService", () => {
     const repo = join(directory, "repo");
     await execFileAsync("git", ["init", repo], { env });
     await writeFile(join(repo, "page.txt"), "new page\n");
-    const commitEnv = { ...env, ...service.getLaunchEnvironment("agent-one") };
+    const commitEnv = { ...env, ...launchEnvironment };
     await execFileAsync("git", ["add", "page.txt"], { cwd: repo, env: commitEnv });
     await execFileAsync("git", ["commit", "-m", "Build page"], { cwd: repo, env: commitEnv });
 
