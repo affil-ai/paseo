@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import type { AdapterPostableMessage, FileUpload } from "chat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadSessionStore } from "../state/thread-session-store.js";
 import { EmailIntakeBridge } from "./email-bridge.js";
@@ -45,14 +46,39 @@ interface HarnessOptions {
   classifier?: EmailClassifier;
   channelId?: string;
   postedChannelId?: string;
+  shouldRejectAliasFileUpload?: boolean;
+  shouldRejectThreadFileUpload?: boolean;
+}
+
+interface FileBearingMessage {
+  files: FileUpload[];
+  markdown?: string;
+}
+
+function isFileBearingMessage(
+  message: AdapterPostableMessage | undefined,
+): message is AdapterPostableMessage & FileBearingMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    "files" in message &&
+    Array.isArray(message.files) &&
+    message.files.length > 0
+  );
+}
+
+function assertFileBearingMessage(
+  message: AdapterPostableMessage | undefined,
+): asserts message is AdapterPostableMessage & FileBearingMessage {
+  expect(isFileBearingMessage(message)).toBe(true);
 }
 
 interface Harness {
   bridge: EmailIntakeBridge;
   store: ThreadSessionStore;
   requestedChannels: string[];
-  channelPosts: unknown[];
-  threadPosts: Array<{ threadId: string; message: unknown }>;
+  channelPosts: AdapterPostableMessage[];
+  threadPosts: Array<{ threadId: string; message: AdapterPostableMessage }>;
   subscribes: string[];
   sentMessages: Array<{ agentId: string; message: string; options: unknown }>;
   createdSessions: Array<{
@@ -139,9 +165,16 @@ async function createHarness(
     officePrompt: "office custom prompt",
     ...(harnessOptions.classifier ? { classifier: harnessOptions.classifier } : {}),
     chat: {
-      postChannelMessage: async (channelId: string, message: unknown) => {
+      postChannelMessage: async (channelId: string, message: AdapterPostableMessage) => {
         harness.requestedChannels.push(channelId);
         harness.channelPosts.push(message);
+        const isAliasChannel = !/^slack:[CDG][A-Z0-9]{8,}$/.test(channelId);
+        const hasFileUpload = isFileBearingMessage(message);
+        const shouldRejectUpload =
+          harnessOptions.shouldRejectAliasFileUpload === true && isAliasChannel && hasFileUpload;
+        if (shouldRejectUpload) {
+          throw new Error("invalid_arguments: channel_id must be canonical");
+        }
         return {
           id: "111.222",
           threadId: `${channelId}:`,
@@ -149,8 +182,14 @@ async function createHarness(
         };
       },
       thread: (threadId: string) => ({
-        post: async (message: unknown) => {
+        post: async (message: AdapterPostableMessage) => {
           harness.threadPosts.push({ threadId, message });
+          const hasFileUpload = isFileBearingMessage(message);
+          const shouldRejectUpload =
+            harnessOptions.shouldRejectThreadFileUpload === true && hasFileUpload;
+          if (shouldRejectUpload) {
+            throw new Error("Slack file upload failed");
+          }
         },
         subscribe: async () => {
           harness.subscribes.push(threadId);
@@ -238,6 +277,18 @@ const imageEmail: ResendReceivedEmail = {
   ],
 };
 
+const reporterMetadataEmail: ResendReceivedEmail = {
+  ...initialEmail,
+  id: "em_metadata",
+  attachments: [
+    {
+      id: "att_metadata",
+      filename: "reporter-metadata.txt",
+      content_type: "text/plain",
+    },
+  ],
+};
+
 describe("EmailIntakeBridge", () => {
   it("rejects invalid signatures", async () => {
     const harness = await createHarness({});
@@ -310,24 +361,109 @@ describe("EmailIntakeBridge", () => {
     );
   });
 
+  it("uploads attachments to the canonical thread when configured with a channel name", async () => {
+    const harness = await createHarness(
+      { em_metadata: reporterMetadataEmail },
+      {
+        channelId: "nextcard-support",
+        postedChannelId: "C0B4WN6KK6W",
+        shouldRejectAliasFileUpload: true,
+      },
+    );
+    const body = webhookBody("em_metadata");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(result.body).toEqual({ accepted: true, created: true });
+    expect(harness.channelPosts).toEqual([
+      expect.not.objectContaining({ files: expect.anything() }),
+    ]);
+    expect(harness.threadPosts).toEqual([
+      {
+        threadId: "slack:C0B4WN6KK6W:111.222",
+        message: {
+          markdown: "",
+          files: [
+            expect.objectContaining({
+              filename: "reporter-metadata.txt",
+              mimeType: "text/plain",
+            }),
+          ],
+        },
+      },
+    ]);
+    expect(harness.createdSessions[0]?.attachments).toEqual([
+      expect.objectContaining({
+        type: "uploaded_file",
+        fileName: "reporter-metadata.txt",
+        mimeType: "text/plain",
+      }),
+    ]);
+  });
+
+  it("continues triage when the canonical Slack attachment upload fails", async () => {
+    const harness = await createHarness(
+      { em_metadata: reporterMetadataEmail },
+      {
+        channelId: "nextcard-support",
+        postedChannelId: "C0B4WN6KK6W",
+        shouldRejectAliasFileUpload: true,
+        shouldRejectThreadFileUpload: true,
+      },
+    );
+    const body = webhookBody("em_metadata");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(harness.threadPosts).toEqual([
+      {
+        threadId: "slack:C0B4WN6KK6W:111.222",
+        message: {
+          markdown: "",
+          files: [
+            expect.objectContaining({
+              filename: "reporter-metadata.txt",
+              mimeType: "text/plain",
+            }),
+          ],
+        },
+      },
+    ]);
+    expect(result.body).toEqual({ accepted: true, created: true });
+    expect(harness.createdSessions).toHaveLength(1);
+    expect(harness.createdSessions[0]?.externalThreadId).toBe("slack:C0B4WN6KK6W:111.222");
+    expect(harness.createdSessions[0]?.attachments).toEqual([
+      expect.objectContaining({
+        type: "uploaded_file",
+        fileName: "reporter-metadata.txt",
+        mimeType: "text/plain",
+      }),
+    ]);
+  });
+
   it("posts email previews as code blocks and includes stored attachments", async () => {
     const harness = await createHarness({ em_image: imageEmail });
     const body = webhookBody("em_image");
     const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
 
     expect(result.body).toEqual({ accepted: true, created: true });
-    const announce = harness.channelPosts[0] as {
-      markdown?: string;
-      files?: Array<{ filename?: string; mimeType?: string; data?: Buffer }>;
-    };
-    expect(announce.markdown).toContain("```\nFrom: Jane Doe <jane@customer.com>");
-    expect(announce.markdown).toContain("what about this image");
-    expect(announce.files).toHaveLength(1);
-    expect(announce.files?.[0]).toMatchObject({
+    expect(harness.channelPosts[0]).toEqual(
+      expect.objectContaining({
+        markdown: expect.stringContaining("```\nFrom: Jane Doe <jane@customer.com>"),
+      }),
+    );
+    expect(harness.channelPosts[0]).toEqual(
+      expect.objectContaining({ markdown: expect.stringContaining("what about this image") }),
+    );
+    const attachmentPost = harness.threadPosts[0];
+    const attachmentMessage = attachmentPost?.message;
+    assertFileBearingMessage(attachmentMessage);
+    expect(attachmentPost?.threadId).toBe("slack:C42:111.222");
+    expect(attachmentMessage.markdown).toBe("");
+    expect(attachmentMessage.files).toHaveLength(1);
+    expect(attachmentMessage.files[0]).toMatchObject({
       filename: "screenshot.png",
       mimeType: "image/png",
     });
-    expect(Buffer.isBuffer(announce.files?.[0]?.data)).toBe(true);
+    expect(Buffer.isBuffer(attachmentMessage.files[0]?.data)).toBe(true);
 
     const session = harness.createdSessions[0];
     expect(session?.images).toEqual([
