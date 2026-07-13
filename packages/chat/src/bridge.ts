@@ -20,8 +20,9 @@ import {
   Card,
   type Adapter,
   type AdapterPostableMessage,
+  type EmojiValue,
   type Message,
-  type Thread,
+  type UserInfo,
 } from "chat";
 import type { ResolvedChatBridgeConfig } from "./config.js";
 import type { FocusRelay } from "./focus.js";
@@ -31,6 +32,7 @@ import {
   shouldIgnoreAuthor,
   shouldIgnoreAmbient,
   titleFromText,
+  type SlackIntakeThread,
 } from "./intake/slack.js";
 import {
   assembleContextOnlySlackPrompt,
@@ -51,6 +53,33 @@ import {
   type ChatBinding,
   type ChatStarter,
 } from "./state/thread-session-store.js";
+
+export interface ChatBridgeClient {
+  archiveAgent(agentId: string): Promise<unknown>;
+  createAgent(input: Parameters<DaemonClient["createAgent"]>[0]): Promise<{ id: string }>;
+  createWorkspace(
+    input: Parameters<DaemonClient["createWorkspace"]>[0],
+  ): Promise<{ workspace?: { id: string } | null; error?: string | null }>;
+  fetchAgent(agentId: string): Promise<{ agent: { labels?: Record<string, string> } } | null>;
+  fetchAgentTimeline: DaemonClient["fetchAgentTimeline"];
+  getLastServerInfoMessage(): { serverId: string } | null;
+  sendAgentMessage: DaemonClient["sendAgentMessage"];
+}
+
+interface ChatBridgeAdapter {
+  botUserId?: string;
+  getUser?: (userId: string) => Promise<UserInfo | null>;
+  postMessage(externalThreadId: string, message: string | AdapterPostableMessage): Promise<unknown>;
+}
+
+export interface ChatBridgeThread extends Omit<SlackIntakeThread, "adapter"> {
+  adapter: ChatBridgeAdapter;
+  subscribe(): Promise<unknown>;
+  post(message: string | AdapterPostableMessage): Promise<unknown>;
+  createSentMessageFromMessage(message: Message): {
+    addReaction(reaction: EmojiValue | string): Promise<unknown>;
+  };
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -169,18 +198,18 @@ export class ChatBridge {
 
   constructor(
     private readonly config: ResolvedChatBridgeConfig,
-    private readonly client: DaemonClient,
+    private readonly client: ChatBridgeClient,
     private readonly store: ThreadSessionStore,
-    private readonly permissions: PermissionBridge,
-    private readonly focus: FocusRelay,
+    private readonly permissions: Pick<PermissionBridge, "answerPendingQuestion">,
+    private readonly focus: Pick<FocusRelay, "escapeToRoot">,
     private readonly fallbackAdapter?: Pick<Adapter, "postMessage">,
   ) {
     this.customOfficePrompt = loadOfficePrompt(config);
   }
 
-  private readonly threads = new Map<string, Thread>();
+  private readonly threads = new Map<string, ChatBridgeThread>();
 
-  getThread(externalThreadId: string): Thread | null {
+  getThread(externalThreadId: string): ChatBridgeThread | null {
     return this.threads.get(externalThreadId) ?? null;
   }
 
@@ -299,7 +328,7 @@ export class ChatBridge {
   }
 
   private async handleCommand(
-    thread: Thread,
+    thread: ChatBridgeThread,
     message: Message,
     normalized: Awaited<ReturnType<typeof normalizeMessage>>,
     existing: ChatBinding | null,
@@ -375,7 +404,7 @@ export class ChatBridge {
   }
 
   async handleMessage(
-    thread: Thread,
+    thread: ChatBridgeThread,
     message: Message,
     source: "mention" | "dm" | "subscribed",
   ): Promise<void> {
@@ -439,7 +468,7 @@ export class ChatBridge {
   }
 
   private async dispatchAgentTurn(input: {
-    thread: Thread;
+    thread: ChatBridgeThread;
     message: Message;
     source: "mention" | "dm" | "subscribed";
     normalized: Awaited<ReturnType<typeof normalizeMessage>>;
@@ -510,7 +539,7 @@ export class ChatBridge {
     initialPrompt: string;
     images?: Array<{ data: string; mimeType: string }>;
     attachments?: AgentAttachment[];
-    thread?: Thread | null;
+    thread?: ChatBridgeThread | null;
     initialRelayId?: string;
     startedBy?: ChatStarter;
   }) {
@@ -593,16 +622,28 @@ export class ChatBridge {
   }
 
   private async startNewSession(
-    thread: Thread,
+    thread: ChatBridgeThread,
     message: Message,
     normalized: Awaited<ReturnType<typeof normalizeMessage>>,
   ) {
     const title = titleFromText(normalized.cleanedText);
+    let threadContext = "";
+    if (!thread.isDM) {
+      threadContext = await captureThreadContext(thread, message.id);
+    }
+
+    let workspaceTitlePrompt = normalized.cleanedText;
+    if (threadContext) {
+      workspaceTitlePrompt = threadContext;
+      if (normalized.cleanedText) {
+        workspaceTitlePrompt = `${threadContext}\n\n${normalized.cleanedText}`;
+      }
+    }
     const session = await this.createExternalSession({
       externalThreadId: normalized.externalThreadId,
       source: "slack",
       title,
-      workspaceTitlePrompt: normalized.cleanedText,
+      workspaceTitlePrompt,
       systemPrompt: assembleExternalIntakeSystemPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,
@@ -610,7 +651,7 @@ export class ChatBridge {
       initialPrompt: assembleInitialPrompt({
         sender: normalized.sender,
         text: normalized.cleanedText,
-        threadContext: thread.isDM ? "" : await captureThreadContext(thread, message.id),
+        threadContext,
         relayMode: this.config.relayMode,
       }),
       images: normalized.images,
@@ -638,7 +679,7 @@ export class ChatBridge {
   }
 
   private async reactToMuteCommand(
-    thread: Thread,
+    thread: ChatBridgeThread,
     message: Message,
     command: "mute" | "unmute",
   ): Promise<void> {
@@ -653,7 +694,7 @@ export class ChatBridge {
     }
   }
 
-  private async reactToArchiveCommand(thread: Thread, message: Message): Promise<void> {
+  private async reactToArchiveCommand(thread: ChatBridgeThread, message: Message): Promise<void> {
     const targetMessageId = getSlackThreadRootMessageId(message);
     const targetMessage =
       targetMessageId === message.id ? message : ({ ...message, id: targetMessageId } as Message);
@@ -668,7 +709,7 @@ export class ChatBridge {
   }
 
   private async postStartedCard(
-    thread: Thread | null,
+    thread: ChatBridgeThread | null,
     externalThreadId: string,
     workspaceId: string,
     agentId: string,
@@ -700,7 +741,7 @@ export class ChatBridge {
   }
 
   private startBackgroundRelay(input: {
-    thread: Thread | null;
+    thread: ChatBridgeThread | null;
     externalThreadId: string;
     agentId: string;
     messageId: string;
@@ -725,7 +766,7 @@ export class ChatBridge {
   }
 
   private async relayTurn(input: {
-    thread: Thread | null;
+    thread: ChatBridgeThread | null;
     externalThreadId: string;
     agentId: string;
     messageId: string;
@@ -863,7 +904,7 @@ export class ChatBridge {
   }
 
   private async postAutoRelayMessage(input: {
-    thread: Thread | null;
+    thread: ChatBridgeThread | null;
     externalThreadId: string;
     agentId: string;
     phase: "first" | "final";
@@ -897,7 +938,7 @@ export class ChatBridge {
   }
 
   private async postMessage(
-    thread: Thread | null,
+    thread: ChatBridgeThread | null,
     externalThreadId: string,
     message: string | AdapterPostableMessage,
   ): Promise<void> {

@@ -1,9 +1,62 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Message } from "chat";
 import { describe, expect, it } from "vitest";
-import { buildStartedCardUrl, ChatBridge } from "./bridge.js";
+import {
+  buildStartedCardUrl,
+  ChatBridge,
+  type ChatBridgeClient,
+  type ChatBridgeThread,
+} from "./bridge.js";
+import { loadConfig } from "./config.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
+
+interface PriorSlackMessage {
+  id: string;
+  text: string;
+  authorName: string;
+}
+
+interface SlackSessionCreationInput {
+  isDM: boolean;
+  priorMessages: PriorSlackMessage[];
+}
+
+class SessionCreationClient implements ChatBridgeClient {
+  readonly createWorkspaceCalls: Array<Parameters<ChatBridgeClient["createWorkspace"]>[0]> = [];
+  readonly createAgentCalls: Array<Parameters<ChatBridgeClient["createAgent"]>[0]> = [];
+
+  async archiveAgent(): Promise<never> {
+    throw new Error("archiveAgent is not available in the session creation test client");
+  }
+
+  async createWorkspace(input: Parameters<ChatBridgeClient["createWorkspace"]>[0]) {
+    this.createWorkspaceCalls.push(input);
+    return { workspace: { id: "workspace-1" } };
+  }
+
+  async createAgent(input: Parameters<ChatBridgeClient["createAgent"]>[0]) {
+    this.createAgentCalls.push(input);
+    return { id: "agent-1" };
+  }
+
+  async fetchAgent(): Promise<never> {
+    throw new Error("fetchAgent is not available in the session creation test client");
+  }
+
+  async fetchAgentTimeline(): Promise<never> {
+    throw new Error("fetchAgentTimeline is not available in the session creation test client");
+  }
+
+  getLastServerInfoMessage() {
+    return { serverId: "local" };
+  }
+
+  async sendAgentMessage(): Promise<never> {
+    throw new Error("sendAgentMessage is not available in the session creation test client");
+  }
+}
 
 interface RelayTurnInput {
   thread: { id: string; post: (message: unknown) => Promise<void>; adapter: object };
@@ -99,6 +152,111 @@ async function runAutoRelayWithTimeline(items: TimelineItem[]) {
     postedMessages,
     deliveryReceipt: `slack:${externalThreadId}:333.444:test:turn`,
   };
+}
+
+function createSlackMessage(input: {
+  id: string;
+  threadId: string;
+  text: string;
+  userId: string;
+  authorName: string;
+  authorHandle: string;
+  isMention?: boolean;
+}): Message {
+  return new Message({
+    id: input.id,
+    threadId: input.threadId,
+    text: input.text,
+    formatted: { type: "root", children: [] },
+    raw: { text: input.text, thread_ts: "111.222" },
+    author: {
+      userId: input.userId,
+      userName: input.authorHandle,
+      fullName: input.authorName,
+      isBot: false,
+      isMe: false,
+    },
+    metadata: { dateSent: new Date(0), edited: false },
+    attachments: [],
+    links: [],
+    isMention: input.isMention,
+  });
+}
+
+async function runSlackSessionCreation(input: SlackSessionCreationInput) {
+  const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
+  async function cleanup(): Promise<void> {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+  try {
+    const client = new SessionCreationClient();
+    const config = {
+      ...loadConfig({
+        PASEO_HOME: stateDir,
+        PASEO_CHAT_STATE_DIR: stateDir,
+        PASEO_CHAT_RELAY_MODE: "manual",
+        PASEO_CHAT_DEEP_LINK_BASE_URL: "https://paseo.example",
+      }),
+      officeRepoPath: "/tmp/office",
+    };
+    const bridge = new ChatBridge(
+      config,
+      client,
+      new ThreadSessionStore(stateDir),
+      { answerPendingQuestion: async () => false },
+      { escapeToRoot: async () => {} },
+    );
+    const threadId = input.isDM ? "slack:D123:111.222" : "slack:C123:111.222";
+    let capturedThreadReads = 0;
+    const allMessages = {
+      async *[Symbol.asyncIterator]() {
+        capturedThreadReads += 1;
+        for (const [index, priorMessage] of input.priorMessages.entries()) {
+          yield createSlackMessage({
+            id: priorMessage.id,
+            threadId,
+            text: priorMessage.text,
+            userId: `U${index + 2}`,
+            authorName: priorMessage.authorName,
+            authorHandle: priorMessage.authorName,
+          });
+        }
+      },
+    };
+    const thread: ChatBridgeThread = {
+      id: threadId,
+      isDM: input.isDM,
+      allMessages,
+      subscribe: async () => {},
+      post: async () => {},
+      createSentMessageFromMessage: () => ({ addReaction: async () => {} }),
+      adapter: {
+        botUserId: "UCTO",
+        postMessage: async () => {},
+      },
+    };
+    const message = createSlackMessage({
+      id: "333.444",
+      threadId,
+      text: "<@UCTO> debug, no mid turn replies",
+      userId: "U1",
+      authorName: "Vivek",
+      authorHandle: "vivek",
+      isMention: true,
+    });
+
+    await bridge.handleMessage(thread, message, input.isDM ? "dm" : "mention");
+
+    return {
+      cleanup,
+      createWorkspaceCalls: client.createWorkspaceCalls,
+      createAgentCalls: client.createAgentCalls,
+      capturedThreadReads,
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 describe("buildStartedCardUrl", () => {
@@ -223,6 +381,95 @@ describe("ChatBridge session creation", () => {
       });
     } finally {
       await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses prior Slack thread context and the triggering message for workspace naming", async () => {
+    const priorContext =
+      "John Ta: @Vishal i think newly added got killed in the recent rerun right? probably want to just manually assign the comparison list to the July 10, 2026 list right?";
+    const sessionHarness = await runSlackSessionCreation({
+      isDM: false,
+      priorMessages: [
+        {
+          id: "111.222",
+          text: priorContext.slice("John Ta: ".length),
+          authorName: "John Ta",
+        },
+      ],
+    });
+    try {
+      expect(sessionHarness.createWorkspaceCalls).toEqual([
+        {
+          source: { kind: "directory", path: "/tmp/office" },
+          firstAgentContext: {
+            prompt: `${priorContext}\n\ndebug, no mid turn replies`,
+            attachments: [],
+          },
+        },
+      ]);
+      expect(sessionHarness.createAgentCalls).toEqual([
+        expect.objectContaining({
+          initialPrompt: `Prior thread context:\n${priorContext}\n\nREMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.\n\nVivek (@vivek): debug, no mid turn replies`,
+        }),
+      ]);
+      expect(sessionHarness.capturedThreadReads).toBe(1);
+    } finally {
+      await sessionHarness.cleanup();
+    }
+  });
+
+  it("uses only the triggering message when a channel thread has no prior context", async () => {
+    const sessionHarness = await runSlackSessionCreation({ isDM: false, priorMessages: [] });
+    try {
+      expect(sessionHarness.createWorkspaceCalls).toEqual([
+        {
+          source: { kind: "directory", path: "/tmp/office" },
+          firstAgentContext: {
+            prompt: "debug, no mid turn replies",
+            attachments: [],
+          },
+        },
+      ]);
+      expect(sessionHarness.createAgentCalls).toEqual([
+        expect.objectContaining({
+          initialPrompt: `REMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.\n\nVivek (@vivek): debug, no mid turn replies`,
+        }),
+      ]);
+      expect(sessionHarness.capturedThreadReads).toBe(1);
+    } finally {
+      await sessionHarness.cleanup();
+    }
+  });
+
+  it("does not capture thread context for direct messages", async () => {
+    const sessionHarness = await runSlackSessionCreation({
+      isDM: true,
+      priorMessages: [
+        {
+          id: "111.222",
+          text: "this DM history must not be captured",
+          authorName: "John Ta",
+        },
+      ],
+    });
+    try {
+      expect(sessionHarness.createWorkspaceCalls).toEqual([
+        {
+          source: { kind: "directory", path: "/tmp/office" },
+          firstAgentContext: {
+            prompt: "debug, no mid turn replies",
+            attachments: [],
+          },
+        },
+      ]);
+      expect(sessionHarness.createAgentCalls).toEqual([
+        expect.objectContaining({
+          initialPrompt: `REMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.\n\nVivek (@vivek): debug, no mid turn replies`,
+        }),
+      ]);
+      expect(sessionHarness.capturedThreadReads).toBe(0);
+    } finally {
+      await sessionHarness.cleanup();
     }
   });
 });
