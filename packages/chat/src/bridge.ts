@@ -598,11 +598,15 @@ export class ChatBridge {
     normalized: Awaited<ReturnType<typeof normalizeMessage>>,
   ) {
     const title = titleFromText(normalized.cleanedText);
+    const threadContext = thread.isDM ? "" : await captureThreadContext(thread, message.id);
+    const workspaceTitlePrompt = [threadContext, normalized.cleanedText]
+      .filter(Boolean)
+      .join("\n\n");
     const session = await this.createExternalSession({
       externalThreadId: normalized.externalThreadId,
       source: "slack",
       title,
-      workspaceTitlePrompt: normalized.cleanedText,
+      workspaceTitlePrompt,
       systemPrompt: assembleExternalIntakeSystemPrompt({
         basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
         customPrompt: await this.customOfficePrompt,
@@ -610,7 +614,7 @@ export class ChatBridge {
       initialPrompt: assembleInitialPrompt({
         sender: normalized.sender,
         text: normalized.cleanedText,
-        threadContext: thread.isDM ? "" : await captureThreadContext(thread, message.id),
+        threadContext,
         relayMode: this.config.relayMode,
       }),
       images: normalized.images,
