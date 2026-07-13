@@ -79,6 +79,9 @@ async function createHarness(
 ): Promise<Harness> {
   const dir = await createTempDir();
   const store = new ThreadSessionStore(dir);
+  const configuredChannelId = harnessOptions.channelId ?? "C42";
+  const postedChannelId =
+    harnessOptions.postedChannelId ?? configuredChannelId.replace(/^slack:/, "");
 
   vi.stubGlobal("fetch", async (input: string | URL) => {
     const url = String(input);
@@ -127,7 +130,7 @@ async function createHarness(
       provider: "resend",
       apiKey: "re_test",
       webhookSecret: SECRET,
-      channelId: harnessOptions.channelId ?? "C42",
+      channelId: configuredChannelId,
       supportAddress: "support@affil.ai",
     },
     relayMode: "auto",
@@ -142,7 +145,7 @@ async function createHarness(
         return {
           id: "111.222",
           threadId: `${channelId}:`,
-          raw: { channel: harnessOptions.postedChannelId ?? channelId.replace(/^slack:/, "") },
+          raw: { channel: postedChannelId },
         };
       },
       thread: (threadId: string) => ({

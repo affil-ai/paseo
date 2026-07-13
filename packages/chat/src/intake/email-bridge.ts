@@ -44,6 +44,16 @@ export interface EmailWebhookResult {
   body: unknown;
 }
 
+class SlackChannelIdentityError extends Error {
+  constructor(
+    readonly requestedChannelId: string,
+    readonly messageId: string,
+  ) {
+    super("Slack adapter post response did not include a canonical channel ID");
+    this.name = "SlackChannelIdentityError";
+  }
+}
+
 interface EmailChatThread {
   post(message: AdapterPostableMessage): Promise<unknown>;
   subscribe(): Promise<unknown>;
@@ -123,20 +133,6 @@ function normalizeHeaders(
 function markdownCodeBlock(text: string): string {
   const fence = text.includes("```") ? "````" : "```";
   return `${fence}\n${text}\n${fence}`;
-}
-
-function externalThreadIdFromSlackChannelPost(posted: RawMessage<unknown>): string {
-  const payload = posted.raw;
-  const hasCanonicalChannelId =
-    typeof payload === "object" &&
-    payload !== null &&
-    "channel" in payload &&
-    typeof payload.channel === "string" &&
-    /^[CDG][A-Z0-9]+$/.test(payload.channel);
-  if (!hasCanonicalChannelId) {
-    throw new Error("Slack adapter post response did not include a canonical channel ID");
-  }
-  return `slack:${payload.channel}:${posted.id}`;
 }
 
 async function emailSlackFiles(
@@ -373,7 +369,17 @@ export class EmailIntakeBridge {
       markdown: `*${supportEmailSlackTitle(input.email, this.context)}*\n\n${markdownCodeBlock(preview)}`,
       ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
     });
-    const externalThreadId = externalThreadIdFromSlackChannelPost(sent);
+    const postedPayload = sent.raw;
+    const hasCanonicalChannelId =
+      typeof postedPayload === "object" &&
+      postedPayload !== null &&
+      "channel" in postedPayload &&
+      typeof postedPayload.channel === "string" &&
+      /^[CDG][A-Z0-9]+$/.test(postedPayload.channel);
+    if (!hasCanonicalChannelId) {
+      throw new SlackChannelIdentityError(channelId, sent.id);
+    }
+    const externalThreadId = `slack:${postedPayload.channel}:${sent.id}`;
     await this.deps.chat.thread(externalThreadId).subscribe();
 
     try {
