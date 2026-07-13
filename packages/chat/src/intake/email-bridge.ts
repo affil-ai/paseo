@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
-import type { AdapterPostableMessage, FileUpload, SentMessage } from "chat";
+import type { AdapterPostableMessage, FileUpload, RawMessage } from "chat";
 import type { ChatEmailConfig, ChatRelayMode } from "../config.js";
 import {
   assembleExternalIntakeSystemPrompt,
@@ -11,7 +11,7 @@ import {
   externalIntakeAgentPrompt,
   incomingEmailInstruction,
 } from "../prompt.js";
-import { normalizeSlackChannelId, threadIdFromPostedMessage } from "../service.js";
+import { normalizeSlackChannelId } from "../service.js";
 import { getBindingOwnerAgentId, type ThreadSessionStore } from "../state/thread-session-store.js";
 import type { EmailClassifier } from "./email-classifier.js";
 import {
@@ -44,9 +44,14 @@ export interface EmailWebhookResult {
   body: unknown;
 }
 
-interface EmailChatTarget {
-  id: string;
-  post(message: AdapterPostableMessage): Promise<Pick<SentMessage, "id" | "threadId">>;
+class SlackChannelIdentityError extends Error {
+  constructor(
+    readonly requestedChannelId: string,
+    readonly messageId: string,
+  ) {
+    super("Slack adapter post response did not include a canonical channel ID");
+    this.name = "SlackChannelIdentityError";
+  }
 }
 
 interface EmailChatThread {
@@ -55,7 +60,10 @@ interface EmailChatThread {
 }
 
 export interface EmailChatLike {
-  channel(channelId: string): EmailChatTarget;
+  postChannelMessage(
+    channelId: string,
+    message: AdapterPostableMessage,
+  ): Promise<RawMessage<unknown>>;
   thread(threadId: string): EmailChatThread;
 }
 
@@ -350,18 +358,28 @@ export class EmailIntakeBridge {
     storedIds: string[];
     processed: Awaited<ReturnType<typeof processEmailAttachments>>;
   }): Promise<EmailWebhookResult> {
-    const channel = this.deps.chat.channel(normalizeSlackChannelId(this.deps.email.channelId));
+    const channelId = normalizeSlackChannelId(this.deps.email.channelId);
     const preview = supportEmailSlackPreview({
       email: input.email,
       attachments: input.processed.attachments,
       context: this.context,
     });
     const slackFiles = await emailSlackFiles(input.processed.attachments);
-    const sent = await channel.post({
+    const sent = await this.deps.chat.postChannelMessage(channelId, {
       markdown: `*${supportEmailSlackTitle(input.email, this.context)}*\n\n${markdownCodeBlock(preview)}`,
       ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
     });
-    const externalThreadId = threadIdFromPostedMessage(channel.id, sent);
+    const postedPayload = sent.raw;
+    const hasCanonicalChannelId =
+      typeof postedPayload === "object" &&
+      postedPayload !== null &&
+      "channel" in postedPayload &&
+      typeof postedPayload.channel === "string" &&
+      /^[CDG][A-Z0-9]+$/.test(postedPayload.channel);
+    if (!hasCanonicalChannelId) {
+      throw new SlackChannelIdentityError(channelId, sent.id);
+    }
+    const externalThreadId = `slack:${postedPayload.channel}:${sent.id}`;
     await this.deps.chat.thread(externalThreadId).subscribe();
 
     try {

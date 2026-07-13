@@ -1,5 +1,5 @@
 import { Chat, type Chat as ChatRuntime } from "chat";
-import { createSlackAdapter } from "@chat-adapter/slack";
+import { createSlackAdapter, type SlackAdapter } from "@chat-adapter/slack";
 import { loadConfig, type ResolvedChatBridgeConfig } from "./config.js";
 import { connectToPaseoDaemon, resolveChatRepositoryPath } from "./paseo-client.js";
 import { ChatBridge } from "./bridge.js";
@@ -24,6 +24,7 @@ interface EmailIntakes {
 function startEmailIntakes(input: {
   config: ResolvedChatBridgeConfig;
   chat: ChatRuntime;
+  slack: SlackAdapter;
   client: PaseoDaemonClient;
   state: ThreadSessionStore;
   bridge: ChatBridge;
@@ -39,7 +40,11 @@ function startEmailIntakes(input: {
         maxUploadBytes: input.config.maxUploadBytes,
         officePrompt: loadOfficePrompt(input.config),
         ...(classifier ? { classifier } : {}),
-        chat: input.chat,
+        chat: {
+          postChannelMessage: (channelId, message) =>
+            input.slack.postChannelMessage(channelId, message),
+          thread: (threadId) => input.chat.thread(threadId),
+        },
         client: input.client,
         store: input.state,
         bridge: input.bridge,
@@ -190,7 +195,7 @@ export async function main(): Promise<void> {
     port: config.servicePort,
     tokenPath: config.serviceTokenPath,
   });
-  const { emailIntake } = startEmailIntakes({ config, chat, client, state, bridge });
+  const { emailIntake } = startEmailIntakes({ config, chat, slack, client, state, bridge });
   const githubMergeNotifier = config.githubWebhookSecret
     ? new GithubMergeNotifier(config.githubWebhookSecret, state, client)
     : null;

@@ -41,9 +41,16 @@ function webhookBody(emailId: string): string {
   return JSON.stringify({ type: "email.received", data: { email_id: emailId } });
 }
 
+interface HarnessOptions {
+  classifier?: EmailClassifier;
+  channelId?: string;
+  postedChannelId?: string;
+}
+
 interface Harness {
   bridge: EmailIntakeBridge;
   store: ThreadSessionStore;
+  requestedChannels: string[];
   channelPosts: unknown[];
   threadPosts: Array<{ threadId: string; message: unknown }>;
   subscribes: string[];
@@ -68,10 +75,13 @@ interface Harness {
 
 async function createHarness(
   emailsById: Record<string, ResendReceivedEmail>,
-  harnessOptions: { classifier?: EmailClassifier } = {},
+  harnessOptions: HarnessOptions = {},
 ): Promise<Harness> {
   const dir = await createTempDir();
   const store = new ThreadSessionStore(dir);
+  const configuredChannelId = harnessOptions.channelId ?? "C42";
+  const postedChannelId =
+    harnessOptions.postedChannelId ?? configuredChannelId.replace(/^slack:/, "");
 
   vi.stubGlobal("fetch", async (input: string | URL) => {
     const url = String(input);
@@ -105,6 +115,7 @@ async function createHarness(
   const harness: Harness = {
     bridge: null as never,
     store,
+    requestedChannels: [],
     channelPosts: [],
     threadPosts: [],
     subscribes: [],
@@ -119,7 +130,7 @@ async function createHarness(
       provider: "resend",
       apiKey: "re_test",
       webhookSecret: SECRET,
-      channelId: "C42",
+      channelId: configuredChannelId,
       supportAddress: "support@affil.ai",
     },
     relayMode: "auto",
@@ -128,13 +139,15 @@ async function createHarness(
     officePrompt: "office custom prompt",
     ...(harnessOptions.classifier ? { classifier: harnessOptions.classifier } : {}),
     chat: {
-      channel: (channelId: string) => ({
-        id: channelId,
-        post: async (message: unknown) => {
-          harness.channelPosts.push(message);
-          return { id: "111.222", threadId: `${channelId}:` };
-        },
-      }),
+      postChannelMessage: async (channelId: string, message: unknown) => {
+        harness.requestedChannels.push(channelId);
+        harness.channelPosts.push(message);
+        return {
+          id: "111.222",
+          threadId: `${channelId}:`,
+          raw: { channel: postedChannelId },
+        };
+      },
       thread: (threadId: string) => ({
         post: async (message: unknown) => {
           harness.threadPosts.push({ threadId, message });
@@ -273,6 +286,27 @@ describe("EmailIntakeBridge", () => {
     ]);
     await expect(harness.store.getEmailLink("message:msg-1@customer.com")).resolves.toBe(
       "slack:C42:111.222",
+    );
+  });
+
+  it("uses the canonical posted Slack channel ID when configured with a channel name", async () => {
+    const harness = await createHarness(
+      { em_1: initialEmail },
+      { channelId: "nextcard-support", postedChannelId: "C0B4WN6KK6W" },
+    );
+    const body = webhookBody("em_1");
+    const result = await harness.bridge.handleResendWebhook(body, signedHeaders(body));
+
+    expect(result.body).toEqual({ accepted: true, created: true });
+    expect(harness.requestedChannels).toEqual(["slack:nextcard-support"]);
+    expect(harness.subscribes).toEqual(["slack:C0B4WN6KK6W:111.222"]);
+    expect(harness.createdSessions[0]?.externalThreadId).toBe("slack:C0B4WN6KK6W:111.222");
+    await expect(harness.store.getSession("slack:C0B4WN6KK6W:111.222")).resolves.toMatchObject({
+      externalThreadId: "slack:C0B4WN6KK6W:111.222",
+      rootAgentId: "agent-1",
+    });
+    await expect(harness.store.getEmailLink("message:msg-1@customer.com")).resolves.toBe(
+      "slack:C0B4WN6KK6W:111.222",
     );
   });
 
