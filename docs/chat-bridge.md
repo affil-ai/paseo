@@ -619,7 +619,11 @@ pipeline. Modeled on t3code's `POST /support-email/resend` endpoint. As implemen
   Slack channel, and that Slack thread becomes the primary `inbound-session` binding — all
   existing relay/mute/permission/steering machinery works unchanged, and replies in the Slack
   thread steer the same agent via the normal subscribed-message path. A persisted `emailLinks`
-  map (`thread-session-store.ts`) resolves email external ids to that binding.
+  map (`thread-session-store.ts`) resolves email external ids to that binding. The setting accepts
+  a channel name or ID, but new bindings always use the canonical channel ID returned by the Slack
+  adapter's `postChannelMessage` response. Chat SDK's `Channel.post` `SentMessage` preserves the
+  requested alias and omits that response field, so it cannot establish durable Slack identity.
+  Existing bindings are not rewritten.
 - **Thread linking by email semantics:** threads key off `Message-ID`, `In-Reply-To`,
   `References`, and a `conversation:<sender>:<normalized-subject>` fallback (lookup-gated to
   internal-sender forward-like emails), so an email reply continues the same agent. If a
