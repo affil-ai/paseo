@@ -367,7 +367,6 @@ export class EmailIntakeBridge {
     const slackFiles = await emailSlackFiles(input.processed.attachments);
     const sent = await this.deps.chat.postChannelMessage(channelId, {
       markdown: `*${supportEmailSlackTitle(input.email, this.context)}*\n\n${markdownCodeBlock(preview)}`,
-      ...(slackFiles.length > 0 ? { files: slackFiles } : {}),
     });
     const postedPayload = sent.raw;
     const hasCanonicalChannelId =
@@ -380,7 +379,13 @@ export class EmailIntakeBridge {
       throw new SlackChannelIdentityError(channelId, sent.id);
     }
     const externalThreadId = `slack:${postedPayload.channel}:${sent.id}`;
-    await this.deps.chat.thread(externalThreadId).subscribe();
+    const thread = this.deps.chat.thread(externalThreadId);
+    await thread.subscribe();
+    if (slackFiles.length > 0) {
+      await thread.post({ markdown: "", files: slackFiles }).catch((error) => {
+        console.warn("Failed to post email attachments to Slack", error);
+      });
+    }
 
     try {
       const session = await this.deps.bridge.createExternalSession({

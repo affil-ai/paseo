@@ -623,6 +623,8 @@ pipeline. Modeled on t3code's `POST /support-email/resend` endpoint. As implemen
   a channel name or ID, but new bindings always use the canonical channel ID returned by the Slack
   adapter's `postChannelMessage` response. Chat SDK's `Channel.post` `SentMessage` preserves the
   requested alias and omits that response field, so it cannot establish durable Slack identity.
+  The announcement text establishes that canonical thread before attachments are uploaded into it;
+  a Slack attachment-upload failure is logged but does not block agent triage or agent attachments.
   Existing bindings are not rewritten.
 - **Thread linking by email semantics:** threads key off `Message-ID`, `In-Reply-To`,
   `References`, and a `conversation:<sender>:<normalized-subject>` fallback (lookup-gated to
