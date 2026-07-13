@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
-import type { Attachment, Message, Thread, UserInfo } from "chat";
+import type { Attachment, Message, UserInfo } from "chat";
 
 export interface SenderIdentity {
   userId: string;
@@ -10,6 +10,16 @@ export interface SenderIdentity {
   email?: string;
   handle?: string;
   avatarUrl?: string;
+}
+
+export interface SlackIntakeThread {
+  id: string;
+  isDM: boolean;
+  allMessages: AsyncIterable<Message>;
+  adapter: {
+    botUserId?: string;
+    getUser?: (userId: string) => Promise<UserInfo | null>;
+  };
 }
 
 export type ThreadCommand = "mute" | "unmute" | "archive" | "escape" | "aside" | null;
@@ -31,7 +41,7 @@ function slackMessageThreadTs(message: Message): string | null {
   return typeof threadTs === "string" && threadTs ? threadTs : null;
 }
 
-function encodeThreadId(thread: Thread, message: Message): string {
+function encodeThreadId(thread: SlackIntakeThread, message: Message): string {
   if (thread.isDM && thread.id.endsWith(":")) {
     return `${thread.id}${slackMessageThreadTs(message) ?? message.id}`;
   }
@@ -46,15 +56,12 @@ export function cleanSlackText(text: string): string {
     .trim();
 }
 
-async function getSlackUser(thread: Thread, userId: string): Promise<UserInfo | null> {
-  const adapter = thread.adapter as {
-    getUser?: (userId: string) => Promise<UserInfo | null>;
-  };
-  return (await adapter.getUser?.(userId).catch(() => null)) ?? null;
+async function getSlackUser(thread: SlackIntakeThread, userId: string): Promise<UserInfo | null> {
+  return (await thread.adapter.getUser?.(userId).catch(() => null)) ?? null;
 }
 
 async function getSlackUserName(
-  thread: Thread,
+  thread: SlackIntakeThread,
   userId: string,
   fallback?: string,
 ): Promise<string> {
@@ -62,11 +69,14 @@ async function getSlackUserName(
   return user?.userName || user?.fullName || fallback || userId;
 }
 
-async function normalizeMentionsForPrompt(thread: Thread, message: Message): Promise<string> {
+async function normalizeMentionsForPrompt(
+  thread: SlackIntakeThread,
+  message: Message,
+): Promise<string> {
   let text = message.text;
   const raw = message.raw as { text?: unknown } | undefined;
   const rawText = typeof raw?.text === "string" ? raw.text : "";
-  const botUserId = (thread.adapter as { botUserId?: string }).botUserId;
+  const botUserId = thread.adapter.botUserId;
   const mentions = [...rawText.matchAll(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>/g)];
 
   for (const [, userId, label] of mentions) {
@@ -101,7 +111,10 @@ export function titleFromText(text: string): string {
   return first.length > 120 ? `${first.slice(0, 117)}...` : first;
 }
 
-export async function resolveSender(thread: Thread, message: Message): Promise<SenderIdentity> {
+export async function resolveSender(
+  thread: SlackIntakeThread,
+  message: Message,
+): Promise<SenderIdentity> {
   const author = message.author;
   const user = await getSlackUser(thread, author.userId);
   const handle = user?.userName || author.userName || author.userId;
@@ -187,7 +200,7 @@ async function attachmentToUploadedFile(
 }
 
 export async function normalizeMessage(
-  thread: Thread,
+  thread: SlackIntakeThread,
   message: Message,
   options: NormalizeMessageOptions,
 ): Promise<NormalizedMessage> {
@@ -225,7 +238,7 @@ export async function normalizeMessage(
 }
 
 export async function captureThreadContext(
-  thread: Thread,
+  thread: SlackIntakeThread,
   triggeringMessageId: string,
 ): Promise<string> {
   const lines: string[] = [];
@@ -243,7 +256,7 @@ export async function captureThreadContext(
 }
 
 export function shouldIgnoreAmbient(
-  thread: Thread,
+  thread: SlackIntakeThread,
   message: Message,
   hasSession: boolean,
 ): boolean {

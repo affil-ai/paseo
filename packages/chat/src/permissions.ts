@@ -3,6 +3,10 @@ import type { AgentPermissionRequestMessage } from "@getpaseo/protocol/messages"
 import { Actions, Button, Card, CardText, type Chat, type Thread } from "chat";
 import { getBindingOwnerAgentId, type ThreadSessionStore } from "./state/thread-session-store.js";
 
+interface PermissionThread {
+  post(message: Parameters<Thread["post"]>[0]): Promise<unknown>;
+}
+
 const ACTION_PREFIX = "paseo-permit:";
 
 function buttonStyle(variant: "primary" | "secondary" | "danger" | undefined) {
@@ -40,7 +44,7 @@ export class PermissionBridge {
 
   async handlePermission(
     message: AgentPermissionRequestMessage,
-    thread: Thread,
+    thread: PermissionThread,
     externalThreadId: string,
   ): Promise<void> {
     const request = message.payload.request;
