@@ -32,6 +32,11 @@ interface WorkspaceTabPresentationResolverProps {
   tab: WorkspaceTabDescriptor;
   serverId: string;
   workspaceId: string;
+  /**
+   * Overrides the descriptor-provided label. Used to disambiguate file tabs
+   * that share the same file name by prefixing parent folders.
+   */
+  labelOverride?: string;
   children: (presentation: WorkspaceTabPresentation) => ReactNode;
 }
 
@@ -43,6 +48,7 @@ export function WorkspaceTabPresentationResolver({
   tab,
   serverId,
   workspaceId,
+  labelOverride,
   children,
 }: WorkspaceTabPresentationResolverProps): ReactElement {
   ensurePanelsRegistered();
@@ -56,6 +62,7 @@ export function WorkspaceTabPresentationResolver({
       tab={tab}
       serverId={serverId}
       workspaceId={workspaceId}
+      labelOverride={labelOverride}
     >
       {children}
     </WorkspaceTabPresentationResolverInner>
@@ -67,6 +74,7 @@ function WorkspaceTabPresentationResolverInner({
   tab,
   serverId,
   workspaceId,
+  labelOverride,
   children,
 }: WorkspaceTabPresentationResolverInnerProps): ReactElement {
   const descriptor = registration.useDescriptor(tab.target as never, {
@@ -78,7 +86,7 @@ function WorkspaceTabPresentationResolverInner({
     () => ({
       key: tab.key,
       kind: tab.kind,
-      label: descriptor.label,
+      label: labelOverride ?? descriptor.label,
       subtitle: descriptor.subtitle,
       titleState: descriptor.titleState,
       icon: descriptor.icon,
@@ -90,6 +98,7 @@ function WorkspaceTabPresentationResolverInner({
       descriptor.statusBucket,
       descriptor.subtitle,
       descriptor.titleState,
+      labelOverride,
       tab.key,
       tab.kind,
     ],

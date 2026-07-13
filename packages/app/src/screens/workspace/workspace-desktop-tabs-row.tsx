@@ -68,6 +68,7 @@ import {
   type WorkspaceTabPresentation,
 } from "@/screens/workspace/workspace-tab-presentation";
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
+import { buildFileTabLabelOverrides } from "@/screens/workspace/workspace-file-tab-labels";
 import {
   buildWorkspaceDesktopTabActions,
   type WorkspaceDesktopTabActions,
@@ -846,13 +847,21 @@ export function WorkspaceDesktopTabsRow({
     }),
     [t],
   );
+  const fileTabLabelOverrides = useMemo(
+    () => buildFileTabLabelOverrides(tabs.map((tab) => tab.tab)),
+    [tabs],
+  );
   const tabLabelLengths = useMemo(
     () =>
       tabs.map((tab) => {
-        const label = getFallbackTabLabel(tab.tab, fallbackTabLabels);
+        const override =
+          tab.tab.target.kind === "file"
+            ? fileTabLabelOverrides.get(tab.tab.target.path)
+            : undefined;
+        const label = override ?? getFallbackTabLabel(tab.tab, fallbackTabLabels);
         return label.length;
       }),
-    [fallbackTabLabels, tabs],
+    [fallbackTabLabels, fileTabLabelOverrides, tabs],
   );
 
   const { layout } = useWorkspaceTabLayout({
@@ -915,10 +924,16 @@ export function WorkspaceDesktopTabsRow({
         tabDropPreviewIndex === tabs.length &&
         index === tabs.length - 1;
 
+      const labelOverride =
+        item.tab.target.kind === "file"
+          ? fileTabLabelOverrides.get(item.tab.target.path)
+          : undefined;
+
       return (
         <ResolvedDesktopTabChip
           key={`${item.tab.key}:${item.tab.kind}`}
           item={item}
+          labelOverride={labelOverride}
           isFocused={isFocused}
           isDragging={isActive}
           index={index}
@@ -948,6 +963,7 @@ export function WorkspaceDesktopTabsRow({
     },
     [
       activeDragTabId,
+      fileTabLabelOverrides,
       isFocused,
       layout.closeButtonPolicy,
       layout.items,
@@ -1047,6 +1063,7 @@ export function WorkspaceDesktopTabsRow({
 }
 function ResolvedDesktopTabChip({
   item,
+  labelOverride,
   isFocused,
   isDragging,
   index,
@@ -1073,6 +1090,7 @@ function ResolvedDesktopTabChip({
   showDropIndicatorAfter,
 }: {
   item: WorkspaceDesktopTabRowItem;
+  labelOverride: string | undefined;
   isFocused: boolean;
   isDragging: boolean;
   index: number;
@@ -1138,6 +1156,7 @@ function ResolvedDesktopTabChip({
       tab={item.tab}
       serverId={normalizedServerId}
       workspaceId={normalizedWorkspaceId}
+      labelOverride={labelOverride}
     >
       {(presentation) => {
         const tooltipLabel =

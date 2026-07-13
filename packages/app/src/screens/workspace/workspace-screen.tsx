@@ -117,6 +117,7 @@ import {
   WorkspaceTabOptionRow,
   type WorkspaceTabPresentation,
 } from "@/screens/workspace/workspace-tab-presentation";
+import { buildFileTabLabelOverrides } from "@/screens/workspace/workspace-file-tab-labels";
 import {
   useWorkspaceTabRename,
   WorkspaceTabRenameModal,
@@ -404,10 +405,12 @@ function MobileActiveTabTrigger({
   activeTab,
   normalizedServerId,
   normalizedWorkspaceId,
+  labelOverride,
 }: {
   activeTab: WorkspaceTabDescriptor | null;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  labelOverride?: string;
 }) {
   if (!activeTab) {
     return null;
@@ -418,18 +421,28 @@ function MobileActiveTabTrigger({
       activeTab={activeTab}
       normalizedServerId={normalizedServerId}
       normalizedWorkspaceId={normalizedWorkspaceId}
+      labelOverride={labelOverride}
     />
   );
+}
+
+function fileTabLabelOverride(
+  tab: WorkspaceTabDescriptor,
+  overrides: Map<string, string>,
+): string | undefined {
+  return tab.target.kind === "file" ? overrides.get(tab.target.path) : undefined;
 }
 
 function ResolvedMobileActiveTabTrigger({
   activeTab,
   normalizedServerId,
   normalizedWorkspaceId,
+  labelOverride,
 }: {
   activeTab: WorkspaceTabDescriptor;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  labelOverride?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -437,6 +450,7 @@ function ResolvedMobileActiveTabTrigger({
       tab={activeTab}
       serverId={normalizedServerId}
       workspaceId={normalizedWorkspaceId}
+      labelOverride={labelOverride}
     >
       {(presentation) => (
         <>
@@ -572,6 +586,7 @@ function MobileWorkspaceTabOption({
   tab,
   tabIndex,
   tabCount,
+  labelOverride,
   normalizedServerId,
   normalizedWorkspaceId,
   selected,
@@ -590,6 +605,7 @@ function MobileWorkspaceTabOption({
   tab: WorkspaceTabDescriptor;
   tabIndex: number;
   tabCount: number;
+  labelOverride?: string;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   selected: boolean;
@@ -682,6 +698,7 @@ function MobileWorkspaceTabOption({
       tab={tab}
       serverId={normalizedServerId}
       workspaceId={normalizedWorkspaceId}
+      labelOverride={labelOverride}
     >
       {renderPresentation}
     </WorkspaceTabPresentationResolver>
@@ -717,6 +734,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
     });
     return map;
   }, [tabs]);
+  const fileTabLabelOverrides = useMemo(() => buildFileTabLabelOverrides(tabs), [tabs]);
 
   const handleOpenSwitcher = useCallback(() => {
     Keyboard.dismiss();
@@ -748,6 +766,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
           tab={tab}
           tabIndex={tabIndex}
           tabCount={tabs.length}
+          labelOverride={fileTabLabelOverride(tab, fileTabLabelOverrides)}
           normalizedServerId={normalizedServerId}
           normalizedWorkspaceId={normalizedWorkspaceId}
           selected={selected}
@@ -769,6 +788,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
       tabByKey,
       tabIndexByKey,
       tabs.length,
+      fileTabLabelOverrides,
       normalizedServerId,
       normalizedWorkspaceId,
       onCopyResumeCommand,
@@ -798,6 +818,9 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
             activeTab={activeTab}
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
+            labelOverride={
+              activeTab ? fileTabLabelOverride(activeTab, fileTabLabelOverrides) : undefined
+            }
           />
         </View>
         <ThemedChevronDown size={14} uniProps={mutedColorMapping} />
