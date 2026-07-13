@@ -626,7 +626,7 @@ export const ptBR: TranslationResources = {
           success: "Atualizado",
         },
         archive: {
-          label: "Arquivar worktree",
+          label: "Arquivar workspace",
           pending: "Arquivando...",
           success: "Arquivado",
         },
@@ -678,8 +678,6 @@ export const ptBR: TranslationResources = {
             "Atualizar não está disponível enquanto há alterações locais. Faça commit ou stash primeiro",
           updateCurrent:
             "Atualizar não está disponível porque esta branch já está atualizada com {{baseRef}}",
-          archiveNotWorktree:
-            "Arquivar não está disponível aqui porque este workspace não foi criado como um worktree do Paseo",
           mergePrNoGithub:
             "Merge da PR não está disponível agora porque o GitHub não está conectado",
           mergePrMissing: "Merge da PR não está disponível porque ainda não há uma pull request",
@@ -706,11 +704,9 @@ export const ptBR: TranslationResources = {
           baseRefUnavailable: "Ref base indisponível",
           failedMerge: "Falha ao fazer merge",
           failedMergeFromBase: "Falha ao fazer merge da base",
-          worktreePathUnavailable: "Caminho do worktree indisponível",
-          failedArchive: "Falha ao arquivar worktree",
         },
         archiveWarning: {
-          title: 'Arquivar "{{worktreeName}}"?',
+          title: 'Arquivar "{{workspaceName}}"?',
           confirm: "Arquivar",
           cancel: "Cancelar",
           uncommittedChanges: "Alterações sem commit",
@@ -728,11 +724,19 @@ export const ptBR: TranslationResources = {
         tooLarge: "Diff grande demais para exibir",
         unified: "Diff unificado",
         split: "Diff lado a lado",
+        switchToUnified: "Alternar para diff unificado",
+        switchToSplit: "Alternar para diff lado a lado",
+        showTreeView: "Mostrar árvore de pastas",
+        showFlatView: "Mostrar lista plana de arquivos",
+        options: "Opções do diff",
         hideWhitespace: "Ocultar espaços em branco",
+        showWhitespace: "Mostrar espaços em branco",
         scrollLongLines: "Rolar linhas longas",
         wrapLongLines: "Quebrar linhas longas",
         collapseAll: "Recolher todos os arquivos",
         expandAll: "Expandir todos os arquivos",
+        collapseAllFolders: "Recolher todas as pastas",
+        expandAllFolders: "Expandir todas as pastas",
         refreshing: "Atualizando",
         refresh: "Atualizar",
         refreshState: "Atualizar estado do git e do GitHub",
@@ -791,6 +795,9 @@ export const ptBR: TranslationResources = {
     },
   },
   sidebar: {
+    pinned: {
+      title: "Fixados",
+    },
     host: {
       noHost: "Nenhum host",
       switchTitle: "Trocar host",
@@ -799,9 +806,24 @@ export const ptBR: TranslationResources = {
     actions: {
       addProject: "Adicionar projeto",
       newWorkspace: "Novo workspace",
+      hosts: "Hosts",
       home: "Início",
       settings: "Configurações",
       closeSidebar: "Fechar barra lateral",
+    },
+    help: {
+      trigger: "Ajuda e suporte",
+      troubleshoot: "Resolver problemas",
+      diagnostics: "Executar diagnóstico",
+      diagnosticsDescription: "Coletar detalhes do app e dos hosts conectados",
+      shortcuts: "Atalhos de teclado",
+      shortcutsDescription: "Ver os atalhos de teclado disponíveis",
+      reportIssue: "Relatar um problema",
+      discord: "Discord",
+      discordDescription: "Ideal para ajuda rápida e conversa",
+      github: "Criar issue no GitHub",
+      githubDescription: "Relatar um bug reproduzível",
+      version: "Paseo {{version}}",
     },
     sections: {
       pinned: "Fixados",
@@ -856,10 +878,10 @@ export const ptBR: TranslationResources = {
         rename: "Renomear workspace",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
-        pin: "Fixar",
+        pin: "Fixar no topo",
         unpin: "Desafixar",
         archive: "Arquivar",
-        archiveWorktree: "Arquivar worktree",
+        archiveWorkspace: "Arquivar workspace",
         hideFromSidebar: "Ocultar da barra lateral",
         archiving: "Arquivando...",
         hiding: "Ocultando...",
@@ -885,7 +907,7 @@ export const ptBR: TranslationResources = {
         chatRepositoryUnset: "Chat repo unset",
         chatRepositoryFailed: "Failed to update chat repo",
         hideFailed: "Falha ao ocultar workspace",
-        archiveFailed: "Falha ao arquivar worktree",
+        archiveFailed: "Falha ao arquivar workspace",
       },
     },
   },
@@ -1083,6 +1105,12 @@ export const ptBR: TranslationResources = {
       },
     },
   },
+  rootError: {
+    kicker: "Algo deu errado",
+    title: "O Paseo encontrou um problema.",
+    body: "Tente novamente para recarregar o app. Se isso continuar acontecendo, inclua os detalhes abaixo ao relatar o problema.",
+    details: "Detalhes",
+  },
   startup: {
     errorTitle: "Algo deu errado",
     errorDescription:
@@ -1129,7 +1157,8 @@ export const ptBR: TranslationResources = {
     },
   },
   projectPicker: {
-    placeholder: "Digite um caminho de diretório...",
+    placeholder: "Digite para pesquisar...",
+    browse: "Procurar…",
     opening: "Abrindo projeto...",
     searching: "Buscando...",
     empty: "Comece digitando um caminho",
@@ -1457,6 +1486,7 @@ export const ptBR: TranslationResources = {
     },
     backToWorkspace: "Voltar",
     addHost: "Adicionar host",
+    enableBuiltInDaemon: "Ativar o daemon integrado",
     projects: "Projetos",
     projectList: {
       hostLoadFailed: "Não foi possível carregar projetos do host {{hostName}}: {{message}}",
@@ -1465,7 +1495,6 @@ export const ptBR: TranslationResources = {
     groupInfo: "Sobre {{title}}",
     sections: {
       general: "Geral",
-      daemon: "Daemon",
       appearance: "Aparência",
       shortcuts: "Atalhos",
       integrations: "Integrações",
@@ -1482,7 +1511,7 @@ export const ptBR: TranslationResources = {
       providers: "Provedores",
       usage: "Uso",
       terminals: "Terminais",
-      host: "Host",
+      host: "Visão geral",
     },
     general: {
       title: "Geral",
@@ -1511,6 +1540,11 @@ export const ptBR: TranslationResources = {
         label: "Scrollback do terminal",
         description: "Linhas mantidas no buffer do terminal integrado",
         accessibilityLabel: "Linhas do scrollback do terminal",
+      },
+      autoExpandReasoning: {
+        label: "Sempre expandir raciocínio",
+        description:
+          "Mostrar os blocos de pensamento e raciocínio do agente totalmente expandidos por padrão",
       },
       language: {
         label: "Idioma",
@@ -1593,6 +1627,9 @@ export const ptBR: TranslationResources = {
           auto: "Sistema",
         },
       },
+      detailLevel: {
+        title: "Nível de detalhe",
+      },
       fonts: {
         title: "Fontes",
         systemDefault: "Sistema padrão",
@@ -1638,7 +1675,7 @@ export const ptBR: TranslationResources = {
         openProject: "Abrir projeto",
         newWorkspace: "Novo workspace",
         newWorktree: "Novo worktree",
-        archiveWorktree: "Arquivar worktree",
+        archiveWorkspace: "Arquivar workspace",
         newTab: "Nova aba",
         closeCurrentTab: "Fechar aba atual",
         jumpToWorkspace: "Ir para workspace",

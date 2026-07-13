@@ -7,13 +7,10 @@ function portFromListen(listen) {
 
 function requestOk({ port, path }) {
   return new Promise((resolve) => {
-    const req = http.get(
-      { hostname: "127.0.0.1", port, path, timeout: 4000 },
-      (res) => {
-        res.resume();
-        resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400);
-      },
-    );
+    const req = http.get({ hostname: "127.0.0.1", port, path, timeout: 4000 }, (res) => {
+      res.resume();
+      resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400);
+    });
     req.on("timeout", () => {
       req.destroy();
       resolve(false);

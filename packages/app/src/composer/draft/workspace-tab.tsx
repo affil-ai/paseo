@@ -677,7 +677,7 @@ export function WorkspaceDraftAgentTab({
             <AgentStreamView
               agentId={tabId}
               serverId={serverId}
-              agent={draftAgent}
+              context={draftAgent}
               streamItems={optimisticStreamItems}
               pendingPermissions={EMPTY_PENDING_PERMISSIONS}
               onOpenWorkspaceFile={onOpenWorkspaceFile}

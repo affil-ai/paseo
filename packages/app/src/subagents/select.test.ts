@@ -2,12 +2,14 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   resolveWorkspacePrCwdForIdentity,
+  selectProviderSubagentsForParent,
   selectSubagentHoverCardDetailsForWorkspace,
   selectSubagentPrTabsForWorkspace,
   selectSubagentsForParent,
   selectSubagentsForWorkspace,
   selectWorkspaceOwnPrIdentity,
 } from "./select";
+import { useProviderSubagentStore } from "./provider-store";
 import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 
 const SERVER_ID = "server-1";
@@ -65,9 +67,37 @@ function setAgents(agents: Agent[]): void {
 
 afterEach(() => {
   useSessionStore.getState().clearSession(SERVER_ID);
+  useProviderSubagentStore.setState({ descriptors: new Map(), timelines: new Map() });
 });
 
 describe("selectSubagentsForParent", () => {
+  it("hides cached provider children when the host does not support them", () => {
+    useProviderSubagentStore.getState().applyUpdate(SERVER_ID, {
+      kind: "upsert",
+      subagent: {
+        id: "provider-child",
+        parentAgentId: "parent-a",
+        provider: "codex",
+        title: "Provider child",
+        description: null,
+        status: "completed",
+        createdAt: "2026-03-08T10:01:00.000Z",
+        updatedAt: "2026-03-08T10:02:00.000Z",
+        toolCallId: "call-1",
+      },
+    });
+    const params = { serverId: SERVER_ID, parentAgentId: "parent-a" };
+
+    expect(
+      selectProviderSubagentsForParent(useProviderSubagentStore.getState(), params, false),
+    ).toEqual([]);
+    expect(
+      selectProviderSubagentsForParent(useProviderSubagentStore.getState(), params, true).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["provider-child"]);
+  });
+
   it("returns only non-archived children for the requested parent", () => {
     setAgents([
       makeAgent({ id: "parent-a" }),
@@ -201,6 +231,7 @@ describe("selectSubagentsForParent", () => {
 
     expect(rows).toEqual([
       {
+        kind: "paseo",
         id: "child",
         provider: "claude",
         title: "Review child",
@@ -212,6 +243,7 @@ describe("selectSubagentsForParent", () => {
     expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
       "createdAt",
       "id",
+      "kind",
       "provider",
       "requiresAttention",
       "status",

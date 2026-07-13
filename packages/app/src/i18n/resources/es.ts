@@ -628,7 +628,7 @@ export const es: TranslationResources = {
           success: "Actualizado",
         },
         archive: {
-          label: "Árbol de trabajo de archivo",
+          label: "Archivar espacio de trabajo",
           pending: "Archivando...",
           success: "Archivado",
         },
@@ -682,8 +682,6 @@ export const es: TranslationResources = {
             "La actualización no está disponible mientras tenga cambios locales, así que confírmelos o guárdelos primero",
           updateCurrent:
             "La actualización no está disponible porque esta rama ya está actualizada con{{baseRef}}",
-          archiveNotWorktree:
-            "El archivo no está disponible aquí porque este espacio de trabajo no se creó como un árbol de trabajoPaseo",
           mergePrNoGithub:
             "FusionarPRno está disponible en este momento porqueGitHubno está conectado",
           mergePrMissing:
@@ -715,11 +713,9 @@ export const es: TranslationResources = {
           baseRefUnavailable: "Referencia base no disponible",
           failedMerge: "No se pudo fusionar",
           failedMergeFromBase: "No se pudo fusionar desde la base",
-          worktreePathUnavailable: "Ruta del árbol de trabajo no disponible",
-          failedArchive: "No se pudo archivar el árbol de trabajo",
         },
         archiveWarning: {
-          title: '¿Archivo "{{worktreeName}}"?',
+          title: '¿Archivo "{{workspaceName}}"?',
           confirm: "Archivo",
           cancel: "Cancelar",
           uncommittedChanges: "Cambios no confirmados",
@@ -737,11 +733,19 @@ export const es: TranslationResources = {
         tooLarge: "La diferencia es demasiado grande para mostrarse",
         unified: "Diferencia unificada",
         split: "Diferencia de lado a lado",
+        switchToUnified: "Cambiar a diferencia unificada",
+        switchToSplit: "Cambiar a diferencia lado a lado",
+        showTreeView: "Mostrar árbol de carpetas",
+        showFlatView: "Mostrar lista plana de archivos",
+        options: "Opciones de diferencia",
         hideWhitespace: "Ocultar espacios en blanco",
+        showWhitespace: "Mostrar espacios en blanco",
         scrollLongLines: "Desplazarse por largas filas",
         wrapLongLines: "Envolver largas filas",
         collapseAll: "Contraer todos los archivos",
         expandAll: "Expandir todos los archivos",
+        collapseAllFolders: "Contraer todas las carpetas",
+        expandAllFolders: "Expandir todas las carpetas",
         refreshing: "Refrescante",
         refresh: "Refrescar",
         refreshState: "Actualizar el estado de git yGitHub",
@@ -800,6 +804,9 @@ export const es: TranslationResources = {
     },
   },
   sidebar: {
+    pinned: {
+      title: "Anclados",
+    },
     host: {
       noHost: "Sin anfitrión",
       switchTitle: "Cambiar de anfitrión",
@@ -808,9 +815,24 @@ export const es: TranslationResources = {
     actions: {
       addProject: "Agregar proyecto",
       newWorkspace: "Nuevo espacio de trabajo",
+      hosts: "Hosts",
       home: "Hogar",
       settings: "Ajustes",
       closeSidebar: "Cerrar barra lateral",
+    },
+    help: {
+      trigger: "Ayuda y soporte",
+      troubleshoot: "Solucionar problemas",
+      diagnostics: "Ejecutar diagnóstico",
+      diagnosticsDescription: "Recopila datos de la app y los hosts conectados",
+      shortcuts: "Atajos de teclado",
+      shortcutsDescription: "Ver los atajos de teclado disponibles",
+      reportIssue: "Informar de un problema",
+      discord: "Discord",
+      discordDescription: "La mejor opción para ayuda rápida y conversación",
+      github: "Crear incidencia en GitHub",
+      githubDescription: "Informar de un error reproducible",
+      version: "Paseo {{version}}",
     },
     sections: {
       pinned: "Fijados",
@@ -865,10 +887,10 @@ export const es: TranslationResources = {
         rename: "Cambiar nombre del espacio de trabajo",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
-        pin: "Fijar",
-        unpin: "Desfijar",
+        pin: "Anclar arriba",
+        unpin: "Desanclar",
         archive: "Archivo",
-        archiveWorktree: "Árbol de trabajo de archivo",
+        archiveWorkspace: "Archivar espacio de trabajo",
         hideFromSidebar: "Ocultar de la barra lateral",
         archiving: "Archivando...",
         hiding: "Ocultación...",
@@ -894,7 +916,7 @@ export const es: TranslationResources = {
         chatRepositoryUnset: "Chat repo unset",
         chatRepositoryFailed: "Failed to update chat repo",
         hideFailed: "No se pudo ocultar el espacio de trabajo",
-        archiveFailed: "No se pudo archivar el árbol de trabajo",
+        archiveFailed: "No se pudo archivar el espacio de trabajo",
       },
     },
   },
@@ -1097,6 +1119,12 @@ export const es: TranslationResources = {
       },
     },
   },
+  rootError: {
+    kicker: "Algo salió mal",
+    title: "Paseo tuvo un problema.",
+    body: "Vuelve a intentarlo para recargar la app. Si sigue ocurriendo, incluye los detalles de abajo al reportarlo.",
+    details: "Detalles",
+  },
   startup: {
     errorTitle: "algo salió mal",
     errorDescription:
@@ -1143,7 +1171,8 @@ export const es: TranslationResources = {
     },
   },
   projectPicker: {
-    placeholder: "Escriba una ruta de directorio...",
+    placeholder: "Escriba para buscar...",
+    browse: "Explorar…",
     opening: "Proyecto de apertura...",
     searching: "Buscando...",
     empty: "Comience a escribir una ruta",
@@ -1471,6 +1500,7 @@ export const es: TranslationResources = {
     },
     backToWorkspace: "Atrás",
     addHost: "Agregar anfitrión",
+    enableBuiltInDaemon: "Activar el demonio integrado",
     projects: "Proyectos",
     projectList: {
       hostLoadFailed: "No se pudieron cargar proyectos desde el host{{hostName}}:{{message}}",
@@ -1479,7 +1509,6 @@ export const es: TranslationResources = {
     groupInfo: "Acerca de{{title}}",
     sections: {
       general: "General",
-      daemon: "Daemon",
       appearance: "Apariencia",
       shortcuts: "Atajos",
       integrations: "Integraciones",
@@ -1496,7 +1525,7 @@ export const es: TranslationResources = {
       providers: "Proveedores",
       usage: "Uso",
       terminals: "Terminals",
-      host: "Host",
+      host: "Resumen",
     },
     general: {
       title: "General",
@@ -1526,6 +1555,11 @@ export const es: TranslationResources = {
         label: "Historial de terminal",
         description: "Líneas mantenidas en el búfer de terminal incorporado",
         accessibilityLabel: "Líneas del historial de terminal",
+      },
+      autoExpandReasoning: {
+        label: "Siempre expandir razonamiento",
+        description:
+          "Mostrar los bloques de pensamiento y razonamiento del agente totalmente expandidos de forma predeterminada",
       },
       language: {
         label: "Idioma",
@@ -1608,6 +1642,9 @@ export const es: TranslationResources = {
           auto: "Sistema",
         },
       },
+      detailLevel: {
+        title: "Nivel de detalle",
+      },
       fonts: {
         title: "Fuentes",
         systemDefault: "Valor predeterminado del sistema",
@@ -1654,7 +1691,7 @@ export const es: TranslationResources = {
         openProject: "Abrir proyecto",
         newWorkspace: "Nuevo espacio de trabajo",
         newWorktree: "Nuevo árbol de trabajo",
-        archiveWorktree: "Árbol de trabajo de archivo",
+        archiveWorkspace: "Archivar espacio de trabajo",
         newTab: "Nueva pestaña",
         closeCurrentTab: "Cerrar pestaña actual",
         jumpToWorkspace: "Saltar al espacio de trabajo",

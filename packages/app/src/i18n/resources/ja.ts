@@ -626,7 +626,7 @@ export const ja: TranslationResources = {
           success: "更新しました",
         },
         archive: {
-          label: "ワークツリーをアーカイブ",
+          label: "ワークスペースをアーカイブ",
           pending: "アーカイブ中...",
           success: "アーカイブしました",
         },
@@ -673,8 +673,6 @@ export const ja: TranslationResources = {
           updateDirty:
             "ローカルに変更があるため更新は利用できません。先にコミットまたはスタッシュしてください",
           updateCurrent: "このブランチはすでに{{baseRef}}と最新の状態のため、更新は利用できません",
-          archiveNotWorktree:
-            "このワークスペースはPaseoワークツリーとして作成されていないため、アーカイブはここでは利用できません",
           mergePrNoGithub: "GitHubが接続されていないため、PRのマージは現在利用できません",
           mergePrMissing: "プルリクエストがまだないため、PRのマージは利用できません",
           mergePrDraft: "プルリクエストがまだドラフトのため、PRのマージは利用できません",
@@ -700,11 +698,9 @@ export const ja: TranslationResources = {
           baseRefUnavailable: "ベースRefが利用できません",
           failedMerge: "マージに失敗しました",
           failedMergeFromBase: "ベースからのマージに失敗しました",
-          worktreePathUnavailable: "ワークツリーパスが利用できません",
-          failedArchive: "ワークツリーのアーカイブに失敗しました",
         },
         archiveWarning: {
-          title: '"{{worktreeName}}"をアーカイブしますか？',
+          title: '"{{workspaceName}}"をアーカイブしますか？',
           confirm: "アーカイブ",
           cancel: "キャンセル",
           uncommittedChanges: "未コミットの変更",
@@ -722,11 +718,19 @@ export const ja: TranslationResources = {
         tooLarge: "差分が大きすぎて表示できません",
         unified: "ユニファイド差分",
         split: "左右比較",
+        switchToUnified: "ユニファイド差分に切り替え",
+        switchToSplit: "左右比較差分に切り替え",
+        showTreeView: "フォルダツリーを表示",
+        showFlatView: "フラットなファイル一覧を表示",
+        options: "差分オプション",
         hideWhitespace: "空白を非表示",
+        showWhitespace: "空白を表示",
         scrollLongLines: "長い行をスクロール",
         wrapLongLines: "長い行を折り返す",
         collapseAll: "すべて折りたたむ",
         expandAll: "すべて展開",
+        collapseAllFolders: "すべてのフォルダを折りたたむ",
+        expandAllFolders: "すべてのフォルダを展開",
         refreshing: "更新中",
         refresh: "更新",
         refreshState: "gitとGitHubの状態を更新",
@@ -785,6 +789,9 @@ export const ja: TranslationResources = {
     },
   },
   sidebar: {
+    pinned: {
+      title: "固定済み",
+    },
     host: {
       noHost: "ホストなし",
       switchTitle: "ホストを切り替え",
@@ -793,9 +800,24 @@ export const ja: TranslationResources = {
     actions: {
       addProject: "プロジェクトを追加",
       newWorkspace: "新しいワークスペース",
+      hosts: "ホスト",
       home: "ホーム",
       settings: "設定",
       closeSidebar: "サイドバーを閉じる",
+    },
+    help: {
+      trigger: "ヘルプとサポート",
+      troubleshoot: "トラブルシューティング",
+      diagnostics: "診断を実行",
+      diagnosticsDescription: "アプリと接続中のホストの詳細を収集",
+      shortcuts: "キーボードショートカット",
+      shortcutsDescription: "利用可能なキーボードショートカットを表示",
+      reportIssue: "問題を報告",
+      discord: "Discord",
+      discordDescription: "すばやいサポートや相談に最適",
+      github: "GitHub Issueを作成",
+      githubDescription: "再現可能なバグを報告",
+      version: "Paseo {{version}}",
     },
     sections: {
       pinned: "ピン留め",
@@ -850,10 +872,10 @@ export const ja: TranslationResources = {
         rename: "ワークスペースの名前を変更",
         setChatRepository: "Set as chat repo",
         unsetChatRepository: "Unset chat repo",
-        pin: "ピン留め",
-        unpin: "ピン留めを解除",
+        pin: "上部に固定",
+        unpin: "固定解除",
         archive: "アーカイブ",
-        archiveWorktree: "ワークツリーをアーカイブ",
+        archiveWorkspace: "ワークスペースをアーカイブ",
         hideFromSidebar: "サイドバーから非表示",
         archiving: "アーカイブ中...",
         hiding: "非表示にしています...",
@@ -879,7 +901,7 @@ export const ja: TranslationResources = {
         chatRepositoryUnset: "Chat repo unset",
         chatRepositoryFailed: "Failed to update chat repo",
         hideFailed: "ワークスペースの非表示に失敗しました",
-        archiveFailed: "ワークツリーのアーカイブに失敗しました",
+        archiveFailed: "ワークスペースのアーカイブに失敗しました",
       },
     },
   },
@@ -1075,6 +1097,12 @@ export const ja: TranslationResources = {
       },
     },
   },
+  rootError: {
+    kicker: "問題が発生しました",
+    title: "Paseo で問題が発生しました。",
+    body: "アプリを再読み込みするにはもう一度お試しください。繰り返し発生する場合は、以下の詳細を添えて報告してください。",
+    details: "詳細",
+  },
   startup: {
     errorTitle: "問題が発生しました",
     errorDescription:
@@ -1121,7 +1149,8 @@ export const ja: TranslationResources = {
     },
   },
   projectPicker: {
-    placeholder: "ディレクトリパスを入力...",
+    placeholder: "入力して検索...",
+    browse: "参照…",
     opening: "プロジェクトを開いています...",
     searching: "検索中...",
     empty: "パスを入力してください",
@@ -1449,6 +1478,7 @@ export const ja: TranslationResources = {
     },
     backToWorkspace: "戻る",
     addHost: "ホストを追加",
+    enableBuiltInDaemon: "組み込みデーモンを有効にする",
     projects: "プロジェクト",
     projectList: {
       hostLoadFailed: "ホスト{{hostName}}からプロジェクトを読み込めませんでした: {{message}}",
@@ -1457,7 +1487,6 @@ export const ja: TranslationResources = {
     groupInfo: "{{title}}について",
     sections: {
       general: "一般",
-      daemon: "デーモン",
       appearance: "外観",
       shortcuts: "ショートカット",
       integrations: "連携",
@@ -1474,7 +1503,7 @@ export const ja: TranslationResources = {
       providers: "プロバイダー",
       usage: "使用状況",
       terminals: "ターミナル",
-      host: "ホスト",
+      host: "概要",
     },
     general: {
       title: "一般",
@@ -1502,6 +1531,10 @@ export const ja: TranslationResources = {
         label: "ターミナルスクロールバック",
         description: "組み込みターミナルバッファに保持する行数",
         accessibilityLabel: "ターミナルスクロールバック行数",
+      },
+      autoExpandReasoning: {
+        label: "常に思考プロセスを展開",
+        description: "デフォルトでAIのエージェント思考・推論ブロックを完全に展開して表示します",
       },
       language: {
         label: "言語",
@@ -1584,6 +1617,9 @@ export const ja: TranslationResources = {
           auto: "システム",
         },
       },
+      detailLevel: {
+        title: "詳細レベル",
+      },
       fonts: {
         title: "フォント",
         systemDefault: "システムデフォルト",
@@ -1630,7 +1666,7 @@ export const ja: TranslationResources = {
         openProject: "プロジェクトを開く",
         newWorkspace: "新しいワークスペース",
         newWorktree: "新しいワークツリー",
-        archiveWorktree: "ワークツリーをアーカイブ",
+        archiveWorkspace: "ワークスペースをアーカイブ",
         newTab: "新しいタブ",
         closeCurrentTab: "現在のタブを閉じる",
         jumpToWorkspace: "ワークスペースにジャンプ",

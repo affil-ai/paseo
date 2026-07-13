@@ -126,7 +126,9 @@ import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import {
+  archiveByScope,
   archivePersistedWorkspaceRecord,
+  killTerminalsForWorkspace,
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
@@ -1059,14 +1061,75 @@ export async function createPaseoDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
+  const createScheduleLocalWorkspaceExternal = async (input: {
+    cwd: string;
+    firstAgentContext: FirstAgentContext;
+  }) => {
+    const workspace = await createLocalCheckoutWorkspace(
+      { cwd: input.cwd, title: resolveFirstAgentPromptTitle(input.firstAgentContext) },
+      { projectRegistry, workspaceRegistry, workspaceGitService },
+    );
+    workspaceAutoName.scheduleForDirectory({
+      workspaceId: workspace.workspaceId,
+      cwd: workspace.cwd,
+      firstAgentContext: input.firstAgentContext,
+    });
+    await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
+    return workspace;
+  };
+  const createSchedulePaseoWorktreeExternal = async (input: {
+    cwd: string;
+    firstAgentContext: FirstAgentContext;
+  }) => {
+    const result = await createPaseoWorktreeForTools({
+      cwd: input.cwd,
+      firstAgentContext: input.firstAgentContext,
+    });
+    await emitWorkspaceUpdatesExternal([result.workspace.workspaceId]);
+    return result;
+  };
+  const archiveScheduleWorkspaceExternal = async (workspaceId: string, repoRoot: string) => {
+    await archiveByScope(
+      {
+        paseoHome: config.paseoHome,
+        paseoWorktreesBaseRoot: config.worktreesRoot,
+        github,
+        workspaceGitService,
+        agentManager,
+        agentStorage,
+        findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        listActiveWorkspaces: listActiveWorkspacesExternal,
+        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
+        markWorkspaceArchiving: markWorkspaceArchivingExternal,
+        clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+        killTerminalsForWorkspace: (workspaceIdToKill) =>
+          killTerminalsForWorkspace(
+            {
+              terminalManager,
+              sessionLogger: logger,
+            },
+            workspaceIdToKill,
+          ),
+        sessionLogger: logger,
+      },
+      {
+        scope: { kind: "workspace", workspaceId },
+        repoRoot,
+        paseoWorktreesBaseRoot: config.worktreesRoot,
+        requestId: "schedule-run-finish",
+      },
+    );
+  };
   const scheduleService = new ScheduleService({
     paseoHome: config.paseoHome,
     logger,
     agentManager,
     agentStorage,
     createAgent,
-    ensureWorkspaceForCreate: ensureWorkspaceForCreateAndBroadcastExternal,
-    workspaceRegistry,
+    createLocalCheckoutWorkspace: createScheduleLocalWorkspaceExternal,
+    createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
+    archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
   agentManager.setAgentArchivedCallback(async (agentId) => {
@@ -1451,8 +1514,11 @@ export async function createPaseoDaemon(
 
   const stop = async () => {
     scriptHealthMonitor.stop();
+    // Freeze both ingress and registration before taking the agent closure snapshot.
+    wsServer?.prepareForShutdown();
+    agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
-    await agentManager.flush().catch(() => undefined);
+    await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();

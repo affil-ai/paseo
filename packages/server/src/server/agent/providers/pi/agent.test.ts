@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test } from "vitest";
 
 import type { AgentSession, AgentSessionConfig, AgentStreamEvent } from "../../agent-sdk-types.js";
 import { PiRpcAgentClient, PiRpcAgentSession, transformPiModels } from "./agent.js";
@@ -24,15 +24,19 @@ const EMPTY_GLOBAL_MCP_CONFIG_PATH = path.join(
 );
 const PASEO_PI_ACK_BEFORE_TOOLS_PROMPT =
   "For each new user request, if tool use is needed, emit a concise user-visible acknowledgement before your first tool call. Do not acknowledge before later tool calls in the same request.";
+const ONE_BY_ONE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function createClient(
   pi = new FakePi(),
-  options: { globalMcpConfigPath?: string } = {},
+  options: { globalMcpConfigPath?: string; useRuntimeGlobalMcpConfig?: boolean } = {},
 ): PiRpcAgentClient {
   return new PiRpcAgentClient({
     logger: pino({ level: "silent" }),
     runtime: pi,
-    globalMcpConfigPath: options.globalMcpConfigPath ?? EMPTY_GLOBAL_MCP_CONFIG_PATH,
+    ...(options.useRuntimeGlobalMcpConfig
+      ? {}
+      : { globalMcpConfigPath: options.globalMcpConfigPath ?? EMPTY_GLOBAL_MCP_CONFIG_PATH }),
   });
 }
 
@@ -86,6 +90,29 @@ test("forwards launch-context env to the Pi process launch", async () => {
   expect(pi.recordedLaunches[0]?.env).toEqual({
     CHUNK14_PROBE: "expected",
   });
+
+  await session.close();
+});
+
+test("starts internal Pi agents without persisting a native session", async () => {
+  const pi = new FakePi();
+  const client = createClient(pi);
+  const session = await client.createSession(createConfig({ internal: true }));
+
+  expect(pi.recordedLaunches[0]).toMatchObject({
+    noSession: true,
+    argv: expect.arrayContaining(["--no-session"]),
+  });
+
+  await session.close();
+});
+
+test("keeps normal Pi agent sessions persisted", async () => {
+  const pi = new FakePi();
+  const client = createClient(pi);
+  const session = await client.createSession(createConfig());
+
+  expect(pi.recordedLaunches[0]?.argv).not.toContain("--no-session");
 
   await session.close();
 });
@@ -487,9 +514,18 @@ describe("PiRpcAgentSession", () => {
 
     await session.startTurn("hello");
     fakeSession.emit({
+      type: "message_start",
+      message: { role: "assistant", content: [], responseId: "response-1" },
+    });
+    fakeSession.emit({
       type: "message_update",
-      message: { role: "assistant", content: [] },
-      assistantMessageEvent: { type: "text_delta", delta: "hello" },
+      message: { role: "assistant", content: [], responseId: "response-1" },
+      assistantMessageEvent: { type: "text_delta", delta: "hel" },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [], responseId: "response-1" },
+      assistantMessageEvent: { type: "text_delta", delta: "lo" },
     });
     fakeSession.emit({
       type: "message_update",
@@ -514,7 +550,8 @@ describe("PiRpcAgentSession", () => {
     await events.nextTurnCompletion();
 
     expect(events.timelineItems()).toEqual([
-      { type: "assistant_message", text: "hello" },
+      { type: "assistant_message", text: "hel", messageId: "response-1" },
+      { type: "assistant_message", text: "lo", messageId: "response-1" },
       { type: "reasoning", text: "thinking" },
       {
         type: "tool_call",
@@ -573,9 +610,71 @@ describe("PiRpcAgentSession", () => {
 
     await events.nextTurnCompletion();
 
+    const [firstChunk, secondChunk] = events.timelineItems();
+    expect(firstChunk).toMatchObject({
+      type: "assistant_message",
+      text: "This is good.",
+      messageId: expect.any(String),
+    });
+    const firstMessageId = (firstChunk as { messageId: string }).messageId;
+    expect(secondChunk).toEqual({
+      type: "assistant_message",
+      text: "\n\nDone.\n\n- Final summary",
+      messageId: firstMessageId,
+    });
+  });
+
+  test("keeps one generated message id when Pi omits message start and response id", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn("hello");
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_delta", delta: "hel" },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "text_delta", delta: "lo" },
+    });
+
+    const [firstChunk, secondChunk] = events.timelineItems();
+    expect(firstChunk).toMatchObject({
+      type: "assistant_message",
+      text: "hel",
+      messageId: expect.any(String),
+    });
+    const firstMessageId = (firstChunk as { messageId: string }).messageId;
+    expect(secondChunk).toEqual({
+      type: "assistant_message",
+      text: "lo",
+      messageId: firstMessageId,
+    });
+  });
+
+  test("uses a response id that first appears on the assistant update", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn("hello");
+    fakeSession.emit({
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    });
+    fakeSession.emit({
+      type: "message_update",
+      message: { role: "assistant", content: [], responseId: "late-response-id" },
+      assistantMessageEvent: { type: "text_delta", delta: "hello" },
+    });
+
     expect(events.timelineItems()).toEqual([
-      { type: "assistant_message", text: "This is good." },
-      { type: "assistant_message", text: "\n\nDone.\n\n- Final summary" },
+      {
+        type: "assistant_message",
+        text: "hello",
+        messageId: "late-response-id",
+      },
     ]);
   });
 
@@ -644,13 +743,47 @@ describe("PiRpcAgentSession", () => {
       reason: "Request was aborted",
     });
     expect(events.allEvents().some((event) => event.type === "turn_failed")).toBe(false);
-    expect(events.timelineItems()).toEqual([{ type: "assistant_message", text: "Partial draft" }]);
+    expect(events.timelineItems()).toEqual([
+      { type: "assistant_message", text: "Partial draft", messageId: expect.any(String) },
+    ]);
 
     await session.startTurn("continue");
     expect(fakeSession.prompts.map((prompt) => prompt.message)).toEqual([
       "write a long response",
       "continue",
     ]);
+  });
+
+  test("canceling a silent Pi extension command leaves the session usable", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    fakeSession.holdNextPrompt();
+    const firstTurn = await session.startTurn("/silent-search");
+    fakeSession.emit({
+      type: "extension_ui_request",
+      id: "notify-1",
+      method: "notify",
+      message: "Search finished",
+    });
+    await session.interrupt();
+    const cancellation = await events.nextTurnCancellation();
+    await session.startTurn("next request");
+    await fakeSession.failHeldPrompt(new Error("Canceled prompt timed out"));
+
+    expect(cancellation).toEqual({
+      type: "turn_canceled",
+      provider: "pi",
+      reason: "interrupted",
+      turnId: firstTurn.turnId,
+    });
+    expect(fakeSession.prompts).toEqual([
+      { message: "/silent-search", imageCount: 0 },
+      { message: "next request", imageCount: 0 },
+    ]);
+    await expect(session.startTurn("overlapping request")).rejects.toThrow(
+      "A Pi turn is already active",
+    );
   });
 
   test("adds Pi assistant context to generic provider finish errors", async () => {
@@ -695,12 +828,14 @@ describe("PiRpcAgentSession", () => {
         },
       },
       {},
+      { env: { RESUME_PROBE: "expected" } },
     );
 
     expect(pi.recordedLaunches).toHaveLength(1);
     const actualLaunch = pi.recordedLaunches[0]!;
     expect(actualLaunch).toMatchObject({
       cwd: "/workspace/project",
+      env: { RESUME_PROBE: "expected" },
       session: "/tmp/native-pi-session",
       systemPrompt: PASEO_PI_ACK_BEFORE_TOOLS_PROMPT,
     });
@@ -826,6 +961,91 @@ describe("PiRpcAgentSession", () => {
     });
 
     await session.close();
+  });
+
+  test("materializes image prompts as text hints for text-only Pi models", async () => {
+    const { pi, session } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.setModelResult = {
+      provider: "openrouter",
+      id: "openai/gpt-oss-20b:free",
+      name: "OpenAI: gpt-oss-20b (free)",
+      input: ["text"],
+    };
+
+    await session.setModel("openrouter/openai/gpt-oss-20b:free");
+    await session.startTurn([
+      { type: "text", text: "Describe this image." },
+      { type: "image", data: ONE_BY_ONE_PNG_BASE64, mimeType: "image/png" },
+    ]);
+
+    let imagePath: string | undefined;
+    try {
+      expect(fakeSession.prompts).toHaveLength(1);
+      const prompt = fakeSession.prompts[0]!;
+      expect(prompt.imageCount).toBe(0);
+      expect(prompt.message).toContain("Describe this image.");
+      expect(prompt.message).not.toContain(ONE_BY_ONE_PNG_BASE64);
+      imagePath = prompt.message.match(/\[Image available at: (.+)\]/)?.[1];
+      expect(imagePath).toBeTypeOf("string");
+      expect(imagePath).toMatch(
+        /paseo-attachments(?:-[^\\/]+)?[\\/](?:[^\\/]+[\\/])?[0-9a-f]{64}\.png$/,
+      );
+      expect(existsSync(imagePath!)).toBe(true);
+    } finally {
+      if (imagePath) {
+        rmSync(imagePath, { force: true });
+      }
+    }
+  });
+
+  test("materializes image prompts when Pi model capabilities are unknown", async () => {
+    const { pi, session } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    await session.startTurn([
+      { type: "text", text: "Describe this image." },
+      { type: "image", data: ONE_BY_ONE_PNG_BASE64, mimeType: "image/png" },
+    ]);
+
+    let imagePath: string | undefined;
+    try {
+      expect(fakeSession.prompts).toHaveLength(1);
+      const prompt = fakeSession.prompts[0]!;
+      expect(prompt.imageCount).toBe(0);
+      expect(prompt.message).toContain("Describe this image.");
+      imagePath = prompt.message.match(/\[Image available at: (.+)\]/)?.[1];
+      expect(imagePath).toBeTypeOf("string");
+      expect(existsSync(imagePath!)).toBe(true);
+    } finally {
+      if (imagePath) {
+        rmSync(imagePath, { force: true });
+      }
+    }
+  });
+
+  test("forwards raw image prompts for vision-capable Pi models", async () => {
+    const { pi, session } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.setModelResult = {
+      provider: "openai",
+      id: "gpt-4o",
+      name: "GPT-4o",
+      input: ["text", "image"],
+    };
+
+    await session.setModel("openai/gpt-4o");
+    await session.startTurn([
+      { type: "text", text: "Describe this image." },
+      { type: "image", data: ONE_BY_ONE_PNG_BASE64, mimeType: "image/png" },
+    ]);
+
+    expect(fakeSession.prompts).toEqual([
+      {
+        message: "Describe this image.",
+        imageCount: 1,
+      },
+    ]);
   });
 
   test("fails the active turn when the Pi process exits mid-turn", async () => {
@@ -1304,7 +1524,21 @@ describe("PiRpcAgentClient", () => {
     expect(pi.latestSession().treeNavigationRequests).toEqual(["entry-1"]);
   });
 
-  test("injects MCP servers through pi-mcp-adapter when the extension is loaded", async () => {
+  test("injects MCP servers without replacing the Pi global MCP config", async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), "paseo-pi-agent-"));
+    onTestFinished(() => rmSync(agentDir, { recursive: true, force: true }));
+    writeFileSync(
+      path.join(agentDir, "mcp.json"),
+      JSON.stringify({
+        settings: { toolPrefix: "none", disableProxyTool: true },
+        "mcp-servers": {
+          "brave-search": {
+            url: "https://example.com/mcp/brave",
+            directTools: ["brave_llm_context"],
+          },
+        },
+      }),
+    );
     const pi = new FakePi();
     pi.queueCommands([
       {
@@ -1314,7 +1548,7 @@ describe("PiRpcAgentClient", () => {
         sourceInfo: { source: "npm:pi-mcp-adapter" },
       },
     ]);
-    const client = createClient(pi);
+    const client = createClient(pi, { useRuntimeGlobalMcpConfig: true });
 
     const session = await client.createSession(
       createConfig({
@@ -1331,6 +1565,7 @@ describe("PiRpcAgentClient", () => {
           },
         },
       }),
+      { env: { PI_CODING_AGENT_DIR: agentDir } },
     );
 
     expect(pi.recordedLaunches).toHaveLength(2);
@@ -1361,7 +1596,12 @@ describe("PiRpcAgentClient", () => {
       mcpServers: Record<string, unknown>;
     };
     expect(injectedConfig).toEqual({
+      settings: { toolPrefix: "none", disableProxyTool: true },
       mcpServers: {
+        "brave-search": {
+          url: "https://example.com/mcp/brave",
+          directTools: ["brave_llm_context"],
+        },
         paseo: {
           url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
           auth: false,
@@ -1458,6 +1698,27 @@ describe("PiRpcAgentClient", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("reports the path of a malformed Pi global MCP config", async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), "paseo-pi-agent-"));
+    onTestFinished(() => rmSync(agentDir, { recursive: true, force: true }));
+    const configPath = path.join(agentDir, "mcp.json");
+    writeFileSync(configPath, "{ invalid");
+    const pi = new FakePi();
+    pi.queueCommands([{ name: "mcp", source: "extension" }]);
+    const client = createClient(pi, { useRuntimeGlobalMcpConfig: true });
+
+    await expect(
+      client.createSession(
+        createConfig({
+          mcpServers: {
+            paseo: { type: "http", url: "http://127.0.0.1:6767/mcp/agents" },
+          },
+        }),
+        { env: { PI_CODING_AGENT_DIR: agentDir } },
+      ),
+    ).rejects.toThrow(`Failed to parse Pi MCP config: ${configPath}`);
   });
 
   test("does not pass MCP config when pi-mcp-adapter is not loaded", async () => {

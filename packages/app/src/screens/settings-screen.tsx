@@ -37,7 +37,6 @@ import {
   Plug,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
-import { AppDiagnosticSheet } from "@/components/app-diagnostic-sheet";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
@@ -74,11 +73,11 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
-import { LocalDaemonSection } from "@/desktop/components/desktop-updates-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
 import { resolveAppVersion } from "@/utils/app-version";
+import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
 import { useVoiceAudioEngineOptional } from "@/contexts/voice-context";
@@ -104,6 +103,10 @@ import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
+import {
+  type EnableBuiltInDaemonOption,
+  useEnableBuiltInDaemonOption,
+} from "@/desktop/hooks/use-enable-built-in-daemon-option";
 import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
 import {
   buildOpenProjectRoute,
@@ -135,7 +138,6 @@ interface SidebarSectionItem {
 
 const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   { id: "general", labelKey: "settings.sections.general", icon: Settings },
-  { id: "daemon", labelKey: "settings.sections.daemon", icon: Server, desktopOnly: true },
   { id: "appearance", labelKey: "settings.sections.appearance", icon: Palette },
   { id: "shortcuts", labelKey: "settings.sections.shortcuts", icon: Keyboard, desktopOnly: true },
   {
@@ -161,6 +163,7 @@ interface HostSectionItem {
 }
 
 const HOST_SECTION_ITEMS: HostSectionItem[] = [
+  { id: "host", labelKey: "settings.hostSections.host", icon: Server },
   { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
   { id: "chat", labelKey: "settings.hostSections.chat", icon: MessageSquare },
@@ -169,7 +172,6 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
-  { id: "host", labelKey: "settings.hostSections.host", icon: Server },
 ];
 
 function renderHostSettingsContent(
@@ -453,8 +455,6 @@ interface DiagnosticsSectionProps {
   isPlaybackTestRunning: boolean;
   playbackTestResult: string | null;
   handlePlaybackTest: () => Promise<void>;
-  appVersion: string | null;
-  isDesktopApp: boolean;
 }
 
 function DiagnosticsSection({
@@ -462,16 +462,12 @@ function DiagnosticsSection({
   isPlaybackTestRunning,
   playbackTestResult,
   handlePlaybackTest,
-  appVersion,
-  isDesktopApp,
 }: DiagnosticsSectionProps) {
   const { t } = useTranslation();
-  const [diagnosticSheetOpen, setDiagnosticSheetOpen] = useState(false);
+  const openAppDiagnostic = useAppDiagnosticStore((state) => state.open);
   const handlePlayPress = useCallback(() => {
     void handlePlaybackTest();
   }, [handlePlaybackTest]);
-  const handleOpenDiagnostic = useCallback(() => setDiagnosticSheetOpen(true), []);
-  const handleCloseDiagnostic = useCallback(() => setDiagnosticSheetOpen(false), []);
   return (
     <SettingsSection title={t("settings.diagnostics.title")}>
       <View style={settingsStyles.card}>
@@ -480,7 +476,7 @@ function DiagnosticsSection({
             <Text style={settingsStyles.rowTitle}>{t("settings.diagnostics.app.rowTitle")}</Text>
             <Text style={settingsStyles.rowHint}>{t("settings.diagnostics.app.rowHint")}</Text>
           </View>
-          <Button variant="secondary" size="sm" onPress={handleOpenDiagnostic}>
+          <Button variant="secondary" size="sm" onPress={openAppDiagnostic}>
             {t("settings.diagnostics.app.run")}
           </Button>
         </View>
@@ -503,12 +499,6 @@ function DiagnosticsSection({
           </Button>
         </View>
       </View>
-      <AppDiagnosticSheet
-        visible={diagnosticSheetOpen}
-        onClose={handleCloseDiagnostic}
-        appVersion={appVersion}
-        isDesktopApp={isDesktopApp}
-      />
     </SettingsSection>
   );
 }
@@ -903,6 +893,7 @@ interface HostPickerProps {
   sortedHosts: HostProfile[];
   onSelectHost: (serverId: string) => void;
   onAddHost: () => void;
+  enableBuiltInDaemonOption: EnableBuiltInDaemonOption;
 }
 
 /**
@@ -912,7 +903,13 @@ interface HostPickerProps {
  * is using right now; an "Add host" row is always reachable from the list —
  * even with a single host.
  */
-function HostPicker({ activeServerId, sortedHosts, onSelectHost, onAddHost }: HostPickerProps) {
+function HostPicker({
+  activeServerId,
+  sortedHosts,
+  onSelectHost,
+  onAddHost,
+  enableBuiltInDaemonOption,
+}: HostPickerProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<View | null>(null);
@@ -942,6 +939,8 @@ function HostPicker({ activeServerId, sortedHosts, onSelectHost, onAddHost }: Ho
       anchorRef={triggerRef}
       includeAddHost
       onAddHost={onAddHost}
+      includeEnableBuiltInDaemon={enableBuiltInDaemonOption.visible}
+      onEnableBuiltInDaemon={enableBuiltInDaemonOption.onPress}
       showActiveConnection
       searchable={false}
       title={t("settings.hostPicker.switchHost")}
@@ -1000,6 +999,7 @@ function SettingsSidebar({
   const localServerId = useLocalDaemonServerId();
   const sortedHosts = useSortedHosts(hosts, localServerId);
   const hasHosts = sortedHosts.length > 0;
+  const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
   const isDesktopApp = isElectronRuntime();
   const items = SIDEBAR_SECTION_ITEMS.filter((item) => !item.desktopOnly || isDesktopApp);
   const insets = useSafeAreaInsets();
@@ -1046,6 +1046,7 @@ function SettingsSidebar({
             sortedHosts={sortedHosts}
             onSelectHost={onSelectHost}
             onAddHost={onAddHost}
+            enableBuiltInDaemonOption={enableBuiltInDaemonOption}
           />
           {HOST_SECTION_ITEMS.map((item) => (
             <SidebarHostSectionButton
@@ -1072,6 +1073,20 @@ function SettingsSidebar({
               {t("settings.addHost")}
             </Text>
           </Pressable>
+          {enableBuiltInDaemonOption.visible ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("settings.enableBuiltInDaemon")}
+              onPress={enableBuiltInDaemonOption.onPress}
+              testID="settings-enable-built-in-daemon"
+              style={sidebarItemStyle}
+            >
+              <Server size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+              <Text style={sidebarStyles.label} numberOfLines={1}>
+                {t("settings.enableBuiltInDaemon")}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       )}
     </>
@@ -1397,8 +1412,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
             />
           );
-        case "daemon":
-          return <LocalDaemonSection />;
         case "appearance":
           return <AppearanceSection />;
         case "shortcuts":
@@ -1414,8 +1427,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               isPlaybackTestRunning={isPlaybackTestRunning}
               playbackTestResult={playbackTestResult}
               handlePlaybackTest={handlePlaybackTest}
-              appVersion={appVersion}
-              isDesktopApp={isDesktopApp}
             />
           );
         case "about":

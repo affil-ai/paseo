@@ -51,6 +51,7 @@ export async function* streamPiHistory(
 ): AsyncGenerator<AgentStreamEvent> {
   const pendingToolCalls = new Map<string, PiTrackedToolCall>();
   let userIndex = 0;
+  let assistantIndex = 0;
 
   for (const message of messages) {
     if (message.role === "user") {
@@ -72,6 +73,8 @@ export async function* streamPiHistory(
     }
 
     if (message.role === "assistant") {
+      assistantIndex += 1;
+      const messageId = message.responseId || `${provider}-history-assistant-${assistantIndex}`;
       let previousTextBlock = "";
       for (const content of message.content) {
         if (content.type === "text" && content.text) {
@@ -82,7 +85,7 @@ export async function* streamPiHistory(
           yield {
             type: "timeline",
             provider,
-            item: { type: "assistant_message", text },
+            item: { type: "assistant_message", text, messageId },
           };
           continue;
         }

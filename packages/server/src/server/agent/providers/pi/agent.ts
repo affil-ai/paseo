@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -57,6 +57,7 @@ import {
   streamPiHistory,
   type PiCapturedUserMessageEntry,
 } from "./history-mapper.js";
+import { materializeProviderImage } from "../provider-image-output.js";
 import { PiCliRuntime } from "./cli-runtime.js";
 import { revertPiConversation } from "./rewind.js";
 import { listPiImportableSessions, readPiImportSessionConfig } from "./session-descriptor.js";
@@ -95,17 +96,8 @@ const QUESTION_RESPONSE_HEADER = "Response";
 const QUESTION_COMMENT_HEADER = "Comment";
 const PI_ASK_USER_FREEFORM_SENTINEL = "✏️ Type custom response...";
 const COMBINED_ASK_USER_METADATA = "ask_user_select_optional_comment";
-const PI_GLOBAL_MCP_CONFIG_PATH = join(homedir(), ".pi", "agent", "mcp.json");
 const PASEO_PI_ACK_BEFORE_TOOLS_PROMPT =
   "For each new user request, if tool use is needed, emit a concise user-visible acknowledgement before your first tool call. Do not acknowledge before later tool calls in the same request.";
-
-const PiGlobalMcpConfigSchema = z
-  .object({
-    mcpServers: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
-    settings: z.record(z.string(), z.unknown()).optional(),
-    imports: z.array(z.string()).optional(),
-  })
-  .passthrough();
 
 export const PiProviderParamsSchema = z
   .object({
@@ -219,12 +211,6 @@ interface PiResumeConfig {
 }
 
 type PiMcpServerConfig = Record<string, unknown>;
-
-interface PiMcpConfig {
-  mcpServers: Record<string, PiMcpServerConfig>;
-  settings?: Record<string, unknown>;
-  imports?: string[];
-}
 
 interface PiMcpConfigFile {
   path: string;
@@ -382,7 +368,26 @@ function toAgentUsage(stats: PiSessionStats): AgentUsage | undefined {
   };
 }
 
-function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
+function piModelSupportsImageInput(model: PiModel | null | undefined): boolean {
+  return model?.input?.includes("image") === true;
+}
+
+function renderTextOnlyImageHint(image: { data: string; mimeType: string }): string {
+  try {
+    const materialized = materializeProviderImage({
+      data: image.data,
+      mimeType: image.mimeType,
+    });
+    return `[Image available at: ${materialized.path}]`;
+  } catch (error) {
+    return `[Image attachment omitted: failed to write local file (${toDiagnosticErrorMessage(error)})]`;
+  }
+}
+
+function convertPromptInput(
+  prompt: AgentPromptInput,
+  options: { model: PiModel | null | undefined },
+): PiPromptPayload {
   if (typeof prompt === "string") {
     return { text: prompt };
   }
@@ -391,6 +396,7 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
   const images: PiImageContent[] = [];
   const timelineImages: Array<{ data: string; mimeType: string }> = [];
   const timelineAttachments: AgentAttachment[] = [];
+  const forwardImages = piModelSupportsImageInput(options.model);
 
   for (const block of prompt) {
     if (block.type === "text") {
@@ -399,12 +405,16 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
     }
 
     if (block.type === "image") {
-      images.push({
-        type: "image",
-        data: block.data,
-        mimeType: block.mimeType,
-      });
       timelineImages.push({ data: block.data, mimeType: block.mimeType });
+      if (forwardImages) {
+        images.push({
+          type: "image",
+          data: block.data,
+          mimeType: block.mimeType,
+        });
+      } else {
+        textParts.push(renderTextOnlyImageHint(block));
+      }
       continue;
     }
 
@@ -417,6 +427,8 @@ function convertPromptInput(prompt: AgentPromptInput): PiPromptPayload {
   };
   if (images.length > 0) {
     payload.images = images;
+  }
+  if (timelineImages.length > 0) {
     payload.timelineImages = timelineImages;
   }
   if (timelineAttachments.length > 0) {
@@ -513,44 +525,64 @@ function toPiMcpConfig(config: McpServerConfig): PiMcpServerConfig {
   };
 }
 
-function getPiGlobalMcpConfigPath(): string {
-  return PI_GLOBAL_MCP_CONFIG_PATH;
-}
-
-function readPiGlobalMcpConfig(configPath: string): PiMcpConfig {
-  if (!existsSync(configPath)) {
-    return { mcpServers: {} };
+function resolvePiAgentDir(env: Record<string, string> | undefined): string {
+  // Match pi-mcp-adapter's agent-directory resolution so we preserve the config it replaces.
+  const configured = env?.PI_CODING_AGENT_DIR?.trim() || process.env.PI_CODING_AGENT_DIR?.trim();
+  if (!configured) {
+    return join(homedir(), ".pi", "agent");
   }
-
-  try {
-    const parsed = PiGlobalMcpConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8")));
-    return {
-      mcpServers: parsed.mcpServers ?? {},
-      ...(parsed.settings ? { settings: parsed.settings } : {}),
-      ...(parsed.imports ? { imports: parsed.imports } : {}),
-    };
-  } catch {
-    return { mcpServers: {} };
+  if (configured === "~") {
+    return homedir();
   }
+  if (configured.startsWith("~/")) {
+    return resolvePath(homedir(), configured.slice(2));
+  }
+  return resolvePath(configured);
 }
 
 function createPiMcpConfigFile(
   servers: Record<string, McpServerConfig>,
-  globalMcpConfigPath = getPiGlobalMcpConfigPath(),
+  env: Record<string, string> | undefined,
+  globalMcpConfigPath?: string,
 ): PiMcpConfigFile {
-  const dir = mkdtempSync(join(tmpdir(), "paseo-pi-mcp-"));
-  const filePath = join(dir, "mcp.json");
-  const globalConfig = readPiGlobalMcpConfig(globalMcpConfigPath);
-  const mcpServers: Record<string, PiMcpServerConfig> = { ...globalConfig.mcpServers };
+  // pi-mcp-adapter treats --mcp-config as a replacement for its Pi global layer, not an
+  // additional layer. Rebuild that layer here; the adapter still loads shared and project files.
+  const globalConfigPath = globalMcpConfigPath ?? join(resolvePiAgentDir(env), "mcp.json");
+  let globalConfig: unknown = {};
+  if (existsSync(globalConfigPath)) {
+    const contents = readFileSync(globalConfigPath, "utf8");
+    try {
+      globalConfig = JSON.parse(contents) as unknown;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(`Failed to parse Pi MCP config: ${globalConfigPath}`, { cause: error });
+      }
+      throw error;
+    }
+  }
+  if (!isRecord(globalConfig)) {
+    throw new Error(`Pi MCP config must contain a JSON object: ${globalConfigPath}`);
+  }
+  let configuredServers: Record<string, unknown> = {};
+  if (isRecord(globalConfig.mcpServers)) {
+    configuredServers = globalConfig.mcpServers;
+  } else if (isRecord(globalConfig["mcp-servers"])) {
+    configuredServers = globalConfig["mcp-servers"];
+  }
+  const mcpServers: Record<string, unknown> = { ...configuredServers };
   for (const [name, serverConfig] of Object.entries(servers)) {
     mcpServers[name] = toPiMcpConfig(serverConfig);
   }
-  const config: PiMcpConfig = {
-    ...(globalConfig.settings ? { settings: globalConfig.settings } : {}),
-    ...(globalConfig.imports ? { imports: globalConfig.imports } : {}),
-    mcpServers,
-  };
-  writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
+  const dir = mkdtempSync(join(tmpdir(), "paseo-pi-mcp-"));
+  const filePath = join(dir, "mcp.json");
+  const mergedConfig: Record<string, unknown> = { ...globalConfig, mcpServers };
+  // Emit one canonical server key so a stale alias cannot shadow the injected definitions.
+  delete mergedConfig["mcp-servers"];
+  writeFileSync(filePath, `${JSON.stringify(mergedConfig, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   return {
     path: filePath,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
@@ -1118,6 +1150,7 @@ export class PiRpcAgentSession implements AgentSession {
   private activeTurnId: string | null = null;
   private activePromptPayload: PiPromptPayload | null = null;
   private readonly locallyCanceledTurnIds = new Set<string>();
+  private activeAssistantMessageId: string | null = null;
   private lastKnownThinkingOptionId: string | null;
   currentLeafOverrideId: string | null | undefined;
   private readonly capturedUserEntries: PiCapturedEntry[] = [];
@@ -1177,10 +1210,11 @@ export class PiRpcAgentSession implements AgentSession {
       throw new Error("A Pi turn is already active");
     }
 
-    const payload = convertPromptInput(prompt);
+    const payload = convertPromptInput(prompt, { model: this.state.model });
     const turnId = randomUUID();
     this.activeTurnId = turnId;
     this.activePromptPayload = payload;
+    this.activeAssistantMessageId = null;
 
     void this.runtimeSession.prompt(payload.text, payload.images).catch((error) => {
       if (this.activeTurnId === turnId) {
@@ -1749,6 +1783,7 @@ export class PiRpcAgentSession implements AgentSession {
   private handleMessageStart(event: Extract<PiAgentSessionEvent, { type: "message_start" }>): void {
     if (event.message.role === "assistant") {
       this.resetCurrentAssistantTextBlockState();
+      this.activeAssistantMessageId = event.message.responseId || null;
     }
   }
 
@@ -1929,6 +1964,8 @@ export class PiRpcAgentSession implements AgentSession {
         this.currentAssistantMessageHasText = true;
         this.currentAssistantTextEndedWithWhitespace = /\s$/.test(rawText);
       }
+      // Pi-compatible runtimes may emit updates without a preceding message_start.
+      this.activeAssistantMessageId ??= event.message.responseId || randomUUID();
       this.emit({
         type: "timeline",
         provider: PI_PROVIDER,
@@ -1936,6 +1973,7 @@ export class PiRpcAgentSession implements AgentSession {
         item: {
           type: "assistant_message",
           text,
+          messageId: this.activeAssistantMessageId,
         },
       });
       return;
@@ -1957,6 +1995,11 @@ export class PiRpcAgentSession implements AgentSession {
     event: Extract<PiAgentSessionEvent, { type: "message_end" }>,
     turnId: string | undefined,
   ): void {
+    if (event.message.role === "assistant") {
+      this.activeAssistantMessageId = null;
+      this.resetCurrentAssistantTextBlockState();
+      return;
+    }
     if (event.message.role === "custom") {
       const text = getUserMessageText(event.message.content);
       if (text) {
@@ -1970,12 +2013,6 @@ export class PiRpcAgentSession implements AgentSession {
       this.completeTurn(turnId, []);
       return;
     }
-
-    if (event.message.role === "assistant") {
-      this.resetCurrentAssistantTextBlockState();
-      return;
-    }
-
     if (event.message.role !== "user") {
       return;
     }
@@ -2037,6 +2074,7 @@ export class PiRpcAgentSession implements AgentSession {
       return;
     }
     this.activeTurnId = null;
+    this.activeAssistantMessageId = null;
     const terminalResult = latestPiTurnTerminalResult(messages);
     if (terminalResult?.type === "canceled") {
       emitPiTurnCanceled((event) => this.emit(event), turnId, terminalResult.reason);
@@ -2083,7 +2121,7 @@ export class PiRpcAgentClient implements AgentClient {
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly providerParams: PiProviderParams;
   private readonly runtime: PiRuntime;
-  private readonly globalMcpConfigPath: string;
+  private readonly globalMcpConfigPath?: string;
 
   constructor(options: PiRpcAgentClientOptions) {
     this.logger = options.logger;
@@ -2092,14 +2130,17 @@ export class PiRpcAgentClient implements AgentClient {
     this.runtime =
       options.runtime ??
       createRuntime(options.logger, options.runtimeSettings, options.commandsRpcType);
-    this.globalMcpConfigPath = options.globalMcpConfigPath ?? getPiGlobalMcpConfigPath();
+    this.globalMcpConfigPath = options.globalMcpConfigPath;
   }
 
   async createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
-    const mcpConfig = await this.prepareMcpConfig(config.cwd, config.mcpServers);
+    const mcpConfig = await this.prepareMcpConfig(config.cwd, config.mcpServers, {
+      ...this.runtimeSettings?.env,
+      ...launchContext?.env,
+    });
     const paseoExtension = createPiPaseoExtensionFile();
     let runtimeSession: PiRuntimeSession;
     try {
@@ -2108,6 +2149,7 @@ export class PiRpcAgentClient implements AgentClient {
         model: config.model,
         thinkingOptionId:
           normalizePiThinkingOption(config.thinkingOptionId) ?? DEFAULT_PI_THINKING_LEVEL,
+        noSession: config.internal === true,
         systemPrompt: composeSystemPromptParts(
           config.systemPrompt,
           config.daemonAppendSystemPrompt,
@@ -2142,7 +2184,7 @@ export class PiRpcAgentClient implements AgentClient {
   async resumeSession(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
-    _launchContext?: AgentLaunchContext,
+    launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
     const sessionFile = handle.nativeHandle;
     if (!sessionFile) {
@@ -2152,12 +2194,20 @@ export class PiRpcAgentClient implements AgentClient {
     const persistenceMetadata = parsePersistenceMetadata(handle.metadata);
     const resumeConfig = buildResumeConfig(persistenceMetadata, overrides);
 
-    const mcpConfig = await this.prepareMcpConfig(resumeConfig.cwd, resumeConfig.config.mcpServers);
+    const mcpConfig = await this.prepareMcpConfig(
+      resumeConfig.cwd,
+      resumeConfig.config.mcpServers,
+      {
+        ...this.runtimeSettings?.env,
+        ...launchContext?.env,
+      },
+    );
     const paseoExtension = createPiPaseoExtensionFile();
     let runtimeSession: PiRuntimeSession;
     try {
       runtimeSession = await this.runtime.startSession({
         cwd: resumeConfig.cwd,
+        env: launchContext?.env,
         session: sessionFile,
         model: resumeConfig.model,
         thinkingOptionId: normalizePiThinkingOption(resumeConfig.thinkingOptionId) ?? undefined,
@@ -2269,18 +2319,19 @@ export class PiRpcAgentClient implements AgentClient {
   private async prepareMcpConfig(
     cwd: string,
     servers: Record<string, McpServerConfig> | undefined,
+    env: Record<string, string> | undefined,
   ): Promise<PiMcpConfigFile | null> {
     if (!servers || Object.keys(servers).length === 0) {
       return null;
     }
-    if (!(await this.detectMcpAdapter(cwd))) {
+    if (!(await this.detectMcpAdapter(cwd, env))) {
       return null;
     }
-    return createPiMcpConfigFile(servers, this.globalMcpConfigPath);
+    return createPiMcpConfigFile(servers, env, this.globalMcpConfigPath);
   }
 
-  private async detectMcpAdapter(cwd: string): Promise<boolean> {
-    const runtimeSession = await this.runtime.startSession({ cwd }).catch((error) => {
+  private async detectMcpAdapter(cwd: string, env?: Record<string, string>): Promise<boolean> {
+    const runtimeSession = await this.runtime.startSession({ cwd, env }).catch((error) => {
       this.logger.debug({ err: error, cwd }, "Pi MCP adapter probe failed to start");
       return null;
     });

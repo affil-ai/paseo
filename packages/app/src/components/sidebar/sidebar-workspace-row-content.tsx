@@ -111,6 +111,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   isCreating = false,
   shortcutNumber = null,
   showShortcutBadge = false,
+  reserveIdleStatusIndicatorSpace = true,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
@@ -121,6 +122,8 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   isCreating?: boolean;
   shortcutNumber?: number | null;
   showShortcutBadge?: boolean;
+  /** Keep the empty leading slot when the workspace has no active status. */
+  reserveIdleStatusIndicatorSpace?: boolean;
   children?: ReactNode;
 }) {
   const {
@@ -158,6 +161,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
           workspaceOrigin={workspace.workspaceOrigin}
           workspaceKind={workspace.workspaceKind}
           loading={isLoading}
+          reserveIdleSpace={reserveIdleStatusIndicatorSpace}
         />
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
@@ -167,7 +171,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
               </Text>
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
             </View>
-            <View style={styles.workspaceRowRight}>{children}</View>
+            <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           {subtitle ? (
             <Text style={styles.workspaceSubtitle} numberOfLines={1}>
@@ -217,12 +221,14 @@ function WorkspaceStatusIndicator({
   workspaceOrigin,
   workspaceKind,
   loading = false,
+  reserveIdleSpace = true,
 }: {
   bucket: SidebarWorkspaceEntry["statusBucket"];
   chatStartedBy: SidebarWorkspaceEntry["chatStartedBy"];
   workspaceOrigin: SidebarWorkspaceEntry["workspaceOrigin"];
   workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
   loading?: boolean;
+  reserveIdleSpace?: boolean;
 }) {
   const shouldShowSyncedLoader = shouldRenderSyncedStatusLoader({ bucket });
 
@@ -259,7 +265,13 @@ function WorkspaceStatusIndicator({
   }
 
   if (bucket === "done") {
-    return <DoneWorkspaceStatusIndicator chatStartedBy={chatStartedBy} origin={workspaceOrigin} />;
+    return (
+      <DoneWorkspaceStatusIndicator
+        chatStartedBy={chatStartedBy}
+        origin={workspaceOrigin}
+        reserveIdleSpace={reserveIdleSpace}
+      />
+    );
   }
 
   let KindIcon: typeof ThemedMonitor;
@@ -292,9 +304,11 @@ function WorkspaceStatusIndicator({
 function DoneWorkspaceStatusIndicator({
   chatStartedBy,
   origin,
+  reserveIdleSpace,
 }: {
   chatStartedBy: SidebarWorkspaceEntry["chatStartedBy"];
   origin: SidebarWorkspaceEntry["workspaceOrigin"];
+  reserveIdleSpace: boolean;
 }) {
   const starterAvatarSource = useMemo(
     () =>
@@ -337,7 +351,9 @@ function DoneWorkspaceStatusIndicator({
       </View>
     );
   }
-  return <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-done" />;
+  return reserveIdleSpace ? (
+    <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-done" />
+  ) : null;
 }
 
 function StatusDotOverlay({
@@ -590,7 +606,6 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
-  workspaceRowRight: sidebarWorkspaceRowStyles.rowRight,
   shortcutBadgeOverlay: {
     position: "absolute",
     top: 1,
