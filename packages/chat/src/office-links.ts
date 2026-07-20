@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
+import { buildPaseoAgentUrl } from "./paseo-link.js";
 import type { ThreadSessionStore } from "./state/thread-session-store.js";
 
 /**
@@ -60,12 +61,12 @@ export interface AgentLinksReport {
   version: 1;
   bindingId: string;
   agentId: string;
+  paseoUrl?: string;
   branchLinks: AgentBranchLink[];
   prLinks: AgentPrLink[];
 }
 
-const GITHUB_REMOTE_PATTERN =
-  /(?:github\.com[/:])([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/)?$/i;
+const GITHUB_REMOTE_PATTERN = /(?:github\.com[/:])([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/)?$/i;
 const GITHUB_PR_URL_PATTERN = /github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/i;
 
 /** `git@github.com:o/r.git` / `https://github.com/o/r` → `{ owner, repo }`. */
@@ -104,6 +105,8 @@ function rootAgentIdFor(agent: AgentLinksAgent, byId: Map<string, AgentLinksAgen
 }
 
 export interface BuildAgentLinkReportsInput {
+  deepLinkBaseUrl: string;
+  serverId: string;
   /** externalThreadId → root agent id, office threads only. */
   officeBindings: Array<{ externalThreadId: string; rootAgentId: string }>;
   agents: AgentLinksAgent[];
@@ -118,6 +121,51 @@ export interface BuildAgentLinkReportsInput {
   }>;
 }
 
+function paseoUrlForBinding(
+  input: BuildAgentLinkReportsInput,
+  rootAgent: AgentLinksAgent | undefined,
+): string | undefined {
+  if (!rootAgent?.workspaceId || rootAgent.archivedAt) return undefined;
+  return buildPaseoAgentUrl({
+    baseUrl: input.deepLinkBaseUrl,
+    serverId: input.serverId,
+    workspaceId: rootAgent.workspaceId,
+    agentId: rootAgent.id,
+  });
+}
+
+function collectWorkspaceLinks(input: {
+  rootAgentId: string;
+  agents: AgentLinksAgent[];
+  agentsById: Map<string, AgentLinksAgent>;
+  workspacesById: Map<string, AgentLinksWorkspace>;
+}) {
+  const branchLinks: AgentBranchLink[] = [];
+  const prLinks = new Map<string, AgentPrLink>();
+  const seenBranches = new Set<string>();
+  for (const agent of input.agents) {
+    if (agent.archivedAt) continue;
+    if (rootAgentIdFor(agent, input.agentsById) !== input.rootAgentId) continue;
+    const workspace = agent.workspaceId ? input.workspacesById.get(agent.workspaceId) : undefined;
+    if (!workspace) continue;
+    const remote = parseGithubRemote(workspace.gitRuntime?.remoteUrl);
+    const branch = workspace.gitRuntime?.currentBranch?.trim();
+    if (remote && branch) {
+      const key = `${remote.owner}/${remote.repo}#${branch}`;
+      if (!seenBranches.has(key)) {
+        seenBranches.add(key);
+        branchLinks.push({ ...remote, branch, agentId: agent.id });
+      }
+    }
+    const pullRequest = workspace.githubRuntime?.pullRequest;
+    if (pullRequest) {
+      const link = prLinkFrom(pullRequest, remote);
+      if (link) prLinks.set(`${link.owner}/${link.repo}#${link.number}`, link);
+    }
+  }
+  return { branchLinks, prLinks };
+}
+
 /** Pure assembly of per-binding reports; returns only non-empty reports. */
 export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentLinksReport[] {
   const agentsById = new Map(input.agents.map((agent) => [agent.id, agent]));
@@ -126,30 +174,13 @@ export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentL
   for (const binding of input.officeBindings) {
     if (!binding.externalThreadId.startsWith(OFFICE_THREAD_PREFIX)) continue;
     const bindingId = binding.externalThreadId.slice(OFFICE_THREAD_PREFIX.length);
-    const branchLinks: AgentBranchLink[] = [];
-    const prLinks = new Map<string, AgentPrLink>();
-    const seenBranches = new Set<string>();
-
-    for (const agent of input.agents) {
-      if (agent.archivedAt) continue;
-      if (rootAgentIdFor(agent, agentsById) !== binding.rootAgentId) continue;
-      const workspace = agent.workspaceId ? workspacesById.get(agent.workspaceId) : undefined;
-      if (!workspace) continue;
-      const remote = parseGithubRemote(workspace.gitRuntime?.remoteUrl);
-      const branch = workspace.gitRuntime?.currentBranch?.trim();
-      if (remote && branch) {
-        const key = `${remote.owner}/${remote.repo}#${branch}`;
-        if (!seenBranches.has(key)) {
-          seenBranches.add(key);
-          branchLinks.push({ ...remote, branch, agentId: agent.id });
-        }
-      }
-      const pullRequest = workspace.githubRuntime?.pullRequest;
-      if (pullRequest) {
-        const link = prLinkFrom(pullRequest, remote);
-        if (link) prLinks.set(`${link.owner}/${link.repo}#${link.number}`, link);
-      }
-    }
+    const paseoUrl = paseoUrlForBinding(input, agentsById.get(binding.rootAgentId));
+    const { branchLinks, prLinks } = collectWorkspaceLinks({
+      rootAgentId: binding.rootAgentId,
+      agents: input.agents,
+      agentsById,
+      workspacesById,
+    });
 
     for (const link of input.githubPrLinks) {
       if (link.externalThreadId !== binding.externalThreadId) continue;
@@ -161,11 +192,12 @@ export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentL
       });
     }
 
-    if (branchLinks.length === 0 && prLinks.size === 0) continue;
+    if (branchLinks.length === 0 && prLinks.size === 0 && !paseoUrl) continue;
     reports.push({
       version: 1,
       bindingId,
       agentId: binding.rootAgentId,
+      ...(paseoUrl ? { paseoUrl } : {}),
       branchLinks,
       prLinks: [...prLinks.values()],
     });
@@ -196,10 +228,12 @@ export interface OfficeAgentLinksReporterInput {
   client: {
     fetchAgents: PagedFetcher<{ agent: AgentLinksAgent }>;
     fetchWorkspaces: PagedFetcher<AgentLinksWorkspace>;
+    getLastServerInfoMessage(): { serverId: string } | null;
   };
   store: ThreadSessionStore;
   callbackKeyId: string;
   callbackSecret: string;
+  deepLinkBaseUrl: string;
   /** Overrides the per-binding callback-derived URL (mainly for tests). */
   linksUrl?: string;
   intervalMs?: number;
@@ -242,6 +276,8 @@ export class OfficeAgentLinksReporter {
     ]);
     const agents = agentEntries.map((entry) => entry.agent);
     const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: this.input.deepLinkBaseUrl,
+      serverId: this.input.client.getLastServerInfoMessage()?.serverId ?? "local",
       officeBindings: bindings.map((binding) => ({
         externalThreadId: binding.externalThreadId,
         rootAgentId:

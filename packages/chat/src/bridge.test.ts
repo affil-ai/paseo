@@ -3,12 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Message } from "chat";
 import { describe, expect, it } from "vitest";
-import {
-  buildStartedCardUrl,
-  ChatBridge,
-  type ChatBridgeClient,
-  type ChatBridgeThread,
-} from "./bridge.js";
+import { ChatBridge, type ChatBridgeClient, type ChatBridgeThread } from "./bridge.js";
+import { buildPaseoAgentUrl } from "./paseo-link.js";
 import { loadConfig } from "./config.js";
 import { ThreadSessionStore } from "./state/thread-session-store.js";
 
@@ -87,6 +83,7 @@ async function runAutoRelayWithTimeline(
   items: TimelineItem[],
   office = false,
   statuses: string[] = ["idle"],
+  updatedAts: string[] = ["2020-01-01T00:00:00.000Z"],
 ) {
   const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
   const externalThreadId = "slack:D123:111.222";
@@ -108,12 +105,18 @@ async function runAutoRelayWithTimeline(
 
   let timelineFetchCount = 0;
   const client = {
-    fetchAgentTimeline: async () => ({
-      entries: items.map((item, index) => timelineEntry(index + 1, item)),
-      agent: {
-        status: statuses[Math.min(timelineFetchCount++, statuses.length - 1)] ?? "idle",
-      },
-    }),
+    fetchAgentTimeline: async () => {
+      const snapshotIndex = timelineFetchCount++;
+      return {
+        entries: items.map((item, index) => timelineEntry(index + 1, item)),
+        agent: {
+          status: statuses[Math.min(snapshotIndex, statuses.length - 1)] ?? "idle",
+          updatedAt:
+            updatedAts[Math.min(snapshotIndex, updatedAts.length - 1)] ??
+            "2020-01-01T00:00:00.000Z",
+        },
+      };
+    },
   };
   const bridge = new ChatBridge(
     {
@@ -275,10 +278,10 @@ async function runSlackSessionCreation(input: SlackSessionCreationInput) {
   }
 }
 
-describe("buildStartedCardUrl", () => {
+describe("buildPaseoAgentUrl", () => {
   it("links directly to the workspace route with an agent open intent", () => {
     expect(
-      buildStartedCardUrl({
+      buildPaseoAgentUrl({
         baseUrl: "https://affil.olumbe.com/",
         serverId: "srv_iZJtVKHVcWXG",
         workspaceId: "wks_8194146bcb474423",
@@ -291,7 +294,7 @@ describe("buildStartedCardUrl", () => {
 
   it("base64url-encodes path-shaped workspace ids like the app route helper", () => {
     expect(
-      buildStartedCardUrl({
+      buildPaseoAgentUrl({
         baseUrl: "https://paseo.example",
         serverId: "server/one",
         workspaceId: "/home/user/project",
@@ -503,6 +506,28 @@ describe("ChatBridge auto relay", () => {
         expect.objectContaining({
           phase: "final",
           text: "The turn is complete.",
+          terminal: true,
+        }),
+      ]);
+    } finally {
+      await rm(result.stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not terminate an Office relay during a transient provider failure and retry", async () => {
+    const recent = new Date().toISOString();
+    const result = await runAutoRelayWithTimeline(
+      [{ type: "assistant_message", text: "The retried turn is complete." }],
+      true,
+      ["running", "error", "running", "idle"],
+      ["2020-01-01T00:00:00.000Z", recent, recent, "2020-01-01T00:00:00.000Z"],
+    );
+    try {
+      expect(result.timelineFetchCount).toBe(4);
+      expect(result.relayedEvents).toEqual([
+        expect.objectContaining({
+          phase: "final",
+          text: "The retried turn is complete.",
           terminal: true,
         }),
       ]);

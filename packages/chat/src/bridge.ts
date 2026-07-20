@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
@@ -44,6 +43,7 @@ import {
 import { extractGithubPrLinks } from "./github.js";
 import { slackPostableMessagesFromMarkdown } from "./render.js";
 import type { PermissionBridge } from "./permissions.js";
+import { buildPaseoAgentUrl } from "./paseo-link.js";
 import {
   CHAT_SOURCE_LABEL_KEY,
   CHAT_THREAD_LABEL,
@@ -105,10 +105,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function trimNonEmpty(value: string): string {
-  return value.trim();
-}
-
 function slackAttribution(sender: { userId: string; name: string; email?: string }) {
   return {
     source: "slack" as const,
@@ -126,24 +122,10 @@ function isRelayableAssistantText(text: string): boolean {
   return text.trim().length > 0 && !isSystemErrorAssistantText(text);
 }
 
-function toBase64UrlNoPad(input: string): string {
-  return Buffer.from(input, "utf8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function isUrlSafeWorkspaceId(value: string): boolean {
-  return /^[A-Za-z0-9._~-]+$/.test(value);
-}
-
-function encodeWorkspaceIdForPathSegment(workspaceId: string): string {
-  const id = trimNonEmpty(workspaceId);
-  if (isUrlSafeWorkspaceId(id)) {
-    return id;
-  }
-  return `b64_${toBase64UrlNoPad(id)}`;
+function isAgentSettled(agent: FetchAgentTimelinePayload["agent"]): boolean {
+  if (!agent || agent.status === "initializing" || agent.status === "running") return false;
+  const updatedAt = Date.parse(agent.updatedAt);
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt >= 5_000;
 }
 
 function getSlackThreadRootMessageId(message: Message): string {
@@ -161,19 +143,6 @@ function chatStarterLabels(startedBy: ChatStarter | undefined): Record<string, s
     ...(startedBy.handle ? { [CHAT_STARTED_BY_HANDLE_LABEL]: startedBy.handle } : {}),
     ...(startedBy.avatarUrl ? { [CHAT_STARTED_BY_AVATAR_URL_LABEL]: startedBy.avatarUrl } : {}),
   };
-}
-
-export function buildStartedCardUrl(input: {
-  baseUrl: string;
-  serverId: string;
-  workspaceId: string;
-  agentId: string;
-}): string {
-  const baseUrl = trimNonEmpty(input.baseUrl).replace(/\/+$/g, "");
-  const serverId = encodeURIComponent(trimNonEmpty(input.serverId));
-  const workspaceId = encodeURIComponent(encodeWorkspaceIdForPathSegment(input.workspaceId));
-  const openIntent = encodeURIComponent(`agent:${trimNonEmpty(input.agentId)}`);
-  return `${baseUrl}/h/${serverId}/workspace/${workspaceId}?open=${openIntent}`;
 }
 
 type AgentTimelineEntry = FetchAgentTimelinePayload["entries"][number];
@@ -741,7 +710,7 @@ export class ChatBridge {
     agentId: string,
   ): Promise<void> {
     const serverId = this.client.getLastServerInfoMessage()?.serverId ?? "local";
-    const url = buildStartedCardUrl({
+    const url = buildPaseoAgentUrl({
       baseUrl: this.config.deepLinkBaseUrl,
       serverId,
       workspaceId,
@@ -938,9 +907,8 @@ export class ChatBridge {
       );
       relayableBlockCount = relayableBlocks.length;
 
-      const status = timeline.agent?.status;
-      const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
-      const closedBlocks = agentStopped
+      const agentSettled = isAgentSettled(timeline.agent);
+      const closedBlocks = agentSettled
         ? relayableBlocks.slice(0, -1)
         : relayableBlocks.filter((block) => block.lastEntryIndex < timeline.entries.length - 1);
       while (input.onClosedText && closedTextCount < closedBlocks.length) {
@@ -953,7 +921,7 @@ export class ChatBridge {
       const firstBlock = relayableBlocks[0];
       if (!firstTextPosted && firstBlock) {
         const firstBlockClosed = firstBlock.lastEntryIndex < timeline.entries.length - 1;
-        if (firstBlock.text && (firstBlockClosed || agentStopped)) {
+        if (firstBlock.text && (firstBlockClosed || agentSettled)) {
           firstTextPosted = true;
           await input.onFirstText(firstBlock.text);
         }
@@ -961,7 +929,7 @@ export class ChatBridge {
 
       finalText = relayableBlocks.at(-1)?.text ?? finalText;
 
-      if (status && status !== "initializing" && status !== "running") {
+      if (agentSettled) {
         return { finalText, sawAssistantTextBlock, relayableBlockCount };
       }
       await sleep(1_000);

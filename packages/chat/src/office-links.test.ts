@@ -65,6 +65,8 @@ describe("buildAgentLinkReports", () => {
 
   it("collects subagent branches and PRs for the owning office binding", () => {
     const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: "https://affil.olumbe.com",
+      serverId: "srv_m-yyB3h87NLA",
       officeBindings: [{ externalThreadId: "office:binding-1", rootAgentId: "root" }],
       agents: [
         agent("root", { workspaceId: "ws-root" }),
@@ -93,6 +95,9 @@ describe("buildAgentLinkReports", () => {
     const report = reports[0]!;
     expect(report.bindingId).toBe("binding-1");
     expect(report.agentId).toBe("root");
+    expect(report.paseoUrl).toBe(
+      "https://affil.olumbe.com/h/srv_m-yyB3h87NLA/workspace/ws-root?open=agent%3Aroot",
+    );
     expect(report.branchLinks).toEqual([
       { owner: "affil-ai", repo: "office", branch: "main", agentId: "root" },
       { owner: "affil-ai", repo: "office", branch: "feature/pr-board", agentId: "sub" },
@@ -107,6 +112,8 @@ describe("buildAgentLinkReports", () => {
 
   it("skips archived agents, non-office bindings, and empty reports", () => {
     const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: "https://affil.olumbe.com",
+      serverId: "srv_m-yyB3h87NLA",
       officeBindings: [
         { externalThreadId: "office:binding-2", rootAgentId: "root" },
         { externalThreadId: "slack:C9:1", rootAgentId: "slack-root" },
@@ -120,6 +127,8 @@ describe("buildAgentLinkReports", () => {
 
   it("survives parent-label cycles without infinite looping", () => {
     const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: "https://affil.olumbe.com",
+      serverId: "srv_m-yyB3h87NLA",
       officeBindings: [{ externalThreadId: "office:binding-3", rootAgentId: "a" }],
       agents: [
         { id: "a", labels: { [PARENT]: "b" }, archivedAt: null },

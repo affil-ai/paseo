@@ -288,6 +288,7 @@ export async function main(): Promise<void> {
         store: state,
         callbackKeyId: config.officeAdapter.callbackKeyId,
         callbackSecret: config.officeAdapter.callbackSecret,
+        deepLinkBaseUrl: config.deepLinkBaseUrl,
       })
     : null;
   agentLinksReporter?.start();
