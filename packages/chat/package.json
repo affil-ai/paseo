@@ -1,6 +1,6 @@
 {
   "name": "@getpaseo/chat",
-  "version": "0.1.104-beta.4",
+  "version": "0.1.107",
   "private": true,
   "description": "Office Chat SDK bridge for Slack",
   "files": [
@@ -25,8 +25,8 @@
   "dependencies": {
     "@chat-adapter/shared": "4.31.0",
     "@chat-adapter/slack": "4.31.0",
-    "@getpaseo/client": "0.1.104-beta.4",
-    "@getpaseo/protocol": "0.1.104-beta.4",
+    "@getpaseo/client": "0.1.107",
+    "@getpaseo/protocol": "0.1.107",
     "chat": "4.31.0",
     "ws": "^8.20.0",
     "zod": "^4.4.3"
