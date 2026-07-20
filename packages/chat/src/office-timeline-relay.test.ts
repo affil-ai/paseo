@@ -44,9 +44,23 @@ describe("OfficeTimelineRelay", () => {
       runId: "run-1",
       payloadDigest: "a".repeat(64),
     });
+    await store.updateSession("office:binding-1", (session) => {
+      session.activeOfficeTurn = {
+        version: 2,
+        kind: "message",
+        bindingId: "binding-1",
+        runId: "run-1",
+        receiptId: "receipt-1",
+        payloadDigest: "a".repeat(64),
+        agentId: "agent-1",
+        actor: { externalUserId: "member-1", displayName: "Vivek" },
+        message: { markdown: "Ship it", files: [] },
+        callbackUrl: "https://convex.example/api/paseo/events",
+      };
+    });
 
     let entries = [
-      entry(1, { type: "user_message", text: "Ship it", messageId: "receipt-1" }),
+      entry(1, { type: "user_message", text: "Ship it" }),
       entry(2, { type: "assistant_message", text: "I’ll inspect the repo.", messageId: "a-1" }),
       entry(3, {
         type: "tool_call",

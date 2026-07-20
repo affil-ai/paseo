@@ -124,10 +124,14 @@ export class OfficeTimelineRelay {
   ): Promise<void> {
     const relay = session.officeRelay;
     if (!relay) return;
-    const boundaryReceiptId = turn.boundary.item.messageId;
-    const dispatchReceipt = boundaryReceiptId
+    let boundaryReceiptId = turn.boundary.item.messageId;
+    let dispatchReceipt = boundaryReceiptId
       ? await this.store.getOfficeDispatchReceipt(boundaryReceiptId)
       : null;
+    if (!dispatchReceipt && session.activeOfficeTurn?.version === 2) {
+      boundaryReceiptId = session.activeOfficeTurn.receiptId;
+      dispatchReceipt = await this.store.getOfficeDispatchReceipt(boundaryReceiptId);
+    }
     const startedAt = Date.parse(turn.boundary.timestamp);
 
     if (dispatchReceipt) {
@@ -257,6 +261,13 @@ export class OfficeTimelineRelay {
     await this.store.updateSession(session.externalThreadId, (binding) => {
       if (binding.officeRelay?.activeTurn?.providerTurnId === turn.providerTurnId) {
         binding.officeRelay.activeTurn = undefined;
+      }
+      if (
+        dispatchReceipt &&
+        boundaryReceiptId &&
+        binding.activeOfficeTurn?.receiptId === boundaryReceiptId
+      ) {
+        binding.activeOfficeTurn = undefined;
       }
     });
   }
