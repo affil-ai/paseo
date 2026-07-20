@@ -83,7 +83,11 @@ function timelineEntry(seq: number, item: TimelineItem) {
   };
 }
 
-async function runAutoRelayWithTimeline(items: TimelineItem[], office = false) {
+async function runAutoRelayWithTimeline(
+  items: TimelineItem[],
+  office = false,
+  statuses: string[] = ["idle"],
+) {
   const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
   const externalThreadId = "slack:D123:111.222";
   const rootAgentId = "agent-1";
@@ -102,10 +106,13 @@ async function runAutoRelayWithTimeline(items: TimelineItem[], office = false) {
     updatedAt: new Date().toISOString(),
   });
 
+  let timelineFetchCount = 0;
   const client = {
     fetchAgentTimeline: async () => ({
       entries: items.map((item, index) => timelineEntry(index + 1, item)),
-      agent: { status: "idle" },
+      agent: {
+        status: statuses[Math.min(timelineFetchCount++, statuses.length - 1)] ?? "idle",
+      },
     }),
   };
   const bridge = new ChatBridge(
@@ -158,6 +165,7 @@ async function runAutoRelayWithTimeline(items: TimelineItem[], office = false) {
     rootAgentId,
     postedMessages,
     relayedEvents,
+    timelineFetchCount,
     deliveryReceipt: `slack:${externalThreadId}:333.444:test:turn`,
   };
 }
@@ -483,6 +491,26 @@ describe("ChatBridge session creation", () => {
 });
 
 describe("ChatBridge auto relay", () => {
+  it("waits for the agent to stop before emitting the terminal Office event", async () => {
+    const result = await runAutoRelayWithTimeline(
+      [{ type: "assistant_message", text: "The turn is complete." }],
+      true,
+      ["running", "idle"],
+    );
+    try {
+      expect(result.timelineFetchCount).toBe(2);
+      expect(result.relayedEvents).toEqual([
+        expect.objectContaining({
+          phase: "final",
+          text: "The turn is complete.",
+          terminal: true,
+        }),
+      ]);
+    } finally {
+      await rm(result.stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits every completed assistant message to Office and marks only the terminal final", async () => {
     const result = await runAutoRelayWithTimeline(
       [
