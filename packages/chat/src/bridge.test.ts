@@ -55,7 +55,11 @@ class SessionCreationClient implements ChatBridgeClient {
 }
 
 interface RelayTurnInput {
-  thread: { id: string; post: (message: unknown) => Promise<void>; adapter: object };
+  thread: {
+    id: string;
+    post: (message: unknown) => Promise<void>;
+    adapter: object;
+  };
   externalThreadId: string;
   agentId: string;
   messageId: string;
@@ -390,6 +394,7 @@ describe("ChatBridge session creation", () => {
         },
       ]);
       await expect(store.getSession("slack:D123:111.222")).resolves.toMatchObject({
+        workspaceId: "workspace-1",
         startedBy: {
           source: "slack",
           userId: "U123",
@@ -438,7 +443,10 @@ describe("ChatBridge session creation", () => {
   });
 
   it("uses only the triggering message when a channel thread has no prior context", async () => {
-    const sessionHarness = await runSlackSessionCreation({ isDM: false, priorMessages: [] });
+    const sessionHarness = await runSlackSessionCreation({
+      isDM: false,
+      priorMessages: [],
+    });
     try {
       expect(sessionHarness.createWorkspaceCalls).toEqual([
         {
@@ -961,7 +969,10 @@ describe("ChatBridge follow-up delivery", () => {
       const message = {
         id: "333.444",
         text: "<@U0BEGMBCB2L> dude shut up mute stop",
-        raw: { text: "<@U0BEGMBCB2L> dude shut up mute stop", thread_ts: "111.222" },
+        raw: {
+          text: "<@U0BEGMBCB2L> dude shut up mute stop",
+          thread_ts: "111.222",
+        },
         author: {
           userId: "U1",
           userName: "john",

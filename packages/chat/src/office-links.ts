@@ -29,6 +29,8 @@ export interface AgentLinksAgent {
 
 export interface AgentLinksWorkspace {
   id: string;
+  name?: string | undefined;
+  title?: string | null | undefined;
   projectRootPath?: string | undefined;
   workspaceDirectory?: string | undefined;
   gitRuntime?: {
@@ -111,7 +113,12 @@ export interface BuildAgentLinkReportsInput {
   deepLinkBaseUrl: string;
   serverId: string;
   /** externalThreadId → root agent id, office threads only. */
-  officeBindings: Array<{ externalThreadId: string; rootAgentId: string }>;
+  officeBindings: Array<{
+    externalThreadId: string;
+    rootAgentId: string;
+    workspaceId?: string | undefined;
+    title?: string | null | undefined;
+  }>;
   agents: AgentLinksAgent[];
   workspaces: AgentLinksWorkspace[];
   /** The store's text-scraped links, flattened. */
@@ -126,18 +133,48 @@ export interface BuildAgentLinkReportsInput {
 
 function paseoUrlForBinding(
   input: BuildAgentLinkReportsInput,
+  binding: BuildAgentLinkReportsInput["officeBindings"][number],
   rootAgent: AgentLinksAgent | undefined,
   workspacesById: Map<string, AgentLinksWorkspace>,
 ): string | undefined {
-  if (!rootAgent || rootAgent.archivedAt) return undefined;
-  const workspace = workspaceForAgent(rootAgent, workspacesById);
+  if (rootAgent?.archivedAt) return undefined;
+  const workspace =
+    (binding.workspaceId ? workspacesById.get(binding.workspaceId) : undefined) ??
+    (rootAgent ? workspaceForAgent(rootAgent, workspacesById) : undefined) ??
+    workspaceForBindingTitle(binding.title, workspacesById);
   if (!workspace) return undefined;
   return buildPaseoAgentUrl({
     baseUrl: input.deepLinkBaseUrl,
     serverId: input.serverId,
     workspaceId: workspace.id,
-    agentId: rootAgent.id,
+    agentId: binding.rootAgentId,
   });
+}
+
+function normalizedTitle(value: string | null | undefined): string | null {
+  const normalized = value?.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  return normalized || null;
+}
+
+function workspaceForBindingTitle(
+  bindingTitle: string | null | undefined,
+  workspacesById: Map<string, AgentLinksWorkspace>,
+): AgentLinksWorkspace | undefined {
+  const title = normalizedTitle(bindingTitle);
+  if (!title) return undefined;
+  const titledWorkspaces = [...workspacesById.values()].map((workspace) => ({
+    workspace,
+    title: normalizedTitle(workspace.title ?? workspace.name),
+  }));
+  const exactMatches = titledWorkspaces.filter((workspace) => workspace.title === title);
+  if (exactMatches.length > 0) {
+    return exactMatches.length === 1 ? exactMatches[0]?.workspace : undefined;
+  }
+  const prefixMatches = titledWorkspaces.filter(
+    (workspace) =>
+      workspace.title && (workspace.title.startsWith(title) || title.startsWith(workspace.title)),
+  );
+  return prefixMatches.length === 1 ? prefixMatches[0]?.workspace : undefined;
 }
 
 function workspaceForAgent(
@@ -193,7 +230,12 @@ export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentL
   for (const binding of input.officeBindings) {
     if (!binding.externalThreadId.startsWith(OFFICE_THREAD_PREFIX)) continue;
     const bindingId = binding.externalThreadId.slice(OFFICE_THREAD_PREFIX.length);
-    const paseoUrl = paseoUrlForBinding(input, agentsById.get(binding.rootAgentId), workspacesById);
+    const paseoUrl = paseoUrlForBinding(
+      input,
+      binding,
+      agentsById.get(binding.rootAgentId),
+      workspacesById,
+    );
     const { branchLinks, prLinks } = collectWorkspaceLinks({
       rootAgentId: binding.rootAgentId,
       agents: input.agents,
@@ -235,7 +277,9 @@ async function fetchAllPages<T>(fetcher: PagedFetcher<T>): Promise<T[]> {
   const entries: T[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const result = await fetcher({ page: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) } });
+    const result = await fetcher({
+      page: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+    });
     entries.push(...result.entries);
     cursor = result.pageInfo.nextCursor ?? undefined;
     if (!cursor) break;
@@ -301,6 +345,8 @@ export class OfficeAgentLinksReporter {
         externalThreadId: binding.externalThreadId,
         rootAgentId:
           binding.kind === "inbound-session" ? binding.rootAgentId : binding.officeAgentId,
+        workspaceId: binding.kind === "inbound-session" ? binding.workspaceId : undefined,
+        title: binding.title ?? undefined,
       })),
       agents,
       workspaces,

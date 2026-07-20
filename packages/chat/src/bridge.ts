@@ -330,7 +330,10 @@ export class ChatBridge {
   ): Promise<boolean> {
     if (normalized.command === "aside") {
       if (existing) {
-        await this.dispatchContextOnlyMessage({ normalized, session: existing });
+        await this.dispatchContextOnlyMessage({
+          normalized,
+          session: existing,
+        });
       }
       return true;
     }
@@ -343,7 +346,10 @@ export class ChatBridge {
           }
         });
         if (normalized.command === "mute") {
-          await this.dispatchContextOnlyMessage({ normalized, session: existing });
+          await this.dispatchContextOnlyMessage({
+            normalized,
+            session: existing,
+          });
         }
       }
       await this.reactToMuteCommand(thread, message, normalized.command);
@@ -422,7 +428,14 @@ export class ChatBridge {
       const session = existing ?? (await this.startNewSession(thread, message, normalized));
       if (!existing && !(await this.store.markEventProcessed(normalized.eventId))) return;
       if (await this.handleChatAnswer(normalized, Boolean(existing))) return;
-      await this.dispatchAgentTurn({ thread, message, source, normalized, existing, session });
+      await this.dispatchAgentTurn({
+        thread,
+        message,
+        source,
+        normalized,
+        existing,
+        session,
+      });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await this.postMessage(
@@ -575,6 +588,7 @@ export class ChatBridge {
       kind: "inbound-session" as const,
       externalThreadId: input.externalThreadId,
       rootAgentId: agent.id,
+      workspaceId: workspaceResult.workspace.id,
       ...(input.startedBy ? { startedBy: input.startedBy } : {}),
       activeRelayId: input.initialRelayId ?? null,
       muted: false,

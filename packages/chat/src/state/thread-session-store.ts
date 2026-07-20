@@ -15,7 +15,10 @@ export const ChatDestinationSchema = z.discriminatedUnion("kind", [
     name: z.string().min(1).optional(),
     url: z.string().min(1).optional(),
   }),
-  z.object({ kind: z.literal("conversation"), conversationId: z.string().min(1) }),
+  z.object({
+    kind: z.literal("conversation"),
+    conversationId: z.string().min(1),
+  }),
 ]);
 
 const ChatStarterSchema = z.object({
@@ -60,6 +63,7 @@ const InboundSessionBindingSchema = z.object({
   kind: z.literal("inbound-session"),
   externalThreadId: z.string(),
   rootAgentId: z.string(),
+  workspaceId: z.string().min(1).optional(),
   startedBy: ChatStarterSchema.optional(),
   muted: z.boolean().default(false),
   activeRelayId: z.string().nullable().default(null),
@@ -105,6 +109,7 @@ const LegacyThreadSessionSchema = z
     kind: "inbound-session" as const,
     externalThreadId: session.externalThreadId,
     rootAgentId: session.rootAgentId,
+    workspaceId: undefined,
     muted: session.muted,
     activeRelayId: session.activeRelayId,
     activeOfficeTurn: undefined,
@@ -140,9 +145,9 @@ const PendingRequestSchema = z.object({
   updatedAt: z.string(),
 });
 
-const LegacyDeliveryReceiptSchema = z
-  .string()
-  .transform((status) => ({ status: status === "completed" ? "completed" : "started" }));
+const LegacyDeliveryReceiptSchema = z.string().transform((status) => ({
+  status: status === "completed" ? "completed" : "started",
+}));
 
 const DeliveryReceiptSchema = z.union([
   z.object({
@@ -365,7 +370,10 @@ export class ThreadSessionStore {
 
   async recordEmailAudit(record: Omit<EmailAuditRecord, "timestamp">): Promise<void> {
     await this.store.update((data) => {
-      data.emailAuditRecords.push({ ...record, timestamp: new Date().toISOString() });
+      data.emailAuditRecords.push({
+        ...record,
+        timestamp: new Date().toISOString(),
+      });
       if (data.emailAuditRecords.length > 500) {
         data.emailAuditRecords.splice(0, data.emailAuditRecords.length - 500);
       }
@@ -518,7 +526,11 @@ export class ThreadSessionStore {
         if (request.status !== "pending" || Date.parse(request.deadlineAt) > now.getTime()) {
           continue;
         }
-        const updated = { ...request, status: "timeout" as const, updatedAt: timestamp };
+        const updated = {
+          ...request,
+          status: "timeout" as const,
+          updatedAt: timestamp,
+        };
         data.pendingRequests[request.requestId] = updated;
         expired.push(updated);
         const binding = data.sessions[request.externalThreadId];
@@ -527,7 +539,10 @@ export class ThreadSessionStore {
           binding.pendingRequestId === request.requestId
         ) {
           const { pendingRequestId: _pendingRequestId, ...withoutPending } = binding;
-          data.sessions[request.externalThreadId] = { ...withoutPending, updatedAt: timestamp };
+          data.sessions[request.externalThreadId] = {
+            ...withoutPending,
+            updatedAt: timestamp,
+          };
         }
       }
     });
@@ -535,8 +550,18 @@ export class ThreadSessionStore {
   }
 
   async recordGithubPrLinks(
-    prs: Array<{ key: string; owner: string; repo: string; number: number; url: string }>,
-    owner: { officeAgentId: string; externalThreadId: string; conversationId?: string },
+    prs: Array<{
+      key: string;
+      owner: string;
+      repo: string;
+      number: number;
+      url: string;
+    }>,
+    owner: {
+      officeAgentId: string;
+      externalThreadId: string;
+      conversationId?: string;
+    },
   ): Promise<void> {
     if (prs.length === 0) return;
     await this.store.update((data) => {

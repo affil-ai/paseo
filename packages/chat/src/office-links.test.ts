@@ -10,7 +10,12 @@ const PARENT = "paseo.parent-agent-id";
 
 function agent(
   id: string,
-  input: { parent?: string; workspaceId?: string; cwd?: string; archivedAt?: string } = {},
+  input: {
+    parent?: string;
+    workspaceId?: string;
+    cwd?: string;
+    archivedAt?: string;
+  } = {},
 ): AgentLinksAgent {
   return {
     id,
@@ -44,12 +49,17 @@ describe("buildAgentLinkReports", () => {
   const workspaces: AgentLinksWorkspace[] = [
     {
       id: "ws-root",
+      name: "Root workspace",
       projectRootPath: "/workspace/office",
       workspaceDirectory: "/workspace/office",
-      gitRuntime: { currentBranch: "main", remoteUrl: "https://github.com/affil-ai/office.git" },
+      gitRuntime: {
+        currentBranch: "main",
+        remoteUrl: "https://github.com/affil-ai/office.git",
+      },
     },
     {
       id: "ws-sub",
+      name: "Subagent workspace",
       gitRuntime: {
         currentBranch: "feature/pr-board",
         remoteUrl: "git@github.com:affil-ai/office.git",
@@ -103,7 +113,12 @@ describe("buildAgentLinkReports", () => {
     );
     expect(report.branchLinks).toEqual([
       { owner: "affil-ai", repo: "office", branch: "main", agentId: "root" },
-      { owner: "affil-ai", repo: "office", branch: "feature/pr-board", agentId: "sub" },
+      {
+        owner: "affil-ai",
+        repo: "office",
+        branch: "feature/pr-board",
+        agentId: "sub",
+      },
     ]);
     // PR 41 from the subagent workspace; PR 9 from the scraped store links.
     // PR 10 belongs to a Slack thread and must not leak in.
@@ -121,11 +136,82 @@ describe("buildAgentLinkReports", () => {
         { externalThreadId: "office:binding-2", rootAgentId: "root" },
         { externalThreadId: "slack:C9:1", rootAgentId: "slack-root" },
       ],
-      agents: [agent("root", { workspaceId: "ws-sub", archivedAt: "2026-07-01T00:00:00Z" })],
+      agents: [
+        agent("root", {
+          workspaceId: "ws-sub",
+          archivedAt: "2026-07-01T00:00:00Z",
+        }),
+      ],
       workspaces,
       githubPrLinks: [],
     });
     expect(reports).toEqual([]);
+  });
+
+  it("links legacy bindings by an unambiguous workspace title without an agent listing", () => {
+    const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: "https://affil.olumbe.com",
+      serverId: "srv_m-yyB3h87NLA",
+      officeBindings: [
+        {
+          externalThreadId: "office:legacy-binding",
+          rootAgentId: "legacy-root",
+          title: "Investigate Google Ads tracking",
+        },
+      ],
+      agents: [],
+      workspaces: [
+        ...workspaces,
+        {
+          id: "ws-legacy",
+          name: "Investigate Google Ads tracking and conversion attribution",
+        },
+      ],
+      githubPrLinks: [],
+    });
+
+    expect(reports).toEqual([
+      {
+        version: 1,
+        bindingId: "legacy-binding",
+        agentId: "legacy-root",
+        paseoUrl:
+          "https://affil.olumbe.com/h/srv_m-yyB3h87NLA/workspace/ws-legacy?open=agent%3Alegacy-root",
+        branchLinks: [],
+        prLinks: [],
+      },
+    ]);
+  });
+
+  it("prefers a persisted workspace id and refuses ambiguous title matches", () => {
+    const reports = buildAgentLinkReports({
+      deepLinkBaseUrl: "https://affil.olumbe.com",
+      serverId: "srv_m-yyB3h87NLA",
+      officeBindings: [
+        {
+          externalThreadId: "office:explicit-binding",
+          rootAgentId: "missing-root",
+          workspaceId: "ws-sub",
+          title: "Duplicate title",
+        },
+        {
+          externalThreadId: "office:ambiguous-binding",
+          rootAgentId: "another-missing-root",
+          title: "Duplicate title",
+        },
+      ],
+      agents: [],
+      workspaces: [
+        ...workspaces,
+        { id: "duplicate-a", name: "Duplicate title one" },
+        { id: "duplicate-b", name: "Duplicate title two" },
+      ],
+      githubPrLinks: [],
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.bindingId).toBe("explicit-binding");
+    expect(reports[0]?.paseoUrl).toContain("/workspace/ws-sub?");
   });
 
   it("survives parent-label cycles without infinite looping", () => {
@@ -135,7 +221,12 @@ describe("buildAgentLinkReports", () => {
       officeBindings: [{ externalThreadId: "office:binding-3", rootAgentId: "a" }],
       agents: [
         { id: "a", labels: { [PARENT]: "b" }, archivedAt: null },
-        { id: "b", workspaceId: "ws-root", labels: { [PARENT]: "a" }, archivedAt: null },
+        {
+          id: "b",
+          workspaceId: "ws-root",
+          labels: { [PARENT]: "a" },
+          archivedAt: null,
+        },
       ],
       workspaces,
       githubPrLinks: [],
