@@ -64,6 +64,9 @@ const InboundSessionBindingSchema = z.object({
   muted: z.boolean().default(false),
   activeRelayId: z.string().nullable().default(null),
   activeOfficeTurn: OfficeTurnSchema.optional(),
+  // Survives turn completion so the agent-links reporter can reach the office
+  // deployment between turns (activeOfficeTurn is cleared on terminal events).
+  lastCallbackUrl: z.url().optional(),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -79,6 +82,7 @@ const OutboundConversationBindingSchema = z.object({
   pendingRequestId: z.string().optional(),
   activeRelayId: z.string().nullable().default(null),
   activeOfficeTurn: OfficeTurnSchema.optional(),
+  lastCallbackUrl: z.url().optional(),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -104,6 +108,7 @@ const LegacyThreadSessionSchema = z
     muted: session.muted,
     activeRelayId: session.activeRelayId,
     activeOfficeTurn: undefined,
+    lastCallbackUrl: undefined,
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,

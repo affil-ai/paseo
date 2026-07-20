@@ -14,6 +14,7 @@ import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
 import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
 import { OfficeAdapter, type OfficeTurnRegistration } from "./office-adapter.js";
+import { OfficeAgentLinksReporter } from "./office-links.js";
 import { getBindingOwnerAgentId } from "./state/thread-session-store.js";
 
 type PaseoDaemonClient = Awaited<ReturnType<typeof connectToPaseoDaemon>>;
@@ -158,6 +159,7 @@ export async function main(): Promise<void> {
   const focus = new FocusRelay(client, state);
   const persistOfficeTurn = async (input: OfficeTurnRegistration & { agentId: string }) => {
     await state.updateSession(input.threadId, (session) => {
+      session.lastCallbackUrl = input.callbackUrl;
       session.activeOfficeTurn = {
         version: input.version,
         kind: input.kind,
@@ -280,6 +282,15 @@ export async function main(): Promise<void> {
     port: config.servicePort,
     tokenPath: config.serviceTokenPath,
   });
+  const agentLinksReporter = config.officeAdapter
+    ? new OfficeAgentLinksReporter({
+        client,
+        store: state,
+        callbackKeyId: config.officeAdapter.callbackKeyId,
+        callbackSecret: config.officeAdapter.callbackSecret,
+      })
+    : null;
+  agentLinksReporter?.start();
   const { emailIntake } = startEmailIntakes({ config, chat, slack, client, state, bridge });
   const githubMergeNotifier = config.githubWebhookSecret
     ? new GithubMergeNotifier(config.githubWebhookSecret, state, client)
@@ -302,6 +313,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(askExpiryInterval);
+    agentLinksReporter?.stop();
     serviceServer.close();
     httpServer?.close();
     await chat.shutdown().catch(() => {});
