@@ -41,6 +41,7 @@ export function startInboundHttpServer(input: {
   port: number;
   host?: string;
   slackWebhookEnabled?: boolean;
+  officeWebhookEnabled?: boolean;
   emailWebhook?: (
     rawBody: string,
     headers: Record<string, string | string[] | undefined>,
@@ -52,6 +53,7 @@ export function startInboundHttpServer(input: {
   ) => Promise<{ status: number; body: unknown }>;
 }) {
   const slackWebhookEnabled = input.slackWebhookEnabled ?? true;
+  const officeWebhookEnabled = input.officeWebhookEnabled ?? false;
   const server = createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/health") {
@@ -64,6 +66,18 @@ export function startInboundHttpServer(input: {
         const body = await readBody(req);
         const request = await nodeRequestToFetchRequest(req, body);
         const response = await input.chat.webhooks.slack(request);
+        await writeFetchResponse(res, response);
+        return;
+      }
+
+      if (
+        officeWebhookEnabled &&
+        req.method === "POST" &&
+        req.url?.startsWith("/chat/webhooks/office")
+      ) {
+        const body = await readBody(req);
+        const request = await nodeRequestToFetchRequest(req, body);
+        const response = await input.chat.webhooks.office(request);
         await writeFetchResponse(res, response);
         return;
       }

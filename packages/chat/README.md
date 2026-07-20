@@ -1,10 +1,21 @@
 # @getpaseo/chat
 
-Slack bridge for Office. It runs next to the local daemon, listens for Slack mentions/DMs through Chat SDK, starts one office agent per Slack thread, and relays office-agent turns back to Slack.
+Chat SDK bridge for Office. In the production architecture, Office Gateway is the channel provider:
+it owns Slack and the browser transcript, while Paseo registers the custom `office` adapter and
+uses the existing ChatBridge to drive one long-lived office agent per conversation. The legacy
+direct Slack adapter remains available until cutover.
 
 ## Environment
 
-Required:
+Required in Office-adapter mode:
+
+- `PASEO_CHAT_CHANNEL_ADAPTER=office`
+- `PASEO_CHAT_OFFICE_TOKEN=...` — bearer token on Office → adapter webhooks
+- `PASEO_CHAT_OFFICE_CALLBACK_KEY_ID=...`
+- `PASEO_CHAT_OFFICE_CALLBACK_SECRET=...` — signs adapter → Office callbacks
+- Route Office Gateway to `POST /chat/webhooks/office` on `PASEO_CHAT_HTTP_PORT`.
+
+Required in legacy direct-Slack mode:
 
 - A Paseo workspace marked as the chat repo from the workspace sidebar menu. Every Slack-created office-agent workspace uses that repo.
 - Slack adapter env from `@chat-adapter/slack`:
@@ -27,7 +38,7 @@ Optional:
 - `PASEO_CHAT_ACK_EMOJI=cto`
 - `PASEO_CHAT_STATE_DIR=$PASEO_HOME/chat-bridge`
 - `PASEO_CHAT_SLACK_MODE=socket` (`socket` or `http`)
-- `PASEO_CHAT_RELAY_MODE=auto` (`auto` posts first/final assistant text automatically; `manual` requires the office agent to call `chat.send`)
+- `PASEO_CHAT_RELAY_MODE=auto` (`auto` emits completed assistant messages; `manual` requires the office agent to call `chat.send`)
 - `PASEO_CHAT_HTTP_PORT=8787` for HTTP mode
 - `PASEO_CHAT_SERVICE_HOST=127.0.0.1` / `PASEO_CHAT_SERVICE_PORT=8788` for daemon-owned `chat.*` tools
 - `PASEO_CHAT_PEOPLE_JSON='{"vivek":"U123..."}'` for person aliases used by `chat.send` / `chat.ask`
@@ -43,7 +54,14 @@ SLACK_APP_TOKEN=xapp-... \
 node packages/chat/dist/index.js
 ```
 
-Mention the bot in Slack or DM it. Replies in the same thread continue the Office agent. In `PASEO_CHAT_RELAY_MODE=auto`, the bridge automatically relays first/final assistant text to the thread; if the office agent explicitly calls `chat.send` for that same binding, the explicit tool post suppresses the active auto relay for that turn. In `PASEO_CHAT_RELAY_MODE=manual`, assistant text is never auto-posted and the office agent must call `chat.send` to send Slack-visible text and/or files.
+In Office-adapter mode, Office Gateway posts canonical user turns to `/chat/webhooks/office`.
+The adapter sends every completed, user-visible assistant message back to Office in sequence. An
+explicit `chat.send` is another nonterminal Office message and does not suppress the automatic
+terminal final. Office persists all messages but sends only that terminal final to Slack.
+
+In legacy direct-Slack mode, mentions and DMs continue to work as before: auto relay posts the
+first/distinct-final assistant text directly to Slack, and an explicit `chat.send` suppresses that
+legacy auto relay for the turn.
 
 To archive the office agent and unlink its thread, explicitly mention the bot with only `done` or `archive` after the mention (for example, `@cto done`). Matching ignores case and surrounding whitespace after mention cleaning. Bare `done` or `archive` replies in a linked thread, `/archive`, and prose such as `archive this` or `done?` do not archive.
 
@@ -64,6 +82,22 @@ Expose it with a tunnel and configure Slack Event Subscriptions + Interactivity 
 ```text
 https://<tunnel-host>/slack/events
 ```
+
+## Office adapter mode
+
+```bash
+PASEO_CHAT_CHANNEL_ADAPTER=office \
+PASEO_CHAT_OFFICE_TOKEN=... \
+PASEO_CHAT_OFFICE_CALLBACK_KEY_ID=... \
+PASEO_CHAT_OFFICE_CALLBACK_SECRET=... \
+PASEO_CHAT_HTTP_PORT=8787 \
+node packages/chat/dist/index.js
+```
+
+The ingress receipt and payload digest are idempotency keys. A matching retry returns the same
+agent/turn; the same receipt with different content is rejected. Existing/migrated bindings carry
+their preserved Paseo agent ID. A new provisioning binding omits it only on the first message, so
+ChatBridge creates the agent while processing that message and never dispatches it twice.
 
 ## Email intake (Resend)
 

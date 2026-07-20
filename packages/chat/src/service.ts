@@ -624,6 +624,7 @@ export class ChatBridgeService {
   }
 
   private async suppressActiveAutoRelay(externalThreadId: string): Promise<void> {
+    if (externalThreadId.startsWith("office:")) return;
     await this.store.updateBinding(externalThreadId, (binding) => {
       binding.activeRelayId = null;
     });

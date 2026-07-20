@@ -93,6 +93,39 @@ describe("loadConfig GitHub webhook", () => {
   });
 });
 
+describe("loadConfig Office adapter", () => {
+  it("keeps Slack as the default channel adapter", async () => {
+    const home = await createTempHome();
+    const config = loadConfig({ PASEO_HOME: home } as NodeJS.ProcessEnv);
+
+    expect(config.channelAdapter).toBe("slack");
+    expect(config.officeAdapter).toBeNull();
+  });
+
+  it("requires and resolves the Office ingress and callback credentials", async () => {
+    const home = await createTempHome();
+    expect(() =>
+      loadConfig({
+        PASEO_HOME: home,
+        PASEO_CHAT_CHANNEL_ADAPTER: "office",
+      } as NodeJS.ProcessEnv),
+    ).toThrow("PASEO_CHAT_OFFICE_TOKEN");
+
+    const config = loadConfig({
+      PASEO_HOME: home,
+      PASEO_CHAT_CHANNEL_ADAPTER: "office",
+      PASEO_CHAT_OFFICE_TOKEN: " ingress-token ",
+      PASEO_CHAT_OFFICE_CALLBACK_KEY_ID: " callback-key ",
+      PASEO_CHAT_OFFICE_CALLBACK_SECRET: " callback-secret ",
+    } as NodeJS.ProcessEnv);
+    expect(config.officeAdapter).toEqual({
+      inboundToken: "ingress-token",
+      callbackKeyId: "callback-key",
+      callbackSecret: "callback-secret",
+    });
+  });
+});
+
 describe("loadConfig chat.email", () => {
   it("reads chat.email from the persisted config.json", async () => {
     const home = await createTempHome();

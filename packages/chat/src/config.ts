@@ -42,6 +42,10 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true" || value === "1"),
   PASEO_CHAT_RELAY_MODE: z.enum(["auto", "manual"]).default("auto"),
+  PASEO_CHAT_CHANNEL_ADAPTER: z.enum(["slack", "office"]).default("slack"),
+  PASEO_CHAT_OFFICE_TOKEN: z.string().optional(),
+  PASEO_CHAT_OFFICE_CALLBACK_KEY_ID: z.string().optional(),
+  PASEO_CHAT_OFFICE_CALLBACK_SECRET: z.string().optional(),
   PASEO_CHAT_SLACK_MODE: z.enum(["socket", "http"]).default("socket"),
   PASEO_CHAT_HTTP_HOST: z.string().default("127.0.0.1"),
   PASEO_CHAT_HTTP_PORT: z.coerce.number().int().positive().default(8787),
@@ -236,6 +240,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const persistedEmail = loadPersistedChatEmail(paseoHome);
   const persistedRepository = loadPersistedChatRepository(paseoHome);
   const channels = parseJsonMap(parsed.PASEO_CHAT_CHANNELS_JSON);
+  const officeAdapter =
+    parsed.PASEO_CHAT_CHANNEL_ADAPTER === "office"
+      ? {
+          inboundToken: requireOfficeSetting(
+            "PASEO_CHAT_OFFICE_TOKEN",
+            parsed.PASEO_CHAT_OFFICE_TOKEN,
+          ),
+          callbackKeyId: requireOfficeSetting(
+            "PASEO_CHAT_OFFICE_CALLBACK_KEY_ID",
+            parsed.PASEO_CHAT_OFFICE_CALLBACK_KEY_ID,
+          ),
+          callbackSecret: requireOfficeSetting(
+            "PASEO_CHAT_OFFICE_CALLBACK_SECRET",
+            parsed.PASEO_CHAT_OFFICE_CALLBACK_SECRET,
+          ),
+        }
+      : null;
   return {
     provider: persistedDefaults.provider ?? parsed.PASEO_CHAT_PROVIDER,
     model: persistedDefaults.model ?? parsed.PASEO_CHAT_MODEL,
@@ -254,6 +275,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     ),
     showReasoning: parsed.PASEO_CHAT_SHOW_REASONING ?? false,
     relayMode: parsed.PASEO_CHAT_RELAY_MODE,
+    channelAdapter: parsed.PASEO_CHAT_CHANNEL_ADAPTER,
+    officeAdapter,
     slackMode: parsed.PASEO_CHAT_SLACK_MODE,
     httpHost: parsed.PASEO_CHAT_HTTP_HOST,
     httpPort: parsed.PASEO_CHAT_HTTP_PORT,
@@ -282,4 +305,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     githubWebhookSecret: parsed.PASEO_CHAT_GITHUB_WEBHOOK_SECRET?.trim() || undefined,
     maxUploadBytes: parsed.PASEO_CHAT_MAX_UPLOAD_BYTES,
   };
+}
+
+function requireOfficeSetting(name: string, value: string | undefined): string {
+  const resolved = value?.trim();
+  if (!resolved) throw new Error(`${name} is required when PASEO_CHAT_CHANNEL_ADAPTER=office`);
+  return resolved;
 }

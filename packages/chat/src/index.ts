@@ -1,4 +1,4 @@
-import { Chat, type Chat as ChatRuntime } from "chat";
+import { Chat, type Adapter, type Chat as ChatRuntime } from "chat";
 import { createSlackAdapter, type SlackAdapter } from "@chat-adapter/slack";
 import { loadConfig, type ResolvedChatBridgeConfig } from "./config.js";
 import { connectToPaseoDaemon, resolveChatRepositoryPath } from "./paseo-client.js";
@@ -13,6 +13,8 @@ import { EmailIntakeBridge } from "./intake/email-bridge.js";
 import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
 import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
+import { OfficeAdapter, type OfficeTurnRegistration } from "./office-adapter.js";
+import { getBindingOwnerAgentId } from "./state/thread-session-store.js";
 
 type PaseoDaemonClient = Awaited<ReturnType<typeof connectToPaseoDaemon>>;
 type InboundHttpServer = ReturnType<typeof startInboundHttpServer>;
@@ -24,32 +26,34 @@ interface EmailIntakes {
 function startEmailIntakes(input: {
   config: ResolvedChatBridgeConfig;
   chat: ChatRuntime;
-  slack: SlackAdapter;
+  slack: SlackAdapter | null;
   client: PaseoDaemonClient;
   state: ThreadSessionStore;
   bridge: ChatBridge;
 }): EmailIntakes {
+  const slack = input.slack;
   const classifier = input.config.emailClassifier
     ? createDefaultEmailClassifier(input.config.emailClassifier)
     : undefined;
-  const emailIntake = input.config.email
-    ? new EmailIntakeBridge({
-        email: input.config.email,
-        relayMode: input.config.relayMode,
-        stateDir: input.config.stateDir,
-        maxUploadBytes: input.config.maxUploadBytes,
-        officePrompt: loadOfficePrompt(input.config),
-        ...(classifier ? { classifier } : {}),
-        chat: {
-          postChannelMessage: (channelId, message) =>
-            input.slack.postChannelMessage(channelId, message),
-          thread: (threadId) => input.chat.thread(threadId),
-        },
-        client: input.client,
-        store: input.state,
-        bridge: input.bridge,
-      })
-    : null;
+  const emailIntake =
+    input.config.email && slack
+      ? new EmailIntakeBridge({
+          email: input.config.email,
+          relayMode: input.config.relayMode,
+          stateDir: input.config.stateDir,
+          maxUploadBytes: input.config.maxUploadBytes,
+          officePrompt: loadOfficePrompt(input.config),
+          ...(classifier ? { classifier } : {}),
+          chat: {
+            postChannelMessage: (channelId, message) =>
+              slack.postChannelMessage(channelId, message),
+            thread: (threadId) => input.chat.thread(threadId),
+          },
+          client: input.client,
+          store: input.state,
+          bridge: input.bridge,
+        })
+      : null;
   return { emailIntake };
 }
 
@@ -58,15 +62,23 @@ function startHttpBridge(input: {
   chat: ChatRuntime;
   emailIntake: EmailIntakeBridge | null;
   githubMergeNotifier: GithubMergeNotifier | null;
+  officeWebhookEnabled: boolean;
 }): InboundHttpServer | null {
-  if (input.config.slackMode !== "http" && !input.emailIntake && !input.githubMergeNotifier) {
+  if (
+    (input.config.channelAdapter !== "slack" || input.config.slackMode !== "http") &&
+    !input.officeWebhookEnabled &&
+    !input.emailIntake &&
+    !input.githubMergeNotifier
+  ) {
     return null;
   }
   return startInboundHttpServer({
     chat: input.chat,
     host: input.config.httpHost,
     port: input.config.httpPort,
-    slackWebhookEnabled: input.config.slackMode === "http",
+    slackWebhookEnabled:
+      input.config.channelAdapter === "slack" && input.config.slackMode === "http",
+    officeWebhookEnabled: input.officeWebhookEnabled,
     ...(input.emailIntake && input.config.email?.provider === "resend"
       ? {
           emailWebhook: (rawBody: string, headers: Record<string, string | string[] | undefined>) =>
@@ -90,6 +102,7 @@ function logReady(input: {
   httpServer: InboundHttpServer | null;
   emailIntake: EmailIntakeBridge | null;
   githubMergeNotifier: GithubMergeNotifier | null;
+  channelAdapter: "slack" | "office";
 }): void {
   const serverInfo = input.client.getLastServerInfoMessage();
   console.log("Office chat bridge v1 ready");
@@ -99,13 +112,19 @@ function logReady(input: {
     `  provider/model/mode: ${input.config.provider} / ${input.config.model} / ${input.config.modeId}`,
   );
   console.log(`  state: ${input.config.stateDir}`);
-  console.log(`  slack mode: ${input.config.slackMode}`);
+  console.log(`  channel adapter: ${input.channelAdapter}`);
+  if (input.channelAdapter === "slack") console.log(`  slack mode: ${input.config.slackMode}`);
   console.log(`  relay mode: ${input.config.relayMode}`);
   console.log(
     `  chat service: http://${input.config.serviceHost}:${input.config.servicePort}/chat-bridge/rpc`,
   );
-  if (input.httpServer && input.config.slackMode === "http") {
+  if (input.httpServer && input.channelAdapter === "slack" && input.config.slackMode === "http") {
     console.log(`  http: http://${input.config.httpHost}:${input.config.httpPort}/slack/events`);
+  }
+  if (input.httpServer && input.channelAdapter === "office") {
+    console.log(
+      `  office webhook: http://${input.config.httpHost}:${input.config.httpPort}/chat/webhooks/office`,
+    );
   }
   if (input.httpServer && input.githubMergeNotifier) {
     console.log(
@@ -137,15 +156,81 @@ export async function main(): Promise<void> {
   const chatState = new FileChatStateAdapter(config.stateDir);
   const permissions = new PermissionBridge(client, state);
   const focus = new FocusRelay(client, state);
-  const slack = createSlackAdapter({
-    mode: config.slackMode === "http" ? "webhook" : "socket",
-    botToken: process.env.SLACK_BOT_TOKEN,
-    appToken: process.env.SLACK_APP_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-  });
-  const bridge = new ChatBridge(config, client, state, permissions, focus, slack);
+  const persistOfficeTurn = async (input: OfficeTurnRegistration & { agentId: string }) => {
+    await state.updateSession(input.threadId, (session) => {
+      session.activeOfficeTurn = {
+        version: input.version,
+        kind: input.kind,
+        bindingId: input.bindingId,
+        runId: input.runId,
+        receiptId: input.receiptId,
+        providerTurnId: input.providerTurnId,
+        payloadDigest: input.payloadDigest,
+        agentId: input.agentId,
+        ...(input.title ? { title: input.title } : {}),
+        actor: input.actor,
+        message: input.message,
+        callbackUrl: input.callbackUrl,
+      };
+    });
+  };
+  const office = config.officeAdapter
+    ? new OfficeAdapter({
+        ...config.officeAdapter,
+        onTurnReceived: async (input) => {
+          const existing = await state.getSession(input.threadId);
+          if (!existing) {
+            if (!input.agentId) return;
+            const now = new Date().toISOString();
+            await state.upsertSession({
+              kind: "inbound-session",
+              externalThreadId: input.threadId,
+              rootAgentId: input.agentId,
+              muted: false,
+              activeRelayId: null,
+              title: input.title ?? null,
+              createdAt: now,
+              updatedAt: now,
+            });
+          } else if (input.agentId && getBindingOwnerAgentId(existing) !== input.agentId) {
+            throw new Error("OFFICE_AGENT_MISMATCH");
+          }
+        },
+        onTurnBound: persistOfficeTurn,
+        onTurnCompleted: async (threadId, providerTurnId) => {
+          await state.updateSession(threadId, (session) => {
+            if (session.activeOfficeTurn?.providerTurnId === providerTurnId)
+              session.activeOfficeTurn = undefined;
+          });
+        },
+        resolveAgentId: async (threadId) => {
+          const session = await state.getSession(threadId);
+          return session ? getBindingOwnerAgentId(session) : null;
+        },
+        resolveTurn: async (threadId) =>
+          (await state.getSession(threadId))?.activeOfficeTurn ?? null,
+        cancelTurn: async (input) => {
+          const session = await state.getSession(`office:${input.bindingId}`);
+          if (!session || getBindingOwnerAgentId(session) !== input.agentId)
+            throw new Error("OFFICE_AGENT_MISMATCH");
+          await client.cancelAgent(input.agentId);
+          return "accepted";
+        },
+      })
+    : null;
+  const slack =
+    config.channelAdapter === "slack"
+      ? createSlackAdapter({
+          mode: config.slackMode === "http" ? "webhook" : "socket",
+          botToken: process.env.SLACK_BOT_TOKEN,
+          appToken: process.env.SLACK_APP_TOKEN,
+          signingSecret: process.env.SLACK_SIGNING_SECRET,
+        })
+      : null;
+  const activeAdapter: Adapter = office ?? slack!;
+  const bridge = new ChatBridge(config, client, state, permissions, focus, activeAdapter);
   const chat = new Chat({
-    adapters: { slack },
+    adapters: office ? { office } : { slack: slack! },
     state: chatState,
     userName: process.env.PASEO_CHAT_BOT_NAME ?? "cto",
     concurrency: "queue",
@@ -199,8 +284,21 @@ export async function main(): Promise<void> {
   const githubMergeNotifier = config.githubWebhookSecret
     ? new GithubMergeNotifier(config.githubWebhookSecret, state, client)
     : null;
-  const httpServer = startHttpBridge({ config, chat, emailIntake, githubMergeNotifier });
-  logReady({ config, client, httpServer, emailIntake, githubMergeNotifier });
+  const httpServer = startHttpBridge({
+    config,
+    chat,
+    emailIntake,
+    githubMergeNotifier,
+    officeWebhookEnabled: Boolean(office),
+  });
+  logReady({
+    config,
+    client,
+    httpServer,
+    emailIntake,
+    githubMergeNotifier,
+    channelAdapter: config.channelAdapter,
+  });
 
   const shutdown = async () => {
     clearInterval(askExpiryInterval);

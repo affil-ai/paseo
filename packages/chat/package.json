@@ -23,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@chat-adapter/shared": "4.31.0",
     "@chat-adapter/slack": "4.31.0",
     "@getpaseo/client": "0.1.104-beta.4",
     "@getpaseo/protocol": "0.1.104-beta.4",

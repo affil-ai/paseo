@@ -225,6 +225,32 @@ describe("ChatBridgeService", () => {
     });
   });
 
+  it("keeps the automatic final relay active for Office adapter replies", async () => {
+    const dir = await createTempDir();
+    const store = new ThreadSessionStore(dir);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await store.upsertBinding({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-office",
+      muted: false,
+      activeRelayId: "relay-1",
+      title: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const service = new ChatBridgeService(new FakeChat(), fakeDaemonClient(), store, {
+      people: {},
+      channels: {},
+    });
+
+    await service.reply({ officeAgentId: "agent-office", message: "progress update" });
+
+    await expect(store.getSession("office:binding-1")).resolves.toMatchObject({
+      activeRelayId: "relay-1",
+    });
+  });
+
   it("posts manual replies with Markdown tables as native table cards", async () => {
     const store = new ThreadSessionStore(await createTempDir());
     const chat = new FakeChat();

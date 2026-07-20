@@ -27,6 +27,35 @@ const ChatStarterSchema = z.object({
   avatarUrl: z.string().min(1).optional(),
 });
 
+const OfficeTurnSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal("message"),
+  bindingId: z.string().min(1),
+  runId: z.string().min(1),
+  receiptId: z.string().min(1),
+  providerTurnId: z.string().min(1),
+  payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  agentId: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  actor: z.object({
+    externalUserId: z.string().min(1),
+    displayName: z.string().min(1),
+    email: z.email().optional(),
+  }),
+  message: z.object({
+    markdown: z.string(),
+    files: z.array(
+      z.object({
+        id: z.string().min(1),
+        filename: z.string().min(1),
+        mimeType: z.string().min(1),
+        downloadUrl: z.url(),
+      }),
+    ),
+  }),
+  callbackUrl: z.url(),
+});
+
 const InboundSessionBindingSchema = z.object({
   kind: z.literal("inbound-session"),
   externalThreadId: z.string(),
@@ -34,6 +63,7 @@ const InboundSessionBindingSchema = z.object({
   startedBy: ChatStarterSchema.optional(),
   muted: z.boolean().default(false),
   activeRelayId: z.string().nullable().default(null),
+  activeOfficeTurn: OfficeTurnSchema.optional(),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -48,6 +78,7 @@ const OutboundConversationBindingSchema = z.object({
   subscribed: z.boolean().default(true),
   pendingRequestId: z.string().optional(),
   activeRelayId: z.string().nullable().default(null),
+  activeOfficeTurn: OfficeTurnSchema.optional(),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -72,6 +103,7 @@ const LegacyThreadSessionSchema = z
     rootAgentId: session.rootAgentId,
     muted: session.muted,
     activeRelayId: session.activeRelayId,
+    activeOfficeTurn: undefined,
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
@@ -179,6 +211,7 @@ const StoreSchema = z.object({
 
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
 export type ChatStarter = z.infer<typeof ChatStarterSchema>;
+export type OfficeTurn = z.infer<typeof OfficeTurnSchema>;
 export type InboundSessionBinding = z.infer<typeof InboundSessionBindingSchema>;
 export type OutboundConversationBinding = z.infer<typeof OutboundConversationBindingSchema>;
 export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;

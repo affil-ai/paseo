@@ -18,7 +18,6 @@ import {
   LinkButton,
   Actions,
   Card,
-  type Adapter,
   type AdapterPostableMessage,
   type EmojiValue,
   type Message,
@@ -67,9 +66,30 @@ export interface ChatBridgeClient {
 }
 
 interface ChatBridgeAdapter {
+  name?: string;
   botUserId?: string;
   getUser?: (userId: string) => Promise<UserInfo | null>;
+  hasActiveTurn?(externalThreadId: string): Promise<boolean>;
   postMessage(externalThreadId: string, message: string | AdapterPostableMessage): Promise<unknown>;
+  postTurnEvent?(event: OfficeTurnRelayEvent): Promise<unknown>;
+  postTurnFailure?(event: OfficeTurnFailureEvent): Promise<unknown>;
+}
+
+export interface OfficeTurnRelayEvent {
+  externalThreadId: string;
+  agentId: string;
+  relayId: string;
+  phase: "message" | "final";
+  sequence: number;
+  text: string;
+  terminal: boolean;
+}
+
+export interface OfficeTurnFailureEvent {
+  externalThreadId: string;
+  agentId: string;
+  relayId: string;
+  errorCode: string;
 }
 
 export interface ChatBridgeThread extends Omit<SlackIntakeThread, "adapter"> {
@@ -202,7 +222,7 @@ export class ChatBridge {
     private readonly store: ThreadSessionStore,
     private readonly permissions: Pick<PermissionBridge, "answerPendingQuestion">,
     private readonly focus: Pick<FocusRelay, "escapeToRoot">,
-    private readonly fallbackAdapter?: Pick<Adapter, "postMessage">,
+    private readonly fallbackAdapter?: ChatBridgeAdapter,
   ) {
     this.customOfficePrompt = loadOfficePrompt(config);
   }
@@ -292,6 +312,12 @@ export class ChatBridge {
     if (!session) return;
     const thread = this.getThread(session.externalThreadId);
     if (!thread && !this.fallbackAdapter) return;
+    const relayAdapter = thread?.adapter ?? this.fallbackAdapter;
+    if (
+      relayAdapter?.hasActiveTurn &&
+      !(await relayAdapter.hasActiveTurn(session.externalThreadId))
+    )
+      return;
     if (session.activeRelayId) return;
 
     const relayId = `ui:${agentId}:${eventSeq ?? Date.now()}`;
@@ -757,6 +783,18 @@ export class ChatBridge {
       await this.clearActiveRelayIfCurrent(input.externalThreadId, input.relayId);
       if (!wasCurrent) return;
       const reason = error instanceof Error ? error.message : String(error);
+      const relayAdapter = input.thread?.adapter ?? this.fallbackAdapter;
+      if (relayAdapter?.postTurnFailure) {
+        await relayAdapter
+          .postTurnFailure({
+            externalThreadId: input.externalThreadId,
+            agentId: input.agentId,
+            relayId: input.relayId,
+            errorCode: reason.slice(0, 100) || "OFFICE_RELAY_FAILED",
+          })
+          .catch(() => {});
+        return;
+      }
       await this.postMessage(
         input.thread,
         input.externalThreadId,
@@ -777,6 +815,49 @@ export class ChatBridge {
   }): Promise<void> {
     const receipt = `slack:${input.externalThreadId}:${input.messageId}:${input.source}:turn`;
     if (!(await this.store.markDeliveryStarted(receipt))) return;
+
+    const relayAdapter = input.thread?.adapter ?? this.fallbackAdapter;
+    if (relayAdapter?.postTurnEvent) {
+      const relayResult = await this.waitForAssistantTextBlocks({
+        agentId: input.agentId,
+        sinceSeq: input.sinceSeq,
+        externalThreadId: input.externalThreadId,
+        relayId: input.relayId,
+        onFirstText: async () => {},
+        onClosedText: input.postFirstReply
+          ? async (text, sequence) => {
+              await relayAdapter.postTurnEvent?.({
+                externalThreadId: input.externalThreadId,
+                agentId: input.agentId,
+                relayId: input.relayId,
+                phase: "message",
+                sequence,
+                text,
+                terminal: false,
+              });
+            }
+          : undefined,
+      });
+      if (!(await this.isRelayCurrent(input.externalThreadId, input.relayId))) {
+        await this.store.markDeliveryCompleted(receipt);
+        return;
+      }
+      const finalText = relayResult.finalText || (relayResult.sawAssistantTextBlock ? "" : "Done.");
+      await relayAdapter.postTurnEvent({
+        externalThreadId: input.externalThreadId,
+        agentId: input.agentId,
+        relayId: input.relayId,
+        phase: "final",
+        sequence: Math.max(0, relayResult.relayableBlockCount - 1),
+        text: finalText,
+        terminal: true,
+      });
+      await this.store.updateSession(input.externalThreadId, (current) => {
+        if (current.activeRelayId === input.relayId) current.activeRelayId = null;
+      });
+      await this.store.markDeliveryCompleted(receipt);
+      return;
+    }
 
     const firstReply = { text: null as string | null };
     const relayResult = await this.waitForAssistantTextBlocks({
@@ -830,10 +911,17 @@ export class ChatBridge {
     externalThreadId: string;
     relayId: string;
     onFirstText: (text: string) => Promise<void>;
-  }): Promise<{ finalText: string; sawAssistantTextBlock: boolean }> {
+    onClosedText?: (text: string, sequence: number) => Promise<void>;
+  }): Promise<{
+    finalText: string;
+    sawAssistantTextBlock: boolean;
+    relayableBlockCount: number;
+  }> {
     let firstTextPosted = false;
     let finalText = "";
     let sawAssistantTextBlock = false;
+    let closedTextCount = 0;
+    let relayableBlockCount = 0;
 
     while (await this.isRelayCurrent(input.externalThreadId, input.relayId)) {
       const timeline = await this.client.fetchAgentTimeline(input.agentId, {
@@ -848,11 +936,22 @@ export class ChatBridge {
       const relayableBlocks = assistantBlocks.filter((block) =>
         isRelayableAssistantText(block.text),
       );
+      relayableBlockCount = relayableBlocks.length;
+
+      const status = timeline.agent?.status;
+      const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
+      const closedBlocks = agentStopped
+        ? relayableBlocks.slice(0, -1)
+        : relayableBlocks.filter((block) => block.lastEntryIndex < timeline.entries.length - 1);
+      while (input.onClosedText && closedTextCount < closedBlocks.length) {
+        const block = closedBlocks[closedTextCount];
+        if (!block) break;
+        await input.onClosedText(block.text, closedTextCount);
+        closedTextCount += 1;
+      }
 
       const firstBlock = relayableBlocks[0];
       if (!firstTextPosted && firstBlock) {
-        const status = timeline.agent?.status;
-        const agentStopped = Boolean(status && status !== "initializing" && status !== "running");
         const firstBlockClosed = firstBlock.lastEntryIndex < timeline.entries.length - 1;
         if (firstBlock.text && (firstBlockClosed || agentStopped)) {
           firstTextPosted = true;
@@ -862,14 +961,13 @@ export class ChatBridge {
 
       finalText = relayableBlocks.at(-1)?.text ?? finalText;
 
-      const status = timeline.agent?.status;
       if (status && status !== "initializing" && status !== "running") {
-        return { finalText, sawAssistantTextBlock };
+        return { finalText, sawAssistantTextBlock, relayableBlockCount };
       }
       await sleep(1_000);
     }
 
-    return { finalText, sawAssistantTextBlock };
+    return { finalText, sawAssistantTextBlock, relayableBlockCount };
   }
 
   private async getTimelineNextSeq(agentId: string): Promise<number> {

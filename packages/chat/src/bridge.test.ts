@@ -83,13 +83,14 @@ function timelineEntry(seq: number, item: TimelineItem) {
   };
 }
 
-async function runAutoRelayWithTimeline(items: TimelineItem[]) {
+async function runAutoRelayWithTimeline(items: TimelineItem[], office = false) {
   const stateDir = await mkdtemp(join(tmpdir(), "paseo-chat-bridge-test-"));
   const externalThreadId = "slack:D123:111.222";
   const rootAgentId = "agent-1";
   const relayId = "relay-1";
   const store = new ThreadSessionStore(stateDir);
   const postedMessages: unknown[] = [];
+  const relayedEvents: unknown[] = [];
   await store.upsertSession({
     kind: "inbound-session",
     externalThreadId,
@@ -125,7 +126,13 @@ async function runAutoRelayWithTimeline(items: TimelineItem[]) {
   );
   const thread = {
     id: externalThreadId,
-    adapter: {},
+    adapter: office
+      ? {
+          postTurnEvent: async (event: unknown) => {
+            relayedEvents.push(event);
+          },
+        }
+      : {},
     post: async (message: unknown) => {
       postedMessages.push(message);
     },
@@ -150,6 +157,7 @@ async function runAutoRelayWithTimeline(items: TimelineItem[]) {
     externalThreadId,
     rootAgentId,
     postedMessages,
+    relayedEvents,
     deliveryReceipt: `slack:${externalThreadId}:333.444:test:turn`,
   };
 }
@@ -475,6 +483,44 @@ describe("ChatBridge session creation", () => {
 });
 
 describe("ChatBridge auto relay", () => {
+  it("emits every completed assistant message to Office and marks only the terminal final", async () => {
+    const result = await runAutoRelayWithTimeline(
+      [
+        { type: "assistant_message", text: "I found the affected service." },
+        { type: "reasoning", text: "separator" },
+        { type: "assistant_message", text: "I am applying the fix." },
+        { type: "reasoning", text: "separator" },
+        { type: "assistant_message", text: "The fix is complete." },
+      ],
+      true,
+    );
+    try {
+      expect(result.postedMessages).toEqual([]);
+      expect(result.relayedEvents).toEqual([
+        expect.objectContaining({
+          phase: "message",
+          sequence: 0,
+          text: "I found the affected service.",
+          terminal: false,
+        }),
+        expect.objectContaining({
+          phase: "message",
+          sequence: 1,
+          text: "I am applying the fix.",
+          terminal: false,
+        }),
+        expect.objectContaining({
+          phase: "final",
+          sequence: 2,
+          text: "The fix is complete.",
+          terminal: true,
+        }),
+      ]);
+    } finally {
+      await rm(result.stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not post system-error-only artifacts or fall back to Done", async () => {
     const result = await runAutoRelayWithTimeline([
       {

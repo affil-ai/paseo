@@ -737,18 +737,19 @@ strict per-channel isolation):
 If added, this must not reintroduce bridge-owned worktree creation or "run vs build"
 classification — those remain agent decisions.
 
-## Slack output relay (timeline polling, no streaming)
+## Output relay (timeline polling, no streaming)
 
-Slack v1 intentionally does **not** display intermediate assistant/tool output: native Slack
+Slack intentionally does **not** display intermediate assistant/tool output: native Slack
 streaming can show confusing error chrome, and partial messages are too noisy for the desired
 thread UX. Relay behavior is selected by `PASEO_CHAT_RELAY_MODE`:
 
-- `auto` (default): the bridge polls the daemon timeline and automatically posts first/final
-  assistant text to the bound Slack thread.
+- `auto` (default): the bridge polls the daemon timeline. The legacy Slack adapter posts
+  first/final text; the Office adapter emits every completed assistant message to Office and marks
+  exactly one terminal final.
 - `manual`: the bridge never auto-posts assistant text; the office agent must call `chat.send`
   to send Slack-visible text and/or files.
 
-In `auto` mode, the bridge posts only two kinds of normal thread replies:
+In legacy direct-Slack mode, the bridge posts only two kinds of normal thread replies:
 
 1. The first complete assistant text block for the turn.
 2. The final assistant text block after the agent reaches a terminal state.
@@ -756,16 +757,23 @@ In `auto` mode, the bridge posts only two kinds of normal thread replies:
 If the first and final text are identical, the bridge posts once. Tool calls, reasoning, plan
 updates, and partial assistant chunks are never posted to Slack.
 
-**How it works.** For Slack-originated turns, `bridge.ts` records the timeline sequence number
+**How it works.** For inbound turns, `bridge.ts` records the timeline sequence number
 before sending the prompt. For UI-originated turns on an agent that is linked to a Slack thread,
 the bridge observes `turn_started` and starts the same relay. A background relay polls
 `fetchAgentTimeline(..., { projection: "canonical" })` for assistant messages at or after that
 sequence. It posts the first complete assistant block once it is no longer the newest row (or
 the agent has stopped), then keeps polling until the office agent is no longer
 `initializing`/`running` and posts the last assistant block as the final reply. Auto-relay posts
-are audited in the chat bridge state. If the office agent explicitly posts to the same binding
+are audited in the chat bridge state. In legacy Slack mode, if the office agent explicitly posts to the same binding
 with a `chat.*` tool while an auto relay is active, that tool post suppresses the active auto
 relay for the turn so Slack has one source of truth.
+
+With `PASEO_CHAT_CHANNEL_ADAPTER=office`, the Chat SDK Office adapter replaces the Slack adapter.
+Each closed assistant block is signed and emitted to Office as a nonterminal `message` event; when
+the agent stops, the last assistant block is emitted as the terminal `final`. Explicit `chat.send`
+events remain nonterminal and do not suppress that final. Office stores every event for its UI and
+is solely responsible for enqueueing the terminal final to Slack. Tool calls, raw reasoning, and
+partial token chunks are never exposed as Office messages.
 
 If native Slack streaming is ever reintroduced, it must be behind an explicit product decision
 and preserve the reply contract above: no top-level messages, no duplicate final text, and no
@@ -891,11 +899,12 @@ URL. The bridge links to the owning office workspace and does not link directly 
 
 ```
 packages/chat/
-  package.json            # @getpaseo/chat, private, ESM; deps: chat, @chat-adapter/slack,
+  package.json            # @getpaseo/chat, private, ESM; deps: chat, @chat-adapter/slack/shared,
                           #   @getpaseo/client, @getpaseo/protocol, ws — no DB/Redis dependency
   tsconfig.json           # extends ../../tsconfig.base.json, NodeNext (cli pattern)
   src/
     index.ts              # boot: load config, connect daemon, construct Chat + adapters, register handlers
+    office-adapter.ts     # authenticated Office platform adapter; signed callbacks and turn correlation
     config.ts             # env: officeRepoPath (the office repo), provider (default pi), model
                           #   (default OpenRouter Fable 5), thinkingOptionId (default high),
                           #   modeId (default empty), ackEmoji, officePromptPath, deepLinkBaseUrl,
