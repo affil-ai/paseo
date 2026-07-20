@@ -129,6 +129,7 @@ interface OfficeCallbackFile {
 }
 
 type OfficePresentationItem =
+  | { type: "reasoning" }
   | { type: "assistant_message"; text: string; files: OfficeCallbackFile[] }
   | {
       type: "tool_call";

@@ -318,6 +318,14 @@ function projectItem(
       item: { type: "assistant_message", text, files: [] },
     };
   }
+  if (item.type === "reasoning") {
+    // Office should show that the agent is thinking, but the bridge must not
+    // export or persist private chain-of-thought text.
+    return {
+      itemKey: `reasoning:${entry.seqStart}`,
+      item: { type: "reasoning" },
+    };
+  }
   if (item.type !== "tool_call") return null;
   const detail = boundedValue(item.detail, 32_000);
   return {
@@ -337,6 +345,7 @@ function projectItem(
 }
 
 type PresentationItem =
+  | { type: "reasoning" }
   | { type: "assistant_message"; text: string; files: [] }
   | {
       type: "tool_call";

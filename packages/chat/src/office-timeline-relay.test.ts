@@ -62,7 +62,8 @@ describe("OfficeTimelineRelay", () => {
     let entries = [
       entry(1, { type: "user_message", text: "Ship it" }),
       entry(2, { type: "assistant_message", text: "I’ll inspect the repo.", messageId: "a-1" }),
-      entry(3, {
+      entry(3, { type: "reasoning", text: "private reasoning must not leave Paseo" }),
+      entry(4, {
         type: "tool_call",
         callId: "tool-1",
         name: "shell",
@@ -70,7 +71,7 @@ describe("OfficeTimelineRelay", () => {
         detail: { command: "git status", authorization: "secret" },
         error: null,
       }),
-      entry(4, { type: "assistant_message", text: "The change is complete.", messageId: "a-2" }),
+      entry(5, { type: "assistant_message", text: "The change is complete.", messageId: "a-2" }),
     ];
     const events: OfficeV2RelayEvent[] = [];
     const relay = new OfficeTimelineRelay(
@@ -91,11 +92,18 @@ describe("OfficeTimelineRelay", () => {
       "timeline",
       "timeline",
       "timeline",
+      "timeline",
       "completed",
     ]);
     expect(events[2]).toMatchObject({
       kind: "timeline",
       occurredAt: Date.parse("2026-07-20T12:00:03.000Z"),
+      item: { type: "reasoning" },
+    });
+    expect(JSON.stringify(events)).not.toContain("private reasoning must not leave Paseo");
+    expect(events[3]).toMatchObject({
+      kind: "timeline",
+      occurredAt: Date.parse("2026-07-20T12:00:04.000Z"),
       item: {
         type: "tool_call",
         input: { command: "git status", authorization: "[redacted]" },
@@ -105,22 +113,22 @@ describe("OfficeTimelineRelay", () => {
     expect(events.every((event) => event.providerTurnId === firstProviderTurnId)).toBe(true);
 
     await relay.wake("agent-1", { kind: "completed" });
-    expect(events).toHaveLength(5);
+    expect(events).toHaveLength(6);
 
     entries = [
       ...entries,
-      entry(5, { type: "user_message", text: "Run the tests" }),
-      entry(6, { type: "assistant_message", text: "Tests pass.", messageId: "a-3" }),
+      entry(6, { type: "user_message", text: "Run the tests" }),
+      entry(7, { type: "assistant_message", text: "Tests pass.", messageId: "a-3" }),
     ];
     await relay.wake("agent-1", { kind: "completed", occurredAt: 5678 });
-    expect(events.slice(5).map((event) => event.kind)).toEqual([
+    expect(events.slice(6).map((event) => event.kind)).toEqual([
       "turnStarted",
       "timeline",
       "completed",
     ]);
-    expect(events[5]!.providerTurnId).not.toBe(firstProviderTurnId);
+    expect(events[6]!.providerTurnId).not.toBe(firstProviderTurnId);
     const stored = await store.getSession("office:binding-1");
-    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 6, epoch: "epoch-1" });
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 7, epoch: "epoch-1" });
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 });
