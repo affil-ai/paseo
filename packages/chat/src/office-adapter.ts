@@ -120,13 +120,13 @@ export interface OfficeAdapterConfig {
   cancelTurn?(input: z.infer<typeof cancelTurnSchema>): Promise<"accepted" | "alreadyCanceled">;
 }
 
-type OfficeCallbackFile = {
+interface OfficeCallbackFile {
   id: string;
   filename: string;
   mimeType: string;
   size: number;
   bytesBase64: string;
-};
+}
 
 type OfficePresentationItem =
   | { type: "assistant_message"; text: string; files: OfficeCallbackFile[] }
@@ -173,6 +173,7 @@ export type OfficeV2RelayEvent =
       itemKey: string;
       seqStart: number;
       seqEnd: number;
+      occurredAt: number;
       itemDigest: string;
       item: OfficePresentationItem;
     }
@@ -507,6 +508,7 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
       itemKey: `chat-send:${digest}`,
       seqStart: relay.acknowledgedSeq,
       seqEnd: relay.acknowledgedSeq,
+      occurredAt: Date.now(),
       itemDigest: createHash("sha256")
         .update(JSON.stringify({ type: "assistant_message", text: markdown, files: [] }))
         .digest("hex"),

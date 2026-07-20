@@ -189,6 +189,7 @@ export class OfficeTimelineRelay {
     });
     for (const projected of presentable) {
       if (projected.entry.seqEnd <= acknowledgedSeq) continue;
+      const occurredAt = Date.parse(projected.entry.timestamp);
       await this.adapter.postRelayEvent({
         version: 2,
         eventId: `${turn.providerTurnId}:timeline:${projected.itemKey}:${projected.entry.seqEnd}`,
@@ -199,6 +200,7 @@ export class OfficeTimelineRelay {
         itemKey: projected.itemKey,
         seqStart: projected.entry.seqStart,
         seqEnd: projected.entry.seqEnd,
+        occurredAt: Number.isFinite(occurredAt) ? occurredAt : Date.now(),
         itemDigest: stableDigest(projected.item),
         item: projected.item,
       });

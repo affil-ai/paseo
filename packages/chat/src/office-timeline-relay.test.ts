@@ -95,6 +95,7 @@ describe("OfficeTimelineRelay", () => {
     ]);
     expect(events[2]).toMatchObject({
       kind: "timeline",
+      occurredAt: Date.parse("2026-07-20T12:00:03.000Z"),
       item: {
         type: "tool_call",
         input: { command: "git status", authorization: "[redacted]" },

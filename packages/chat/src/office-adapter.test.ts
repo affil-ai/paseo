@@ -173,6 +173,7 @@ describe("OfficeAdapter", () => {
       itemKey: "assistant:assistant-1",
       seqStart: 10,
       seqEnd: 10,
+      occurredAt: 1_721_476_800_000,
       itemDigest: "d".repeat(64),
       item: { type: "assistant_message", text: "Done.", files: [] },
     };
