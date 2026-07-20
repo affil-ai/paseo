@@ -48,6 +48,12 @@ const inboundTurnV2Schema = z.object({
     markdown: z.string(),
     files: z.array(inboundFileSchema).max(10),
   }),
+  priorContext: z
+    .object({
+      markdown: z.string(),
+      files: z.array(inboundFileSchema).max(10),
+    })
+    .optional(),
   callbackUrl: z.url(),
 });
 
@@ -367,7 +373,10 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
         isMe: false,
       },
       metadata: { dateSent: new Date(), edited: false },
-      attachments: turn.message.files.map((file) => ({
+      attachments: [
+        ...(turn.version === 2 ? (turn.priorContext?.files ?? []) : []),
+        ...turn.message.files,
+      ].map((file) => ({
         type: fileKind(file.mimeType),
         name: file.filename,
         mimeType: file.mimeType,
@@ -382,6 +391,15 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
       links: [],
       isMention: !turn.agentId,
     });
+  }
+
+  getPriorContext(message: Message): string | null {
+    const turn = (message.raw as OfficeRawMessage).turn;
+    return turn.version === 2 ? (turn.priorContext?.markdown ?? null) : null;
+  }
+
+  getThreadTitle(message: Message): string | null {
+    return (message.raw as OfficeRawMessage).turn.title ?? null;
   }
 
   async postRelayEvent(event: OfficeV2RelayEvent): Promise<void> {

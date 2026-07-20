@@ -426,14 +426,18 @@ describe("ChatBridge session creation", () => {
         {
           source: { kind: "directory", path: "/tmp/office" },
           firstAgentContext: {
-            prompt: `${priorContext}\n\ndebug, no mid turn replies`,
+            prompt: "debug, no mid turn replies",
             attachments: [],
           },
         },
       ]);
       expect(sessionHarness.createAgentCalls).toEqual([
         expect.objectContaining({
-          initialPrompt: `Prior thread context:\n${priorContext}\n\nREMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.\n\nVivek (@vivek): debug, no mid turn replies`,
+          title: "debug, no mid turn replies",
+          systemPrompt: expect.stringContaining(
+            `Prior Slack thread context (background only, not a new user message):\n<prior_slack_thread_context>\n${priorContext}\n</prior_slack_thread_context>`,
+          ),
+          initialPrompt: `REMINDER: This came from Slack. Manual delivery is on. Slack will not see your final assistant message unless you call chat.send. Always end this turn with one final chat.send; skip only if the user explicitly asks for no more Slack messages. Use mid-turn chat.send sparingly per the system Slack delivery rules.\n\nVivek (@vivek): debug, no mid turn replies`,
         }),
       ]);
       expect(sessionHarness.capturedThreadReads).toBe(1);

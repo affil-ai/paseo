@@ -57,6 +57,21 @@ const OfficeTurnV2Schema = z.object({
       }),
     ),
   }),
+  priorContext: z
+    .object({
+      markdown: z.string(),
+      files: z.array(
+        z.object({
+          id: z.string().min(1),
+          filename: z.string().min(1),
+          mimeType: z.string().min(1),
+          sizeBytes: z.number().int().nonnegative(),
+          contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+          downloadUrl: z.url(),
+        }),
+      ),
+    })
+    .optional(),
   callbackUrl: z.url(),
 });
 

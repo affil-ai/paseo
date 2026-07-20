@@ -129,6 +129,30 @@ describe("OfficeAdapter", () => {
     await expect(conflict.json()).resolves.toEqual({ error: "OFFICE_RECEIPT_CONFLICT" });
   });
 
+  it("keeps prior Slack context separate from the current human message", async () => {
+    const processed: Array<{ threadId: string; message: Message }> = [];
+    const adapter = await initializedAdapter({}, processed);
+    const response = await adapter.handleWebhook(
+      officeRequest({
+        ...turn,
+        agentId: undefined,
+        title: "Explore affiliate notifications",
+        priorContext: {
+          markdown: "John: The approval flow already has the affiliate links.",
+          files: [],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const message = processed[0]?.message;
+    expect(message?.text).toBe("Please ship the fix.");
+    expect(message && adapter.getPriorContext(message)).toBe(
+      "John: The approval flow already has the affiliate links.",
+    );
+    expect(message && adapter.getThreadTitle(message)).toBe("Explore affiliate notifications");
+  });
+
   it("registers an existing binding without invoking Chat SDK", async () => {
     const registrations: unknown[] = [];
     const adapter = await initializedAdapter({

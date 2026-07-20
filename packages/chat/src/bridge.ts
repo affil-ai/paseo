@@ -37,6 +37,7 @@ import {
   assembleExternalIntakeSystemPrompt,
   assembleFollowupPrompt,
   assembleInitialPrompt,
+  appendPriorThreadContext,
   externalIntakeAgentPrompt,
   loadOfficePrompt,
 } from "./prompt.js";
@@ -71,6 +72,8 @@ interface ChatBridgeAdapter {
   getUser?: (userId: string) => Promise<UserInfo | null>;
   hasActiveTurn?(externalThreadId: string): Promise<boolean>;
   usesPersistentRelay?(externalThreadId: string): Promise<boolean>;
+  getPriorContext?(message: Message): string | null;
+  getThreadTitle?(message: Message): string | null;
   postMessage(externalThreadId: string, message: string | AdapterPostableMessage): Promise<unknown>;
   postTurnEvent?(event: OfficeTurnRelayEvent): Promise<unknown>;
   postTurnFailure?(event: OfficeTurnFailureEvent): Promise<unknown>;
@@ -643,32 +646,32 @@ export class ChatBridge {
     message: Message,
     normalized: Awaited<ReturnType<typeof normalizeMessage>>,
   ) {
-    const title = titleFromText(normalized.cleanedText);
-    let threadContext = "";
-    if (!thread.isDM) {
+    const adapterTitle = thread.adapter.getThreadTitle?.(message)?.trim();
+    const title = titleFromText(
+      adapterTitle && !/^Prior thread context\s*:/i.test(adapterTitle)
+        ? adapterTitle
+        : normalized.cleanedText,
+    );
+    let threadContext = thread.adapter.getPriorContext?.(message)?.trim() ?? "";
+    if (!threadContext && !thread.isDM)
       threadContext = await captureThreadContext(thread, message.id);
-    }
 
-    let workspaceTitlePrompt = normalized.cleanedText;
-    if (threadContext) {
-      workspaceTitlePrompt = threadContext;
-      if (normalized.cleanedText) {
-        workspaceTitlePrompt = `${threadContext}\n\n${normalized.cleanedText}`;
-      }
-    }
+    const workspaceTitlePrompt = normalized.cleanedText || title;
     const session = await this.createExternalSession({
       externalThreadId: normalized.externalThreadId,
       source: "slack",
       title,
       workspaceTitlePrompt,
-      systemPrompt: assembleExternalIntakeSystemPrompt({
-        basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
-        customPrompt: await this.customOfficePrompt,
-      }),
+      systemPrompt: appendPriorThreadContext(
+        assembleExternalIntakeSystemPrompt({
+          basePrompt: externalIntakeAgentPrompt(this.config.relayMode),
+          customPrompt: await this.customOfficePrompt,
+        }),
+        threadContext,
+      ),
       initialPrompt: assembleInitialPrompt({
         sender: normalized.sender,
         text: normalized.cleanedText,
-        threadContext,
         relayMode: this.config.relayMode,
       }),
       images: normalized.images,

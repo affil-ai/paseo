@@ -75,6 +75,12 @@ export function assembleExternalIntakeSystemPrompt(input: {
     .join("\n\n");
 }
 
+export function appendPriorThreadContext(systemPrompt: string, context: string): string {
+  const trimmed = context.trim();
+  if (!trimmed) return systemPrompt;
+  return `${systemPrompt}\n\nPrior Slack thread context (background only, not a new user message):\n<prior_slack_thread_context>\n${trimmed}\n</prior_slack_thread_context>`;
+}
+
 export async function loadOfficePrompt(config: ChatBridgeConfig): Promise<string> {
   if (!config.officePromptPath) return "";
   return fs.readFile(config.officePromptPath, "utf8");
