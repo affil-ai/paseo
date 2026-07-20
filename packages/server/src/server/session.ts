@@ -5802,6 +5802,27 @@ export class Session {
       const agentId = resolved.agentId;
       const attribution = this.resolveMessageAttribution(msg.attribution);
 
+      // The caller-provided message id is the durable dispatch receipt. A
+      // bridge retry after an ambiguous HTTP response must acknowledge the
+      // existing parent-turn boundary instead of starting a second turn.
+      if (
+        msg.messageId &&
+        this.agentManager
+          .getTimeline(agentId)
+          .some((item) => item.type === "user_message" && item.messageId === msg.messageId)
+      ) {
+        this.emit({
+          type: "send_agent_message_response",
+          payload: {
+            requestId: msg.requestId,
+            agentId,
+            accepted: true,
+            error: null,
+          },
+        });
+        return;
+      }
+
       const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {

@@ -30,7 +30,39 @@ const ChatStarterSchema = z.object({
   avatarUrl: z.string().min(1).optional(),
 });
 
-const OfficeTurnSchema = z.object({
+const OfficeTurnV2Schema = z.object({
+  version: z.literal(2),
+  kind: z.literal("message"),
+  bindingId: z.string().min(1),
+  runId: z.string().min(1),
+  receiptId: z.string().min(1),
+  payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  agentId: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  actor: z.object({
+    externalUserId: z.string().min(1),
+    displayName: z.string().min(1),
+    email: z.email().optional(),
+  }),
+  message: z.object({
+    markdown: z.string(),
+    files: z.array(
+      z.object({
+        id: z.string().min(1),
+        filename: z.string().min(1),
+        mimeType: z.string().min(1),
+        sizeBytes: z.number().int().nonnegative(),
+        contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        downloadUrl: z.url(),
+      }),
+    ),
+  }),
+  callbackUrl: z.url(),
+});
+
+// Production state may still contain the pre-relay dispatch envelope. Keep the
+// persisted record readable while normalizing all new writes to the v2 shape.
+const LegacyOfficeTurnSchema = z.object({
   version: z.literal(1),
   kind: z.literal("message"),
   bindingId: z.string().min(1),
@@ -59,6 +91,32 @@ const OfficeTurnSchema = z.object({
   callbackUrl: z.url(),
 });
 
+const OfficeTurnSchema = z.union([OfficeTurnV2Schema, LegacyOfficeTurnSchema]);
+
+const OfficeDispatchReceiptSchema = z.object({
+  runId: z.string().min(1),
+  payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  status: z.enum(["received", "attached", "terminal"]),
+  providerTurnId: z.string().min(1).optional(),
+});
+
+const OfficeAgentRelaySchema = z.object({
+  version: z.literal(2),
+  bindingId: z.string().min(1),
+  agentId: z.string().min(1),
+  callbackUrl: z.url(),
+  acknowledgedSeq: z.number().int().nonnegative().default(0),
+  epoch: z.string().min(1).optional(),
+  dispatchReceipts: z.record(z.string(), OfficeDispatchReceiptSchema).default({}),
+  activeTurn: z
+    .object({
+      providerTurnId: z.string().min(1),
+      receiptId: z.string().min(1).optional(),
+      startSeq: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
+
 const InboundSessionBindingSchema = z.object({
   kind: z.literal("inbound-session"),
   externalThreadId: z.string(),
@@ -68,6 +126,8 @@ const InboundSessionBindingSchema = z.object({
   muted: z.boolean().default(false),
   activeRelayId: z.string().nullable().default(null),
   activeOfficeTurn: OfficeTurnSchema.optional(),
+  officeRelay: OfficeAgentRelaySchema.optional(),
+  supersededByOfficeBindingId: z.string().min(1).optional(),
   // Survives turn completion so the agent-links reporter can reach the office
   // deployment between turns (activeOfficeTurn is cleared on terminal events).
   lastCallbackUrl: z.url().optional(),
@@ -86,6 +146,8 @@ const OutboundConversationBindingSchema = z.object({
   pendingRequestId: z.string().optional(),
   activeRelayId: z.string().nullable().default(null),
   activeOfficeTurn: OfficeTurnSchema.optional(),
+  officeRelay: OfficeAgentRelaySchema.optional(),
+  supersededByOfficeBindingId: z.string().min(1).optional(),
   lastCallbackUrl: z.url().optional(),
   title: z.string().nullable().default(null),
   createdAt: z.string(),
@@ -113,6 +175,8 @@ const LegacyThreadSessionSchema = z
     muted: session.muted,
     activeRelayId: session.activeRelayId,
     activeOfficeTurn: undefined,
+    officeRelay: undefined,
+    supersededByOfficeBindingId: undefined,
     lastCallbackUrl: undefined,
     title: session.title,
     createdAt: session.createdAt,
@@ -207,6 +271,7 @@ const EmailAuditRecordSchema = z.object({
 
 const StoreSchema = z.object({
   sessions: z.record(z.string(), ChatBindingSchema).default({}),
+  officeDispatchReceipts: z.record(z.string(), OfficeDispatchReceiptSchema).default({}),
   eventReceipts: z.record(z.string(), z.string()).default({}),
   deliveryReceipts: z.record(z.string(), DeliveryReceiptSchema).default({}),
   pendingQuestions: z.record(z.string(), PendingQuestionSchema).default({}),
@@ -222,6 +287,7 @@ const StoreSchema = z.object({
 export type ChatDestination = z.infer<typeof ChatDestinationSchema>;
 export type ChatStarter = z.infer<typeof ChatStarterSchema>;
 export type OfficeTurn = z.infer<typeof OfficeTurnSchema>;
+export type OfficeAgentRelay = z.infer<typeof OfficeAgentRelaySchema>;
 export type InboundSessionBinding = z.infer<typeof InboundSessionBindingSchema>;
 export type OutboundConversationBinding = z.infer<typeof OutboundConversationBindingSchema>;
 export type ChatBinding = InboundSessionBinding | OutboundConversationBinding;
@@ -235,6 +301,7 @@ type StoreData = z.infer<typeof StoreSchema>;
 function emptyStore(): StoreData {
   return {
     sessions: {},
+    officeDispatchReceipts: {},
     eventReceipts: {},
     deliveryReceipts: {},
     pendingQuestions: {},
@@ -308,7 +375,11 @@ export class ThreadSessionStore {
 
   async findSessionByAgent(agentId: string): Promise<ChatBinding | null> {
     const bindings = Object.values((await this.load()).sessions);
-    return bindings.find((binding) => bindingOwnerAgentId(binding) === agentId) ?? null;
+    const active = bindings.filter(
+      (binding) => bindingOwnerAgentId(binding) === agentId && !binding.supersededByOfficeBindingId,
+    );
+    if (active.length > 1) throw new Error("CHAT_AGENT_BINDING_CONFLICT");
+    return active[0] ?? null;
   }
 
   async findBindingsByAgent(agentId: string): Promise<ChatBinding[]> {
@@ -316,6 +387,98 @@ export class ThreadSessionStore {
     return bindings
       .filter((binding) => bindingOwnerAgentId(binding) === agentId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async registerOfficeRelay(input: {
+    externalThreadId: string;
+    bindingId: string;
+    agentId: string;
+    callbackUrl: string;
+    acknowledgedSeq: number;
+  }): Promise<{ outcome: "registered" | "alreadyRegistered"; supersededLegacySessions: number }> {
+    let outcome: "registered" | "alreadyRegistered" = "registered";
+    let supersededLegacySessions = 0;
+    await this.store.update((data) => {
+      const binding = data.sessions[input.externalThreadId];
+      if (!binding || bindingOwnerAgentId(binding) !== input.agentId) {
+        throw new Error("OFFICE_AGENT_MISMATCH");
+      }
+      if (
+        binding.officeRelay &&
+        (binding.officeRelay.bindingId !== input.bindingId ||
+          binding.officeRelay.agentId !== input.agentId)
+      ) {
+        throw new Error("OFFICE_RELAY_CONFLICT");
+      }
+      outcome = binding.officeRelay ? "alreadyRegistered" : "registered";
+      binding.officeRelay = {
+        version: 2,
+        bindingId: input.bindingId,
+        agentId: input.agentId,
+        callbackUrl: input.callbackUrl,
+        acknowledgedSeq: binding.officeRelay?.acknowledgedSeq ?? input.acknowledgedSeq,
+        ...(binding.officeRelay?.epoch ? { epoch: binding.officeRelay.epoch } : {}),
+        dispatchReceipts: binding.officeRelay?.dispatchReceipts ?? {},
+        ...(binding.officeRelay?.activeTurn ? { activeTurn: binding.officeRelay.activeTurn } : {}),
+      };
+      binding.lastCallbackUrl = input.callbackUrl;
+      binding.supersededByOfficeBindingId = undefined;
+      binding.updatedAt = new Date().toISOString();
+
+      for (const candidate of Object.values(data.sessions)) {
+        if (
+          candidate.externalThreadId === input.externalThreadId ||
+          bindingOwnerAgentId(candidate) !== input.agentId ||
+          candidate.supersededByOfficeBindingId === input.bindingId
+        ) {
+          continue;
+        }
+        candidate.supersededByOfficeBindingId = input.bindingId;
+        candidate.activeRelayId = null;
+        candidate.updatedAt = new Date().toISOString();
+        supersededLegacySessions += 1;
+      }
+    });
+    return { outcome, supersededLegacySessions };
+  }
+
+  async reserveOfficeDispatch(input: {
+    receiptId: string;
+    runId: string;
+    payloadDigest: string;
+  }): Promise<"received" | "alreadyReceived"> {
+    let outcome: "received" | "alreadyReceived" = "received";
+    await this.store.update((data) => {
+      const existing = data.officeDispatchReceipts[input.receiptId];
+      if (existing) {
+        if (existing.runId !== input.runId || existing.payloadDigest !== input.payloadDigest) {
+          throw new Error("OFFICE_RECEIPT_CONFLICT");
+        }
+        outcome = "alreadyReceived";
+        return;
+      }
+      data.officeDispatchReceipts[input.receiptId] = {
+        runId: input.runId,
+        payloadDigest: input.payloadDigest,
+        status: "received",
+      };
+    });
+    return outcome;
+  }
+
+  async updateOfficeDispatchReceipt(
+    receiptId: string,
+    input: { status: "attached" | "terminal"; providerTurnId: string },
+  ): Promise<void> {
+    await this.store.update((data) => {
+      const existing = data.officeDispatchReceipts[receiptId];
+      if (!existing) throw new Error("OFFICE_RECEIPT_NOT_FOUND");
+      data.officeDispatchReceipts[receiptId] = { ...existing, ...input };
+    });
+  }
+
+  async getOfficeDispatchReceipt(receiptId: string) {
+    return (await this.load()).officeDispatchReceipts[receiptId] ?? null;
   }
 
   async getConversation(conversationId: string): Promise<OutboundConversationBinding | null> {

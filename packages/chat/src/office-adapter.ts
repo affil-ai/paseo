@@ -19,15 +19,39 @@ import {
 } from "chat";
 import { z } from "zod";
 import type { OfficeTurnFailureEvent, OfficeTurnRelayEvent } from "./bridge.js";
+import type { OfficeAgentRelay } from "./state/thread-session-store.js";
 
 const inboundFileSchema = z.object({
   id: z.string().min(1),
   filename: z.string().min(1),
   mimeType: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
   downloadUrl: z.url(),
 });
 
-const inboundTurnSchema = z.object({
+const inboundTurnV2Schema = z.object({
+  version: z.literal(2),
+  kind: z.literal("message"),
+  bindingId: z.string().min(1),
+  runId: z.string().min(1),
+  receiptId: z.string().min(1),
+  payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  agentId: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  actor: z.object({
+    externalUserId: z.string().min(1),
+    displayName: z.string().min(1),
+    email: z.email().optional(),
+  }),
+  message: z.object({
+    markdown: z.string(),
+    files: z.array(inboundFileSchema).max(10),
+  }),
+  callbackUrl: z.url(),
+});
+
+const inboundTurnV1Schema = z.object({
   version: z.literal(1),
   kind: z.literal("message"),
   bindingId: z.string().min(1),
@@ -44,10 +68,19 @@ const inboundTurnSchema = z.object({
   }),
   message: z.object({
     markdown: z.string(),
-    files: z.array(inboundFileSchema).max(10),
+    files: z.array(
+      z.object({
+        id: z.string().min(1),
+        filename: z.string().min(1),
+        mimeType: z.string().min(1),
+        downloadUrl: z.url(),
+      }),
+    ),
   }),
   callbackUrl: z.url(),
 });
+
+const inboundTurnSchema = z.union([inboundTurnV2Schema, inboundTurnV1Schema]);
 
 const cancelTurnSchema = z.object({
   version: z.literal(1),
@@ -59,23 +92,109 @@ const cancelTurnSchema = z.object({
   providerTurnId: z.string().min(1),
 });
 
+const registerRelaySchema = z.object({
+  version: z.literal(2),
+  kind: z.literal("register"),
+  bindingId: z.string().min(1),
+  agentId: z.string().min(1),
+  callbackUrl: z.url(),
+});
+
 export type OfficeInboundTurn = z.infer<typeof inboundTurnSchema>;
 
-export interface OfficeTurnRegistration extends OfficeInboundTurn {
-  threadId: string;
-}
+export type OfficeTurnRegistration = OfficeInboundTurn & { threadId: string };
 
 export interface OfficeAdapterConfig {
   inboundToken: string;
   callbackKeyId: string;
   callbackSecret: string;
-  onTurnReceived(input: OfficeTurnRegistration): Promise<void>;
+  onTurnReceived(input: OfficeTurnRegistration): Promise<"received" | "alreadyReceived">;
   onTurnBound?(input: OfficeTurnRegistration & { agentId: string }): Promise<void>;
   onTurnCompleted?(threadId: string, providerTurnId: string): Promise<void>;
   resolveAgentId(threadId: string): Promise<string | null>;
   resolveTurn?(threadId: string): Promise<OfficeInboundTurn | null>;
+  resolveRelay?(threadId: string): Promise<OfficeAgentRelay | null>;
+  registerRelay?(
+    input: z.infer<typeof registerRelaySchema>,
+  ): Promise<{ outcome: "registered" | "alreadyRegistered"; supersededLegacySessions: number }>;
   cancelTurn?(input: z.infer<typeof cancelTurnSchema>): Promise<"accepted" | "alreadyCanceled">;
 }
+
+type OfficeCallbackFile = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  bytesBase64: string;
+};
+
+type OfficePresentationItem =
+  | { type: "assistant_message"; text: string; files: OfficeCallbackFile[] }
+  | {
+      type: "tool_call";
+      callId: string;
+      name: string;
+      status: "running" | "completed" | "failed" | "canceled";
+      input: unknown;
+      output?: unknown;
+      errorText?: string;
+    };
+
+export type OfficeV2RelayEvent =
+  | {
+      version: 2;
+      eventId: string;
+      kind: "accepted";
+      bindingId: string;
+      runId: string;
+      receiptId: string;
+      agentId: string;
+      providerTurnId: string;
+      timelineStartSeq: number;
+      startedAt: number;
+    }
+  | {
+      version: 2;
+      eventId: string;
+      kind: "turnStarted";
+      bindingId: string;
+      agentId: string;
+      providerTurnId: string;
+      timelineStartSeq: number;
+      startedAt: number;
+    }
+  | {
+      version: 2;
+      eventId: string;
+      kind: "timeline";
+      bindingId: string;
+      agentId: string;
+      providerTurnId: string;
+      itemKey: string;
+      seqStart: number;
+      seqEnd: number;
+      itemDigest: string;
+      item: OfficePresentationItem;
+    }
+  | {
+      version: 2;
+      eventId: string;
+      kind: "completed";
+      bindingId: string;
+      agentId: string;
+      providerTurnId: string;
+      finalItemKey: string;
+      completedAt: number;
+    }
+  | {
+      version: 2;
+      eventId: string;
+      kind: "failed" | "canceled";
+      bindingId: string;
+      agentId: string;
+      providerTurnId: string;
+      errorCode: string;
+    };
 
 interface OfficeThreadId {
   bindingId: string;
@@ -176,6 +295,14 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
       const outcome = await this.config.cancelTurn(cancellation);
       return Response.json({ outcome });
     }
+    if (
+      payload &&
+      typeof payload === "object" &&
+      (payload as { kind?: unknown }).kind === "register"
+    ) {
+      if (!this.config.registerRelay) throw new Error("OFFICE_RELAY_REGISTRATION_NOT_CONFIGURED");
+      return Response.json(await this.config.registerRelay(registerRelaySchema.parse(payload)));
+    }
     return this.handleInboundTurn(inboundTurnSchema.parse(payload), options);
   }
 
@@ -187,7 +314,8 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     const activeTurn = this.turns.get(threadId) ?? (await this.config.resolveTurn?.(threadId));
     if (activeTurn?.receiptId === turn.receiptId && activeTurn.payloadDigest !== turn.payloadDigest)
       throw new Error("OFFICE_RECEIPT_CONFLICT");
-    const duplicateReceipt = activeTurn?.receiptId === turn.receiptId;
+    const receiptOutcome = await this.config.onTurnReceived({ ...turn, threadId });
+    const duplicateReceipt = receiptOutcome === "alreadyReceived";
     this.turns.set(threadId, turn);
     this.users.set(turn.actor.externalUserId, {
       userId: turn.actor.externalUserId,
@@ -196,22 +324,28 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
       email: turn.actor.email,
       isBot: false,
     });
-    await this.config.onTurnReceived({ ...turn, threadId });
-    await this.chat!.processMessage(
-      this,
-      threadId,
-      () => Promise.resolve(this.parseMessage({ turn })),
-      options,
-    );
+    if (!duplicateReceipt) {
+      await this.chat!.processMessage(
+        this,
+        threadId,
+        () => Promise.resolve(this.parseMessage({ turn })),
+        options,
+      );
+    }
     const agentId = await this.config.resolveAgentId(threadId);
     if (!agentId) throw new Error("OFFICE_AGENT_NOT_BOUND");
     this.turns.set(threadId, { ...turn, agentId });
     await this.config.onTurnBound?.({ ...turn, threadId, agentId });
-    return Response.json({
-      outcome: duplicateReceipt ? "alreadyAccepted" : "accepted",
-      agentId,
-      providerTurnId: turn.providerTurnId,
-    });
+    return turn.version === 1
+      ? Response.json({
+          outcome: duplicateReceipt ? "alreadyAccepted" : "accepted",
+          agentId,
+          providerTurnId: turn.providerTurnId,
+        })
+      : Response.json({
+          outcome: duplicateReceipt ? "alreadyReceived" : "received",
+          receiptId: turn.receiptId,
+        });
   }
 
   parseMessage(raw: OfficeRawMessage): Message<OfficeRawMessage> {
@@ -248,11 +382,18 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     });
   }
 
+  async postRelayEvent(event: OfficeV2RelayEvent): Promise<void> {
+    const relay = await this.config.resolveRelay?.(`office:${event.bindingId}`);
+    if (!relay || relay.agentId !== event.agentId) throw new Error("OFFICE_RELAY_NOT_REGISTERED");
+    await this.sendCallback(relay.callbackUrl, event);
+  }
+
   async postTurnEvent(event: OfficeTurnRelayEvent): Promise<RawMessage<OfficeRawMessage>> {
     const turn = await this.requireTurn(event.externalThreadId);
+    if (turn.version !== 1) throw new Error("OFFICE_LEGACY_TURN_NOT_REGISTERED");
     if (turn.agentId && turn.agentId !== event.agentId) throw new Error("OFFICE_AGENT_MISMATCH");
     const eventId = `${turn.providerTurnId}:auto:${event.phase}:${event.sequence}`;
-    await this.sendCallback(turn, {
+    await this.sendCallback(turn.callbackUrl, {
       version: 1,
       eventId,
       kind: "assistant",
@@ -275,9 +416,10 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
 
   async postTurnFailure(event: OfficeTurnFailureEvent): Promise<RawMessage<OfficeRawMessage>> {
     const turn = await this.requireTurn(event.externalThreadId);
+    if (turn.version !== 1) throw new Error("OFFICE_LEGACY_TURN_NOT_REGISTERED");
     if (turn.agentId && turn.agentId !== event.agentId) throw new Error("OFFICE_AGENT_MISMATCH");
     const eventId = `${turn.providerTurnId}:auto:failed`;
-    await this.sendCallback(turn, {
+    await this.sendCallback(turn.callbackUrl, {
       version: 1,
       eventId,
       kind: "failed",
@@ -293,6 +435,10 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     return { id: eventId, threadId: event.externalThreadId, raw: { turn } };
   }
 
+  async usesPersistentRelay(threadId: string): Promise<boolean> {
+    return (await this.requireTurn(threadId)).version === 2;
+  }
+
   async hasActiveTurn(threadId: string): Promise<boolean> {
     return Boolean(this.turns.get(threadId) ?? (await this.config.resolveTurn?.(threadId)));
   }
@@ -304,7 +450,7 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     const turn = await this.requireTurn(threadId);
     if (!turn.agentId)
       return {
-        id: `${turn.providerTurnId}:bridge-notice`,
+        id: `${turn.receiptId}:bridge-notice`,
         threadId,
         raw: { turn },
       };
@@ -327,21 +473,44 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
       )
       .digest("hex")
       .slice(0, 24);
-    const eventId = `${turn.providerTurnId}:chat-send:${digest}`;
+    if (turn.version === 1) {
+      const eventId = `${turn.providerTurnId}:chat-send:${digest}`;
+      const agentId = turn.agentId ?? (await this.config.resolveAgentId(threadId));
+      if (!agentId) throw new Error("OFFICE_AGENT_NOT_BOUND");
+      await this.sendCallback(turn.callbackUrl, {
+        version: 1,
+        eventId,
+        kind: "assistant",
+        bindingId: turn.bindingId,
+        runId: turn.runId,
+        receiptId: turn.receiptId,
+        agentId,
+        providerTurnId: turn.providerTurnId,
+        phase: "chatSend",
+        message: { markdown, files },
+        terminal: false,
+      });
+      return { id: eventId, threadId, raw: { turn } };
+    }
+    const relay = await this.config.resolveRelay?.(threadId);
+    if (!relay?.activeTurn) throw new Error("OFFICE_TURN_NOT_REGISTERED");
+    const eventId = `${relay.activeTurn.providerTurnId}:chat-send:${digest}`;
     const agentId = turn.agentId ?? (await this.config.resolveAgentId(threadId));
     if (!agentId) throw new Error("OFFICE_AGENT_NOT_BOUND");
-    await this.sendCallback(turn, {
-      version: 1,
+    await this.sendCallback(relay.callbackUrl, {
+      version: 2,
       eventId,
-      kind: "assistant",
-      bindingId: turn.bindingId,
-      runId: turn.runId,
-      receiptId: turn.receiptId,
+      kind: "timeline",
+      bindingId: relay.bindingId,
       agentId,
-      providerTurnId: turn.providerTurnId,
-      phase: "chatSend",
-      message: { markdown, files },
-      terminal: false,
+      providerTurnId: relay.activeTurn.providerTurnId,
+      itemKey: `chat-send:${digest}`,
+      seqStart: relay.acknowledgedSeq,
+      seqEnd: relay.acknowledgedSeq,
+      itemDigest: createHash("sha256")
+        .update(JSON.stringify({ type: "assistant_message", text: markdown, files: [] }))
+        .digest("hex"),
+      item: { type: "assistant_message", text: markdown, files },
     });
     return { id: eventId, threadId, raw: { turn } };
   }
@@ -398,14 +567,14 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     return turn;
   }
 
-  private async sendCallback(turn: OfficeInboundTurn, event: unknown): Promise<void> {
+  private async sendCallback(callbackUrl: string, event: unknown): Promise<void> {
     const body = JSON.stringify(event);
     const timestamp = String(Date.now());
     const signature = createHmac("sha256", this.config.callbackSecret)
       .update(`${timestamp}.${body}`)
       .digest("hex");
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const response = await fetch(turn.callbackUrl, {
+      const response = await fetch(callbackUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",

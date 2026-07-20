@@ -70,6 +70,7 @@ interface ChatBridgeAdapter {
   botUserId?: string;
   getUser?: (userId: string) => Promise<UserInfo | null>;
   hasActiveTurn?(externalThreadId: string): Promise<boolean>;
+  usesPersistentRelay?(externalThreadId: string): Promise<boolean>;
   postMessage(externalThreadId: string, message: string | AdapterPostableMessage): Promise<unknown>;
   postTurnEvent?(event: OfficeTurnRelayEvent): Promise<unknown>;
   postTurnFailure?(event: OfficeTurnFailureEvent): Promise<unknown>;
@@ -216,6 +217,7 @@ export class ChatBridge {
     }
 
     for (const session of sessions) {
+      if (session.officeRelay) continue;
       const agentId = getBindingOwnerAgentId(session);
       const timeline = await this.client
         .fetchAgentTimeline(agentId, {
@@ -279,6 +281,7 @@ export class ChatBridge {
     if (this.config.relayMode === "manual") return;
     const session = await this.findLinkedSessionForAgent(agentId);
     if (!session) return;
+    if (session.officeRelay) return;
     const thread = this.getThread(session.externalThreadId);
     if (!thread && !this.fallbackAdapter) return;
     const relayAdapter = thread?.adapter ?? this.fallbackAdapter;
@@ -486,7 +489,10 @@ export class ChatBridge {
     const relayId = input.message.id;
     const ownerAgentId = getBindingOwnerAgentId(input.session);
     const sinceSeq = input.existing ? await this.getTimelineNextSeq(ownerAgentId) : 0;
-    if (this.config.relayMode === "auto") {
+    const usesPersistentRelay = await input.thread.adapter.usesPersistentRelay?.(
+      input.normalized.externalThreadId,
+    );
+    if (this.config.relayMode === "auto" && !usesPersistentRelay) {
       await this.store.updateSession(input.normalized.externalThreadId, (current) => {
         current.activeRelayId = relayId;
       });
@@ -504,11 +510,12 @@ export class ChatBridge {
           attachments: input.normalized.attachments,
           userMessageSource: "slack",
           attribution: slackAttribution(input.normalized.sender),
+          messageId: input.message.id,
         },
       );
       await this.store.markEventProcessed(input.normalized.eventId);
     }
-    if (this.config.relayMode === "auto") {
+    if (this.config.relayMode === "auto" && !usesPersistentRelay) {
       this.startBackgroundRelay({
         thread: input.thread,
         externalThreadId: input.normalized.externalThreadId,
@@ -549,6 +556,7 @@ export class ChatBridge {
     attachments?: AgentAttachment[];
     thread?: ChatBridgeThread | null;
     initialRelayId?: string;
+    clientMessageId?: string;
     startedBy?: ChatStarter;
   }) {
     const workspaceResult = await this.client.createWorkspace({
@@ -571,7 +579,7 @@ export class ChatBridge {
       ...(this.config.modeId ? { modeId: this.config.modeId } : {}),
       ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
       initialPrompt: input.initialPrompt,
-      clientMessageId: randomUUID(),
+      clientMessageId: input.clientMessageId ?? randomUUID(),
       initialMessageSource: input.source,
       ...(input.startedBy ? { initialAttribution: slackAttribution(input.startedBy) } : {}),
       images: input.images ?? [],
@@ -665,6 +673,7 @@ export class ChatBridge {
       }),
       images: normalized.images,
       attachments: normalized.attachments,
+      clientMessageId: message.id,
       startedBy: {
         source: "slack",
         userId: normalized.sender.userId,

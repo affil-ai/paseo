@@ -14,8 +14,9 @@ import { createDefaultEmailClassifier } from "./intake/email-classifier.js";
 import { loadOfficePrompt } from "./prompt.js";
 import { ChatBridgeService, startChatServiceServer } from "./service.js";
 import { OfficeAdapter, type OfficeTurnRegistration } from "./office-adapter.js";
+import { OfficeTimelineRelay } from "./office-timeline-relay.js";
 import { OfficeAgentLinksReporter } from "./office-links.js";
-import { getBindingOwnerAgentId } from "./state/thread-session-store.js";
+import { CHAT_THREAD_LABEL, getBindingOwnerAgentId } from "./state/thread-session-store.js";
 
 type PaseoDaemonClient = Awaited<ReturnType<typeof connectToPaseoDaemon>>;
 type InboundHttpServer = ReturnType<typeof startInboundHttpServer>;
@@ -157,32 +158,84 @@ export async function main(): Promise<void> {
   const chatState = new FileChatStateAdapter(config.stateDir);
   const permissions = new PermissionBridge(client, state);
   const focus = new FocusRelay(client, state);
+  let officeTimelineRelay: OfficeTimelineRelay | null = null;
   const persistOfficeTurn = async (input: OfficeTurnRegistration & { agentId: string }) => {
     await state.updateSession(input.threadId, (session) => {
       session.lastCallbackUrl = input.callbackUrl;
-      session.activeOfficeTurn = {
-        version: input.version,
-        kind: input.kind,
-        bindingId: input.bindingId,
-        runId: input.runId,
-        receiptId: input.receiptId,
-        providerTurnId: input.providerTurnId,
-        payloadDigest: input.payloadDigest,
-        agentId: input.agentId,
-        ...(input.title ? { title: input.title } : {}),
-        actor: input.actor,
-        message: input.message,
-        callbackUrl: input.callbackUrl,
-      };
+      const { threadId: _threadId, ...turn } = input;
+      session.activeOfficeTurn = turn;
     });
+    if (input.version === 1) return;
+    const session = await state.getSession(input.threadId);
+    await state.registerOfficeRelay({
+      externalThreadId: input.threadId,
+      bindingId: input.bindingId,
+      agentId: input.agentId,
+      callbackUrl: input.callbackUrl,
+      acknowledgedSeq: session?.officeRelay ? session.officeRelay.acknowledgedSeq : 0,
+    });
+    await officeTimelineRelay?.wake(input.agentId);
   };
   const office = config.officeAdapter
     ? new OfficeAdapter({
         ...config.officeAdapter,
         onTurnReceived: async (input) => {
-          const existing = await state.getSession(input.threadId);
+          if (input.version === 1) {
+            const existing = await state.getSession(input.threadId);
+            if (!existing && input.agentId) {
+              const now = new Date().toISOString();
+              await state.upsertSession({
+                kind: "inbound-session",
+                externalThreadId: input.threadId,
+                rootAgentId: input.agentId,
+                muted: false,
+                activeRelayId: null,
+                title: input.title ?? null,
+                createdAt: now,
+                updatedAt: now,
+              });
+            } else if (
+              existing &&
+              input.agentId &&
+              getBindingOwnerAgentId(existing) !== input.agentId
+            ) {
+              throw new Error("OFFICE_AGENT_MISMATCH");
+            }
+            return existing?.activeOfficeTurn?.receiptId === input.receiptId
+              ? "alreadyReceived"
+              : "received";
+          }
+          const receiptOutcome = await state.reserveOfficeDispatch({
+            receiptId: input.receiptId,
+            runId: input.runId,
+            payloadDigest: input.payloadDigest,
+          });
+          let existing = await state.getSession(input.threadId);
+          if (!existing && !input.agentId && receiptOutcome === "alreadyReceived") {
+            const recovered = await client.fetchAgents({
+              filter: { labels: { [CHAT_THREAD_LABEL]: input.threadId } },
+              page: { limit: 2 },
+            });
+            if (recovered.entries.length > 1) throw new Error("OFFICE_AGENT_BINDING_CONFLICT");
+            const agent = recovered.entries[0]?.agent;
+            if (agent) {
+              const now = new Date().toISOString();
+              await state.upsertSession({
+                kind: "inbound-session",
+                externalThreadId: input.threadId,
+                rootAgentId: agent.id,
+                ...(agent.workspaceId ? { workspaceId: agent.workspaceId } : {}),
+                muted: false,
+                activeRelayId: null,
+                title: input.title ?? agent.title ?? null,
+                createdAt: now,
+                updatedAt: now,
+              });
+              existing = await state.getSession(input.threadId);
+            }
+          }
           if (!existing) {
-            if (!input.agentId) return;
+            if (!input.agentId) return "received";
             const now = new Date().toISOString();
             await state.upsertSession({
               kind: "inbound-session",
@@ -194,14 +247,33 @@ export async function main(): Promise<void> {
               createdAt: now,
               updatedAt: now,
             });
+            existing = await state.getSession(input.threadId);
           } else if (input.agentId && getBindingOwnerAgentId(existing) !== input.agentId) {
             throw new Error("OFFICE_AGENT_MISMATCH");
           }
+          if (existing && input.agentId && !existing.officeRelay) {
+            const timeline = await client.fetchAgentTimeline(input.agentId, {
+              direction: "tail",
+              projection: "projected",
+              limit: 1,
+            });
+            await state.registerOfficeRelay({
+              externalThreadId: input.threadId,
+              bindingId: input.bindingId,
+              agentId: input.agentId,
+              callbackUrl: input.callbackUrl,
+              acknowledgedSeq: Math.max(0, timeline.window.nextSeq - 1),
+            });
+          }
+          return receiptOutcome;
         },
         onTurnBound: persistOfficeTurn,
         onTurnCompleted: async (threadId, providerTurnId) => {
           await state.updateSession(threadId, (session) => {
-            if (session.activeOfficeTurn?.providerTurnId === providerTurnId)
+            if (
+              session.activeOfficeTurn?.version === 1 &&
+              session.activeOfficeTurn.providerTurnId === providerTurnId
+            )
               session.activeOfficeTurn = undefined;
           });
         },
@@ -211,6 +283,43 @@ export async function main(): Promise<void> {
         },
         resolveTurn: async (threadId) =>
           (await state.getSession(threadId))?.activeOfficeTurn ?? null,
+        resolveRelay: async (threadId) => (await state.getSession(threadId))?.officeRelay ?? null,
+        registerRelay: async (input) => {
+          const externalThreadId = `office:${input.bindingId}`;
+          let session = await state.getSession(externalThreadId);
+          if (!session) {
+            const legacy = await state.findSessionByAgent(input.agentId);
+            const now = new Date().toISOString();
+            await state.upsertSession({
+              kind: "inbound-session",
+              externalThreadId,
+              rootAgentId: input.agentId,
+              ...(legacy?.kind === "inbound-session" && legacy.workspaceId
+                ? { workspaceId: legacy.workspaceId }
+                : {}),
+              muted: false,
+              activeRelayId: null,
+              title: legacy?.title ?? null,
+              createdAt: now,
+              updatedAt: now,
+            });
+            session = await state.getSession(externalThreadId);
+          }
+          if (!session || getBindingOwnerAgentId(session) !== input.agentId)
+            throw new Error("OFFICE_AGENT_MISMATCH");
+          const timeline = await client.fetchAgentTimeline(input.agentId, {
+            direction: "tail",
+            projection: "projected",
+            limit: 1,
+          });
+          return state.registerOfficeRelay({
+            externalThreadId,
+            bindingId: input.bindingId,
+            agentId: input.agentId,
+            callbackUrl: input.callbackUrl,
+            acknowledgedSeq: Math.max(0, timeline.window.nextSeq - 1),
+          });
+        },
         cancelTurn: async (input) => {
           const session = await state.getSession(`office:${input.bindingId}`);
           if (!session || getBindingOwnerAgentId(session) !== input.agentId)
@@ -231,6 +340,7 @@ export async function main(): Promise<void> {
       : null;
   const activeAdapter: Adapter = office ?? slack!;
   const bridge = new ChatBridge(config, client, state, permissions, focus, activeAdapter);
+  officeTimelineRelay = office ? new OfficeTimelineRelay(client, state, office) : null;
   const chat = new Chat({
     adapters: office ? { office } : { slack: slack! },
     state: chatState,
@@ -249,8 +359,29 @@ export async function main(): Promise<void> {
   );
 
   client.on("agent_stream", async (message) => {
-    if (message.payload.event.type !== "turn_started") return;
-    await bridge.handleAgentTurnStarted(message.payload.agentId, message.payload.seq);
+    const event = message.payload.event;
+    if (officeTimelineRelay) {
+      const terminal =
+        event.type === "turn_completed"
+          ? { kind: "completed" as const }
+          : event.type === "turn_failed"
+            ? { kind: "failed" as const, errorCode: event.code ?? event.error }
+            : event.type === "turn_canceled"
+              ? { kind: "canceled" as const, errorCode: event.reason }
+              : undefined;
+      if (event.type === "timeline" || event.type === "turn_started" || terminal) {
+        await officeTimelineRelay.wake(message.payload.agentId, terminal).catch((error) => {
+          console.warn("Office timeline relay failed", {
+            agentId: message.payload.agentId,
+            eventType: event.type,
+            error,
+          });
+        });
+      }
+      return;
+    }
+    if (event.type === "turn_started")
+      await bridge.handleAgentTurnStarted(message.payload.agentId, message.payload.seq);
   });
 
   client.on("agent_permission_request", async (message) => {
@@ -266,6 +397,9 @@ export async function main(): Promise<void> {
   await chat.initialize();
   void bridge.recoverRelaysAfterRestart().catch((error) => {
     console.warn("Slack relay recovery failed", error);
+  });
+  void officeTimelineRelay?.recover().catch((error) => {
+    console.warn("Office timeline relay recovery failed", error);
   });
   void bridge.expirePendingRequests().catch((error) => {
     console.warn("Chat ask recovery failed", error);
