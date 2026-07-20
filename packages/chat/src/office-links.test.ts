@@ -10,10 +10,11 @@ const PARENT = "paseo.parent-agent-id";
 
 function agent(
   id: string,
-  input: { parent?: string; workspaceId?: string; archivedAt?: string } = {},
+  input: { parent?: string; workspaceId?: string; cwd?: string; archivedAt?: string } = {},
 ): AgentLinksAgent {
   return {
     id,
+    cwd: input.cwd,
     workspaceId: input.workspaceId,
     labels: input.parent ? { [PARENT]: input.parent } : {},
     archivedAt: input.archivedAt ?? null,
@@ -43,6 +44,8 @@ describe("buildAgentLinkReports", () => {
   const workspaces: AgentLinksWorkspace[] = [
     {
       id: "ws-root",
+      projectRootPath: "/workspace/office",
+      workspaceDirectory: "/workspace/office",
       gitRuntime: { currentBranch: "main", remoteUrl: "https://github.com/affil-ai/office.git" },
     },
     {
@@ -69,7 +72,7 @@ describe("buildAgentLinkReports", () => {
       serverId: "srv_m-yyB3h87NLA",
       officeBindings: [{ externalThreadId: "office:binding-1", rootAgentId: "root" }],
       agents: [
-        agent("root", { workspaceId: "ws-root" }),
+        agent("root", { cwd: "/workspace/office" }),
         agent("sub", { parent: "root", workspaceId: "ws-sub" }),
         agent("stranger", { workspaceId: "ws-sub" }),
       ],

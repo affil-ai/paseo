@@ -21,6 +21,7 @@ const MAX_PAGES = 20;
 
 export interface AgentLinksAgent {
   id: string;
+  cwd?: string | undefined;
   workspaceId?: string | undefined;
   labels?: Record<string, string> | null | undefined;
   archivedAt?: string | null | undefined;
@@ -28,6 +29,8 @@ export interface AgentLinksAgent {
 
 export interface AgentLinksWorkspace {
   id: string;
+  projectRootPath?: string | undefined;
+  workspaceDirectory?: string | undefined;
   gitRuntime?: {
     currentBranch?: string | null | undefined;
     remoteUrl?: string | null | undefined;
@@ -124,14 +127,30 @@ export interface BuildAgentLinkReportsInput {
 function paseoUrlForBinding(
   input: BuildAgentLinkReportsInput,
   rootAgent: AgentLinksAgent | undefined,
+  workspacesById: Map<string, AgentLinksWorkspace>,
 ): string | undefined {
-  if (!rootAgent?.workspaceId || rootAgent.archivedAt) return undefined;
+  if (!rootAgent || rootAgent.archivedAt) return undefined;
+  const workspace = workspaceForAgent(rootAgent, workspacesById);
+  if (!workspace) return undefined;
   return buildPaseoAgentUrl({
     baseUrl: input.deepLinkBaseUrl,
     serverId: input.serverId,
-    workspaceId: rootAgent.workspaceId,
+    workspaceId: workspace.id,
     agentId: rootAgent.id,
   });
+}
+
+function workspaceForAgent(
+  agent: AgentLinksAgent,
+  workspacesById: Map<string, AgentLinksWorkspace>,
+): AgentLinksWorkspace | undefined {
+  if (agent.workspaceId) return workspacesById.get(agent.workspaceId);
+  for (const workspace of workspacesById.values()) {
+    if (workspace.workspaceDirectory === agent.cwd || workspace.projectRootPath === agent.cwd) {
+      return workspace;
+    }
+  }
+  return undefined;
 }
 
 function collectWorkspaceLinks(input: {
@@ -146,7 +165,7 @@ function collectWorkspaceLinks(input: {
   for (const agent of input.agents) {
     if (agent.archivedAt) continue;
     if (rootAgentIdFor(agent, input.agentsById) !== input.rootAgentId) continue;
-    const workspace = agent.workspaceId ? input.workspacesById.get(agent.workspaceId) : undefined;
+    const workspace = workspaceForAgent(agent, input.workspacesById);
     if (!workspace) continue;
     const remote = parseGithubRemote(workspace.gitRuntime?.remoteUrl);
     const branch = workspace.gitRuntime?.currentBranch?.trim();
@@ -174,7 +193,7 @@ export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentL
   for (const binding of input.officeBindings) {
     if (!binding.externalThreadId.startsWith(OFFICE_THREAD_PREFIX)) continue;
     const bindingId = binding.externalThreadId.slice(OFFICE_THREAD_PREFIX.length);
-    const paseoUrl = paseoUrlForBinding(input, agentsById.get(binding.rootAgentId));
+    const paseoUrl = paseoUrlForBinding(input, agentsById.get(binding.rootAgentId), workspacesById);
     const { branchLinks, prLinks } = collectWorkspaceLinks({
       rootAgentId: binding.rootAgentId,
       agents: input.agents,
