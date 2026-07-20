@@ -328,6 +328,8 @@ function projectItem(
   }
   if (item.type !== "tool_call") return null;
   const detail = boundedValue(item.detail, 32_000);
+  const input = item.detail.type === "unknown" ? boundedValue(item.detail.input, 32_000) : detail;
+  const output = item.detail.type === "unknown" ? boundedValue(item.detail.output, 32_000) : detail;
   return {
     itemKey: `tool:${item.callId}`,
     item: {
@@ -335,8 +337,8 @@ function projectItem(
       callId: item.callId,
       name: item.name.slice(0, 200),
       status: item.status,
-      input: detail,
-      ...(item.status === "completed" ? { output: detail } : {}),
+      input,
+      ...(item.status === "completed" ? { output } : {}),
       ...(item.status === "failed"
         ? { errorText: boundedString(String(item.error ?? "Tool failed"), 8_000) }
         : {}),

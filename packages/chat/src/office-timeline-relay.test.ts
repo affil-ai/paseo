@@ -71,7 +71,22 @@ describe("OfficeTimelineRelay", () => {
         detail: { command: "git status", authorization: "secret" },
         error: null,
       }),
-      entry(5, { type: "assistant_message", text: "The change is complete.", messageId: "a-2" }),
+      entry(5, {
+        type: "tool_call",
+        callId: "executor-1",
+        name: "executor_execute",
+        status: "completed",
+        detail: {
+          type: "unknown",
+          input: { code: "return tools.posthog_api.projects();" },
+          output: {
+            content: [{ type: "text", text: "2 projects" }],
+            structuredContent: { status: "completed", result: [{ id: "1" }] },
+          },
+        },
+        error: null,
+      }),
+      entry(6, { type: "assistant_message", text: "The change is complete.", messageId: "a-2" }),
     ];
     const events: OfficeV2RelayEvent[] = [];
     const relay = new OfficeTimelineRelay(
@@ -93,6 +108,7 @@ describe("OfficeTimelineRelay", () => {
       "timeline",
       "timeline",
       "timeline",
+      "timeline",
       "completed",
     ]);
     expect(events[2]).toMatchObject({
@@ -109,26 +125,38 @@ describe("OfficeTimelineRelay", () => {
         input: { command: "git status", authorization: "[redacted]" },
       },
     });
+    expect(events[4]).toMatchObject({
+      kind: "timeline",
+      item: {
+        type: "tool_call",
+        name: "executor_execute",
+        input: { code: "return tools.posthog_api.projects();" },
+        output: {
+          content: [{ type: "text", text: "2 projects" }],
+          structuredContent: { status: "completed", result: [{ id: "1" }] },
+        },
+      },
+    });
     const firstProviderTurnId = events[0]!.providerTurnId;
     expect(events.every((event) => event.providerTurnId === firstProviderTurnId)).toBe(true);
 
     await relay.wake("agent-1", { kind: "completed" });
-    expect(events).toHaveLength(6);
+    expect(events).toHaveLength(7);
 
     entries = [
       ...entries,
-      entry(6, { type: "user_message", text: "Run the tests" }),
-      entry(7, { type: "assistant_message", text: "Tests pass.", messageId: "a-3" }),
+      entry(7, { type: "user_message", text: "Run the tests" }),
+      entry(8, { type: "assistant_message", text: "Tests pass.", messageId: "a-3" }),
     ];
     await relay.wake("agent-1", { kind: "completed", occurredAt: 5678 });
-    expect(events.slice(6).map((event) => event.kind)).toEqual([
+    expect(events.slice(7).map((event) => event.kind)).toEqual([
       "turnStarted",
       "timeline",
       "completed",
     ]);
-    expect(events[6]!.providerTurnId).not.toBe(firstProviderTurnId);
+    expect(events[7]!.providerTurnId).not.toBe(firstProviderTurnId);
     const stored = await store.getSession("office:binding-1");
-    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 7, epoch: "epoch-1" });
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 8, epoch: "epoch-1" });
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 });
