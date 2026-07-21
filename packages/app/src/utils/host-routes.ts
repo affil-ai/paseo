@@ -174,11 +174,16 @@ export function parseWorkspaceOpenIntent(
 export function parseHostWorkspaceOpenIntentFromPathname(
   pathname: string,
 ): WorkspaceOpenIntent | null {
+  return parseWorkspaceOpenIntent(getHostWorkspaceOpenParamFromPathname(pathname));
+}
+
+export function getHostWorkspaceOpenParamFromPathname(pathname: string): string | null {
   const search = extractSearch(pathname);
   if (!search) {
     return null;
   }
-  return parseWorkspaceOpenIntent(new URLSearchParams(search).get("open"));
+  const open = new URLSearchParams(search).get("open");
+  return parseWorkspaceOpenIntent(open) ? open : null;
 }
 
 export function encodeWorkspaceIdForPathSegment(workspaceId: string): string {
@@ -487,6 +492,7 @@ export function resolveKnownHostRoute(input: {
 export const SETTINGS_SECTION_SLUGS = [
   "general",
   "appearance",
+  "editor",
   "shortcuts",
   "integrations",
   "permissions",

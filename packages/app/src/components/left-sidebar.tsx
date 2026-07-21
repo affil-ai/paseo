@@ -133,7 +133,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   handleDashboard: () => void;
 }
 
-export const LeftSidebar = memo(function LeftSidebar() {
+export const LeftSidebar = memo(function LeftSidebar(_props: { active?: boolean }) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();

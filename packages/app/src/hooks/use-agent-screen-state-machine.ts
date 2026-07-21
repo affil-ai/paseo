@@ -47,6 +47,7 @@ export interface AgentScreenMachineInput {
   isArchivingCurrentAgent: boolean;
   isHistorySyncing: boolean;
   needsAuthoritativeSync: boolean;
+  visibilityCatchUpStatus: "ready" | "pending" | "error";
   continuity: AgentScreenContinuity;
   hasHydratedHistoryBefore: boolean;
 }
@@ -148,10 +149,14 @@ function resolveAgentScreenSource(args: {
 
 function resolveCatchingUpUi(args: {
   hasOptimisticCreateContinuity: boolean;
+  isVisibilityCatchUpPending: boolean;
   hasHydratedHistoryBefore: boolean;
+  needsAuthoritativeSync: boolean;
   hadInitialSyncFailure: boolean;
 }): "overlay" | "silent" {
   if (args.hasOptimisticCreateContinuity) return "silent";
+  if (args.hasHydratedHistoryBefore && args.needsAuthoritativeSync) return "silent";
+  if (args.isVisibilityCatchUpPending) return "overlay";
   if (args.hasHydratedHistoryBefore) return "silent";
   if (args.hadInitialSyncFailure) return "silent";
   return "overlay";
@@ -168,12 +173,21 @@ function resolveAgentScreenSync(args: {
   if (input.missingAgentState.kind === "error") {
     return { status: "sync_error" };
   }
-  if (input.needsAuthoritativeSync || input.isHistorySyncing) {
+  if (input.visibilityCatchUpStatus === "error") {
+    return { status: "sync_error" };
+  }
+  if (
+    input.visibilityCatchUpStatus === "pending" ||
+    input.needsAuthoritativeSync ||
+    input.isHistorySyncing
+  ) {
     return {
       status: "catching_up",
       ui: resolveCatchingUpUi({
         hasOptimisticCreateContinuity: hasOptimisticCreateContinuity(input),
+        isVisibilityCatchUpPending: input.visibilityCatchUpStatus === "pending",
         hasHydratedHistoryBefore: input.hasHydratedHistoryBefore,
+        needsAuthoritativeSync: input.needsAuthoritativeSync,
         hadInitialSyncFailure,
       }),
     };

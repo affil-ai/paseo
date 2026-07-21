@@ -45,6 +45,8 @@ interface ExplorerSubagentsPaneProps {
 function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
   return {
     ...buildSubagentRowPresentationData(row),
+    tooltip: "",
+    modified: false,
     icon: getProviderIcon(row.provider),
   };
 }

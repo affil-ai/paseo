@@ -666,7 +666,7 @@ function ExplorerPrTabButton({
   const tabTextStyle = useMemo(() => [styles.tabText, active && styles.tabTextActive], [active]);
   return (
     <Pressable testID={testID} style={tabStyle} onPress={onPress}>
-      <PullRequestTabIcon size={13} color={active ? activeColor : inactiveColor} />
+      <PullRequestTabIcon forge="github" size={13} color={active ? activeColor : inactiveColor} />
       <Text style={tabTextStyle}>{label}</Text>
     </Pressable>
   );

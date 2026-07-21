@@ -3,6 +3,7 @@ export interface PrHint {
   number: number;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  forge?: string;
   checks?: Array<{ name: string; status: string; url: string | null }>;
   checksStatus?: "none" | "pending" | "success" | "failure";
   reviewDecision?: "approved" | "changes_requested" | "pending" | null;
@@ -33,7 +34,10 @@ function parsePullRequestNumber(url: string): number | null {
   }
 }
 
-export function selectPrHintFromStatus(status: PrStatusLike | null | undefined): PrHint | null {
+export function selectPrHintFromStatus(
+  status: PrStatusLike | null | undefined,
+  forge?: string,
+): PrHint | null {
   if (!status?.url) {
     return null;
   }
@@ -53,6 +57,7 @@ export function selectPrHintFromStatus(status: PrStatusLike | null | undefined):
     number,
     state,
     isDraft: status.isDraft ?? false,
+    ...(forge ? { forge } : {}),
     checks: status.checks,
     checksStatus: status.checksStatus as PrHint["checksStatus"],
     reviewDecision: status.reviewDecision as PrHint["reviewDecision"],

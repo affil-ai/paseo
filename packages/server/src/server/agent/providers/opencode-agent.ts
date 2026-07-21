@@ -180,7 +180,10 @@ function resolveOpenCodeCreateConfig(
       : input.featureValues;
 
   if (inheritsUnattended && requestedMode === undefined) {
-    return { modeId: OPENCODE_BUILD_MODE_ID, featureValues };
+    // Unattendedness for OpenCode is carried by auto_accept (set above), not
+    // by any particular agent. Leave the mode unset so OpenCode uses its own
+    // default agent — `build` may not exist in the user's OpenCode config.
+    return { modeId: undefined, featureValues };
   }
 
   const resolved = resolveDefaultAgentCreateConfig({
@@ -428,7 +431,7 @@ function isOpenCodeNotFoundError(error: unknown): boolean {
   );
 }
 
-async function reconcileOpenCodeSessionClose(params: {
+async function abortOpenCodeSession(params: {
   client: Pick<OpencodeClient, "session">;
   sessionId: string;
   directory: string;
@@ -457,31 +460,6 @@ async function reconcileOpenCodeSessionClose(params: {
         error: toDiagnosticErrorMessage(error),
       },
       "Failed to abort OpenCode session during close",
-    );
-  }
-
-  try {
-    const response = await client.session.update({
-      sessionID: sessionId,
-      directory,
-      time: { archived: Date.now() },
-    });
-    if (response.error && !isOpenCodeNotFoundError(response.error)) {
-      logger.warn(
-        {
-          sessionId,
-          error: toDiagnosticErrorMessage(response.error),
-        },
-        "Failed to archive OpenCode session during close",
-      );
-    }
-  } catch (error) {
-    logger.warn(
-      {
-        sessionId,
-        error: toDiagnosticErrorMessage(error),
-      },
-      "Failed to archive OpenCode session during close",
     );
   }
 }
@@ -570,16 +548,23 @@ function matchesHydratedFingerprint(
   return hydratedFingerprint === JSON.stringify(value);
 }
 
-function normalizeOpenCodeModeId(modeId: string | null | undefined): string {
+// `null` = no explicit mode. The `agent` field is then omitted from OpenCode
+// prompt/command calls so OpenCode falls back to its own configured default
+// agent — never assume any particular agent (even `build`) exists, since
+// OpenCode users can define or delete agents at will.
+function normalizeOpenCodeModeId(modeId: string | null | undefined): string | null {
   const trimmed = typeof modeId === "string" ? modeId.trim() : "";
   if (!trimmed || trimmed === "default") {
-    return OPENCODE_BUILD_MODE_ID;
+    return null;
   }
   return trimmed;
 }
 
-function resolveOpenCodeRuntimeAgentId(modeId: string | null | undefined): string {
+function resolveOpenCodeRuntimeAgentId(modeId: string | null | undefined): string | undefined {
   const normalizedModeId = normalizeOpenCodeModeId(modeId);
+  if (normalizedModeId === null) {
+    return undefined;
+  }
   return normalizedModeId === OPENCODE_LEGACY_FULL_ACCESS_MODE_ID
     ? OPENCODE_BUILD_MODE_ID
     : normalizedModeId;
@@ -636,11 +621,10 @@ function mergeOpenCodeModes(discoveredModes: AgentMode[]): AgentMode[] {
   );
   // When discovery returns results, trust them exactly — don't inject hardcoded
   // defaults that the user may have intentionally disabled in their OpenCode config.
-  // Fall back to DEFAULT_MODES only when discovery produced nothing.
-  if (filtered.length > 0) {
-    return sortOpenCodeModes(filtered);
-  }
-  return sortOpenCodeModes([...DEFAULT_MODES]);
+  // When discovery produced nothing, return empty rather than fabricating modes:
+  // OpenCode users can rename or delete any agent, so a hardcoded fallback can
+  // validate a mode that does not actually exist (failing later at prompt time).
+  return sortOpenCodeModes(filtered);
 }
 
 function sortOpenCodeModes(modes: AgentMode[]): AgentMode[] {
@@ -963,6 +947,7 @@ async function collectOpenCodeImportableSessionsFromSdk(
     archived: true,
     roots: true,
     limit: sessionListLimit,
+    ...(options?.cwd ? { directory: options.cwd } : {}),
   });
 
   if (response.error) {
@@ -1152,7 +1137,7 @@ function resolveOpenCodePersistedSessionModeId(
   messages: ReadonlyArray<OpenCodeSessionMessage>,
 ): string | undefined {
   const agent = session.agent ?? messages.map(readOpenCodeMessageAgent).find(Boolean);
-  return agent ? normalizeOpenCodeModeId(agent) : undefined;
+  return agent ? (normalizeOpenCodeModeId(agent) ?? undefined) : undefined;
 }
 
 function readOpenCodeMessageAgent(message: OpenCodeSessionMessage): string | undefined {
@@ -1245,7 +1230,6 @@ export const __openCodeInternals = {
   hasNormalizedOpenCodeUsage,
   mergeOpenCodeStepFinishUsage,
   parseOpenCodeModelLookupKey,
-  reconcileOpenCodeSessionClose,
   resolveOpenCodeModelLookupKeyFromAssistantMessage,
   resolveOpenCodeSelectedModelContextWindow,
   isSelectableOpenCodeAgent,
@@ -1344,7 +1328,7 @@ export class OpenCodeAgentClient implements AgentClient {
         url,
       );
     } catch (error) {
-      acquisition.release();
+      await acquisition.release();
       throw error;
     }
   }
@@ -1398,7 +1382,7 @@ export class OpenCodeAgentClient implements AgentClient {
         registeredAcquisition !== null,
       );
     } catch (error) {
-      acquisition.release();
+      await acquisition.release();
       throw error;
     }
   }
@@ -1430,7 +1414,7 @@ export class OpenCodeAgentClient implements AgentClient {
       ]);
       return { models, modes };
     } finally {
-      acquisition.release();
+      await acquisition.release();
     }
   }
 
@@ -1446,7 +1430,7 @@ export class OpenCodeAgentClient implements AgentClient {
     try {
       return await listOpenCodeCommandsFromSdk(client, openCodeConfig.cwd);
     } finally {
-      acquisition.release();
+      await acquisition.release();
     }
   }
 
@@ -1467,7 +1451,7 @@ export class OpenCodeAgentClient implements AgentClient {
     try {
       return await collectOpenCodeImportableSessionsFromSdk(client, options);
     } finally {
-      acquisition.release();
+      await acquisition.release();
     }
   }
 
@@ -1503,7 +1487,57 @@ export class OpenCodeAgentClient implements AgentClient {
         },
       });
     } finally {
-      acquisition.release();
+      await acquisition.release();
+    }
+  }
+
+  async archiveNativeSession(handle: AgentPersistenceHandle): Promise<void> {
+    await this.setNativeSessionArchived(handle, Date.now());
+  }
+
+  async unarchiveNativeSession(handle: AgentPersistenceHandle): Promise<void> {
+    await this.setNativeSessionArchived(handle, null);
+  }
+
+  private async setNativeSessionArchived(
+    handle: AgentPersistenceHandle,
+    archivedAt: number | null,
+  ): Promise<void> {
+    const metadata = (handle.metadata ?? {}) as Partial<AgentSessionConfig>;
+    if (!metadata.cwd) {
+      throw new Error("OpenCode native archive update requires the original working directory");
+    }
+
+    const registeredServerUrl = getOpenCodeChildSessionServerUrl(handle.sessionId);
+    const acquisition =
+      (registeredServerUrl ? this.serverManager.acquireExisting(registeredServerUrl) : null) ??
+      (await this.serverManager.acquireCurrent());
+    const client = this.createOpenCodeClient({
+      baseUrl: acquisition.server.url,
+      directory: metadata.cwd,
+    });
+    try {
+      // OpenCode accepts null to clear the archive timestamp, but this SDK
+      // release's generated request type still exposes only number.
+      const updateSession = client.session.update.bind(client.session) as (parameters: {
+        sessionID: string;
+        directory?: string;
+        time?: { archived?: number | null };
+      }) => ReturnType<typeof client.session.update>;
+      const response = readOpenCodeRecord(
+        await updateSession({
+          sessionID: handle.sessionId,
+          directory: metadata.cwd,
+          time: { archived: archivedAt },
+        }),
+      );
+      if (response?.error) {
+        throw new Error(
+          `Failed to ${archivedAt === null ? "unarchive" : "archive"} OpenCode session: ${toDiagnosticErrorMessage(response.error)}`,
+        );
+      }
+    } finally {
+      await acquisition.release();
     }
   }
 
@@ -1635,7 +1669,11 @@ export class OpenCodeAgentClient implements AgentClient {
     );
 
     if (response.error || !response.data) {
-      return DEFAULT_MODES;
+      // Discovery failed — return an empty list rather than fabricating
+      // modes. OpenCode users can rename or delete any agent (including
+      // "build"/"plan"), so a hardcoded fallback can validate a mode that
+      // does not actually exist, which then fails at prompt time.
+      return [];
     }
 
     const discovered = response.data.filter(isSelectableOpenCodeAgent).map(mapOpenCodeAgentToMode);
@@ -1670,6 +1708,7 @@ export interface OpenCodeEventTranslationState {
   cwd?: string;
   messageRoles: Map<string, OpenCodeMessageRole>;
   pendingUserMessageText?: string | null;
+  pendingClientMessageId?: string | null;
   emittedUserMessageIds?: Set<string>;
   accumulatedUsage: AgentUsage;
   sessionTotalCostUsd?: number;
@@ -2333,7 +2372,12 @@ function appendOpenCodeUserMessageUpdated(
   events.push({
     type: "timeline",
     provider: "opencode",
-    item: { type: "user_message", text, messageId: info.id },
+    item: {
+      type: "user_message",
+      text,
+      messageId: info.id,
+      ...(state.pendingClientMessageId ? { clientMessageId: state.pendingClientMessageId } : {}),
+    },
   });
 }
 
@@ -2713,6 +2757,11 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+type OpenCodeTurnState =
+  | { status: "idle" }
+  | { status: "running"; turnId: string }
+  | { status: "stopping"; idle: Deferred<void> };
+
 function unwrapOpenCodeGlobalEvent(event: unknown): OpenCodeEvent | null {
   const record = readOpenCodeRecord(event);
   if (!record) {
@@ -2745,14 +2794,6 @@ function getOpenCodeEventSessionId(event: OpenCodeEvent): string | null {
     (event.type === "session.created" || event.type === "session.updated"
       ? readNonEmptyString(info?.id)
       : null)
-  );
-}
-
-function isOpenCodeUserMessageEvent(event: OpenCodeEvent, sessionId: string): boolean {
-  return (
-    event.type === "message.updated" &&
-    event.properties.info.sessionID === sessionId &&
-    event.properties.info.role === "user"
   );
 }
 
@@ -2846,11 +2887,10 @@ class OpenCodeAgentSession implements AgentSession {
   private readonly sessionId: string;
   private readonly logger: Logger;
   private readonly modelContextWindowsByModelKey: ReadonlyMap<string, number>;
-  private currentMode: string = "default";
+  private currentMode: string | null = null;
   private autoAcceptEnabled = false;
   private pendingPermissions = new Map<string, AgentPermissionRequest>();
   private abortController: AbortController | null = null;
-  private pendingAbortPromise: Promise<void> | null = null;
   private accumulatedUsage: AgentUsage = {};
   private sessionTotalCostUsd: number | undefined;
   private mcpConfigured = false;
@@ -2858,6 +2898,7 @@ class OpenCodeAgentSession implements AgentSession {
   /** Tracks the role of each message by ID to distinguish user from assistant messages */
   private messageRoles = new Map<string, OpenCodeMessageRole>();
   private pendingUserMessageText: string | null = null;
+  private pendingClientMessageId: string | null = null;
   private emittedUserMessageIds = new Set<string>();
   /** Tracks streamed textual part IDs to suppress final full-text echoes from OpenCode. */
   private streamedPartKeys = new Set<string>();
@@ -2871,8 +2912,7 @@ class OpenCodeAgentSession implements AgentSession {
   private availableModesCache: AgentMode[] | null = null;
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private nextTurnOrdinal = 0;
-  private activeForegroundTurnId: string | null = null;
-  private activeForegroundTurnSource: "paseo" | "external" | null = null;
+  private turnState: OpenCodeTurnState = { status: "idle" };
   private readonly runningToolCalls = new Map<string, ToolCallTimelineItem>();
   private subAgentsByCallId = new Map<string, OpenCodeSubAgentActivityState>();
   private subAgentCallIdByChildSessionId = new Map<string, string>();
@@ -2884,11 +2924,10 @@ class OpenCodeAgentSession implements AgentSession {
   private childHydrationCompleted = false;
   private readonly unrelatedSessionIds = new Set<string>();
   private selectedModelContextWindowMaxTokens: number | undefined;
-  private releaseServer: (() => void) | null;
+  private releaseServer: (() => Promise<void>) | null;
   private eventStreamAbortController: AbortController | null = null;
   private eventStreamReady: Deferred<void> | null = null;
   private eventStreamTask: Promise<void> | null = null;
-  private suppressTerminalUntilNextUserMessage = false;
   private closed = false;
   private readonly persistSession: boolean;
   private deletedFromProvider = false;
@@ -2898,7 +2937,7 @@ class OpenCodeAgentSession implements AgentSession {
     sessionId: string,
     logger: Logger,
     modelContextWindowsByModelKey: ReadonlyMap<string, number> = new Map(),
-    releaseServer?: () => void,
+    releaseServer?: () => Promise<void>,
     persistSession = true,
     private readonly agentId?: string,
     private readonly serverUrl?: string,
@@ -2921,6 +2960,10 @@ class OpenCodeAgentSession implements AgentSession {
 
   get id(): string | null {
     return this.sessionId;
+  }
+
+  private get activeForegroundTurnId(): string | null {
+    return this.turnState.status === "running" ? this.turnState.turnId : null;
   }
 
   get features(): AgentFeature[] {
@@ -2964,29 +3007,24 @@ class OpenCodeAgentSession implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
-    let turnId = this.activeForegroundTurnId;
-    const turnAbortController = this.abortController;
-    turnAbortController?.abort();
+    const turnId = this.activeForegroundTurnId;
+    this.abortController?.abort();
+    if (turnId) {
+      this.beginStoppingTurn(turnId);
+    }
     // COMPAT(opencodeSlowAbort): OpenCode 1.14.42+ blocks session.abort until
     // the running tool actually stops, which can be tens of seconds for
     // long-running tools. Cap the wait so the user-visible cancel lands
     // quickly while still giving OpenCode a chance to confirm the abort
     // cleanly. Drop the timeout once upstream returns abort acknowledgement
     // before tool teardown.
-    const abortPromise = this.beginSessionAbort(turnId, "interrupt");
+    const abortPromise = this.abortSession(turnId, "interrupt");
     await withTimeout(abortPromise, 2_000, "OpenCode session.abort").catch((error) => {
       this.logger.warn(
         { err: error, sessionId: this.sessionId, turnId },
         "OpenCode session.abort exceeded the cancel cap; proceeding with local cancel",
       );
     });
-    if (turnId) {
-      this.suppressTerminalUntilNextUserMessage = true;
-      this.finishForegroundTurn(
-        { type: "turn_canceled", provider: "opencode", reason: "interrupted" },
-        turnId,
-      );
-    }
   }
 
   async revertBoth(input: { messageId: string }): Promise<void> {
@@ -2998,8 +3036,8 @@ class OpenCodeAgentSession implements AgentSession {
     });
   }
 
-  private beginSessionAbort(turnId: string | null, reason: string): Promise<void> {
-    const abortPromise = this.client.session
+  private abortSession(turnId: string | null, reason: string): Promise<void> {
+    return this.client.session
       .abort({
         sessionID: this.sessionId,
         directory: this.config.cwd,
@@ -3011,49 +3049,77 @@ class OpenCodeAgentSession implements AgentSession {
           "OpenCode session.abort rejected",
         );
       });
-    const trackedAbortPromise = abortPromise.finally(() => {
-      if (this.pendingAbortPromise === trackedAbortPromise) {
-        this.pendingAbortPromise = null;
-      }
-    });
-    this.pendingAbortPromise = trackedAbortPromise;
-    return trackedAbortPromise;
   }
 
-  private async awaitPendingAbortBeforeStartingTurn(): Promise<void> {
-    const pendingAbortPromise = this.pendingAbortPromise;
-    if (!pendingAbortPromise) {
+  private async waitUntilProviderIdle(): Promise<void> {
+    if (this.turnState.status !== "stopping") {
       return;
     }
 
+    const stopping = this.turnState;
+    // OpenCode creates prompts before joining its single session runner. Sending
+    // while that runner is stopping can strand the new prompt behind the old
+    // run, so only provider-confirmed idle makes the session reusable.
     await withTimeout(
-      pendingAbortPromise,
+      this.observeProviderStopBoundary(stopping),
       OPENCODE_PENDING_ABORT_START_TIMEOUT_MS,
-      "OpenCode pending session.abort",
-    ).catch((error) => {
-      this.logger.warn(
-        { err: error, sessionId: this.sessionId },
-        "OpenCode session.abort was still pending before starting the next turn",
-      );
-    });
+      "OpenCode previous turn to stop",
+    );
+  }
+
+  private async observeProviderStopBoundary(
+    stopping: Extract<OpenCodeTurnState, { status: "stopping" }>,
+  ): Promise<void> {
+    while (this.turnState === stopping) {
+      void this.abortSession(null, "turn_start_boundary");
+      const eventStreamTask = this.eventStreamTask;
+      const boundary = await (eventStreamTask
+        ? Promise.race([
+            stopping.idle.promise.then(() => "idle" as const),
+            eventStreamTask.then(
+              () => "stream_ended" as const,
+              () => "stream_ended" as const,
+            ),
+          ])
+        : Promise.resolve("stream_ended" as const));
+      if (boundary === "idle") {
+        return;
+      }
+
+      await this.ensureEventStreamReady();
+      const response = await this.client.session.status({ directory: this.config.cwd });
+      if (response.error) {
+        throw new Error(
+          `Failed to confirm OpenCode session status: ${toDiagnosticErrorMessage(response.error)}`,
+        );
+      }
+      const statuses = readOpenCodeRecord(response.data);
+      if (!statuses) {
+        throw new Error("OpenCode returned an invalid session status response");
+      }
+      const status = readOpenCodeRecord(statuses[this.sessionId]);
+      const statusType = readNonEmptyString(status?.type);
+      if (!status || statusType === "idle") {
+        this.finishStoppingTurn();
+        return;
+      }
+      if (statusType !== "busy" && statusType !== "retry") {
+        throw new Error(`OpenCode returned an unknown session status '${statusType ?? "missing"}'`);
+      }
+    }
   }
 
   async startTurn(
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): Promise<{ turnId: string }> {
-    if (this.activeForegroundTurnId) {
-      if (this.activeForegroundTurnSource === "external") {
-        // A direct Paseo prompt owns the foreground; close the adopted child run first.
-        this.finishForegroundTurn(
-          { type: "turn_completed", provider: "opencode", usage: undefined },
-          this.activeForegroundTurnId,
-        );
-      } else {
-        throw new Error("A foreground turn is already active");
-      }
+    if (this.turnState.status === "running") {
+      throw new Error("A foreground turn is already active");
     }
-    await this.awaitPendingAbortBeforeStartingTurn();
+    await this.waitUntilProviderIdle();
+    if (this.turnState.status !== "idle") {
+      throw new Error("OpenCode is still stopping the previous turn");
+    }
 
     this.runningToolCalls.clear();
     this.subAgentsByCallId.clear();
@@ -3066,6 +3132,7 @@ class OpenCodeAgentSession implements AgentSession {
 
     const parts = buildOpenCodePromptParts(prompt);
     this.pendingUserMessageText = buildOpenCodeUserTimelineText(prompt);
+    this.pendingClientMessageId = options?.clientMessageId ?? null;
     this.suppressAssistantMessagesUntilIdle.active = false;
     const model = this.parseModel(this.config.model);
     const thinkingOptionId = this.config.thinkingOptionId;
@@ -3082,8 +3149,7 @@ class OpenCodeAgentSession implements AgentSession {
     }
 
     const turnId = this.createTurnId();
-    this.activeForegroundTurnId = turnId;
-    this.activeForegroundTurnSource = "paseo";
+    this.turnState = { status: "running", turnId };
     this.notifySubscribers({ type: "turn_started", provider: "opencode" }, turnId);
 
     const slashCommand = await this.resolveSlashCommandInvocation(prompt);
@@ -3510,6 +3576,20 @@ class OpenCodeAgentSession implements AgentSession {
     if (!event) {
       return;
     }
+    if (
+      this.turnState.status === "stopping" &&
+      getOpenCodeEventSessionId(event) === this.sessionId
+    ) {
+      if (isOpenCodeTerminalEvent(event, this.sessionId)) {
+        this.finishStoppingTurn();
+      }
+      this.traceOpenCode("provider.opencode.event.skip", {
+        n: eventCount,
+        reason: "turn_stopping",
+        type: event.type,
+      });
+      return;
+    }
     const translated = await this.translateEvent(event);
     const foregroundEvents: AgentStreamEvent[] = [];
     for (const translatedEvent of translated) {
@@ -3519,8 +3599,8 @@ class OpenCodeAgentSession implements AgentSession {
         foregroundEvents.push(translatedEvent);
       }
     }
-    if (!turnId && this.shouldStartExternalDrivenTurn(event, foregroundEvents)) {
-      turnId = this.startExternalDrivenTurn();
+    if (!turnId && this.shouldStartAutonomousTurn(event, foregroundEvents)) {
+      turnId = this.startAutonomousTurn();
     }
     if (!turnId) {
       this.emitBackgroundPermissionRequests(foregroundEvents);
@@ -3530,18 +3610,6 @@ class OpenCodeAgentSession implements AgentSession {
         type: event.type,
       });
       return;
-    }
-    if (this.suppressTerminalUntilNextUserMessage) {
-      if (isOpenCodeUserMessageEvent(event, this.sessionId)) {
-        this.suppressTerminalUntilNextUserMessage = false;
-      } else if (isOpenCodeTerminalEvent(event, this.sessionId)) {
-        this.traceOpenCode("provider.opencode.event.skip", {
-          n: eventCount,
-          reason: "stale_interrupt_terminal",
-          type: event.type,
-        });
-        return;
-      }
     }
     this.traceOpenCode("provider.opencode.parsed_event", {
       turnId,
@@ -3580,34 +3648,44 @@ class OpenCodeAgentSession implements AgentSession {
     }
   }
 
-  private shouldStartExternalDrivenTurn(
+  private shouldStartAutonomousTurn(
     event: OpenCodeEvent,
     foregroundEvents: readonly AgentStreamEvent[],
   ): boolean {
+    if (this.turnState.status !== "idle") {
+      return false;
+    }
+    if (getOpenCodeEventSessionId(event) !== this.sessionId) {
+      return false;
+    }
+    // OpenCode publishes the persisted user message before it marks the runner
+    // busy. That message is the earliest unambiguous boundary for a plugin-
+    // initiated parent turn; session metadata and assistant echoes are not.
+    if (event.type === "message.updated" && event.properties.info.role === "user") {
+      return true;
+    }
     if (!this.externallyDriven) {
       return false;
     }
-    if (this.activeForegroundTurnId) {
-      return false;
-    }
-    if (foregroundEvents.some((foregroundEvent) => !toTerminalTurnEvent(foregroundEvent))) {
+    if (
+      foregroundEvents.some(
+        (foregroundEvent) =>
+          foregroundEvent.type !== "thread_started" && !toTerminalTurnEvent(foregroundEvent),
+      )
+    ) {
       return true;
     }
-    return (
-      event.type === "session.status" &&
-      event.properties.sessionID === this.sessionId &&
-      event.properties.status.type === "busy"
-    );
+    return event.type === "session.status" && event.properties.status.type === "busy";
   }
 
-  private startExternalDrivenTurn(): string {
+  private startAutonomousTurn(): string {
     const turnId = this.createTurnId();
-    this.activeForegroundTurnId = turnId;
-    this.activeForegroundTurnSource = "external";
+    this.turnState = { status: "running", turnId };
     this.runningToolCalls.clear();
     this.subAgentsByCallId.clear();
     this.subAgentCallIdByChildSessionId.clear();
     this.pendingUserMessageText = null;
+    this.pendingClientMessageId = null;
     this.abortController = null;
     this.notifySubscribers({ type: "turn_started", provider: "opencode" }, turnId);
     return turnId;
@@ -3633,10 +3711,35 @@ class OpenCodeAgentSession implements AgentSession {
       this.runningToolCalls.clear();
     }
     this.pendingUserMessageText = null;
-    this.activeForegroundTurnId = null;
-    this.activeForegroundTurnSource = null;
+    this.pendingClientMessageId = null;
+    this.turnState = { status: "idle" };
     this.abortController = null;
     this.notifySubscribers(event, turnId);
+  }
+
+  private beginStoppingTurn(turnId: string): void {
+    if (this.turnState.status !== "running" || this.turnState.turnId !== turnId) {
+      return;
+    }
+    this.synthesizeInterruptedToolCalls(turnId);
+    this.pendingUserMessageText = null;
+    this.pendingClientMessageId = null;
+    this.abortController = null;
+    this.turnState = { status: "stopping", idle: createDeferred<void>() };
+    this.notifySubscribers(
+      { type: "turn_canceled", provider: "opencode", reason: "interrupted" },
+      turnId,
+    );
+  }
+
+  private finishStoppingTurn(): void {
+    if (this.turnState.status !== "stopping") {
+      return;
+    }
+    const stopping = this.turnState;
+    resetOpenCodeTurnTrackingState(this.createTranslationState());
+    this.turnState = { status: "idle" };
+    stopping.idle.resolve();
   }
 
   private trackToolCall(item: ToolCallTimelineItem): void {
@@ -3771,7 +3874,7 @@ class OpenCodeAgentSession implements AgentSession {
     }
 
     this.currentMode = normalizedModeId;
-    this.config.modeId = normalizedModeId;
+    this.config.modeId = normalizedModeId ?? undefined;
   }
 
   async setFeature(featureId: string, value: unknown): Promise<void> {
@@ -3878,16 +3981,19 @@ class OpenCodeAgentSession implements AgentSession {
       this.eventStreamReady = null;
       this.eventStreamTask = null;
       this.subscribers.clear();
-      await reconcileOpenCodeSessionClose({
+      await abortOpenCodeSession({
         client: this.client,
         sessionId: this.sessionId,
         directory: this.config.cwd,
         logger: this.logger,
       });
       await this.deleteProviderSessionIfEphemeral();
-      this.activeForegroundTurnId = null;
+      if (this.turnState.status === "stopping") {
+        this.turnState.idle.resolve();
+      }
+      this.turnState = { status: "idle" };
     } finally {
-      this.releaseServer?.();
+      await this.releaseServer?.();
       this.releaseServer = null;
     }
   }
@@ -4031,6 +4137,7 @@ class OpenCodeAgentSession implements AgentSession {
       cwd: this.config.cwd,
       messageRoles: this.messageRoles,
       pendingUserMessageText: this.pendingUserMessageText,
+      pendingClientMessageId: this.pendingClientMessageId,
       emittedUserMessageIds: this.emittedUserMessageIds,
       accumulatedUsage: this.accumulatedUsage,
       sessionTotalCostUsd: this.sessionTotalCostUsd,

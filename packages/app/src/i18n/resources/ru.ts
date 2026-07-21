@@ -54,13 +54,16 @@ export const ru: TranslationResources = {
       close: "Закрыть меню",
     },
     commandCenter: {
-      placeholder: "Введите команду или найдите агентов...",
+      placeholder: "Поиск команд, рабочих пространств и агентов...",
       noMatches: "Нет совпадений",
       actions: "Действия",
+      workspaces: "Рабочие пространства",
       agents: "Агенты",
       newAgent: "Новый агент",
-      openProject: "Открыть проект",
+      addProject: "Добавить проект",
       home: "Дом",
+      modelGroupLabel: "Модель",
+      modelSearchKeywords: "сменить модель изменить модель выбрать модель установить модель",
     },
   },
   composer: {
@@ -100,6 +103,7 @@ export const ru: TranslationResources = {
       addImage: "Добавить изображение",
       addFile: "Upload file",
       addIssueOrPr: "Добавить проблему или PR",
+      addIssueOrPr_mr: "Добавить проблему или MR",
       dropImagesHere: "Скиньте изображения сюда",
       dropFilesHere: "Drop files here",
       editQueuedMessage: "Изменить сообщение в очереди",
@@ -107,8 +111,8 @@ export const ru: TranslationResources = {
       openImage: "Открыть прикрепленное изображение",
       removeImage: "Удалить прикрепленное изображение",
       removeFile: "Remove file attachment",
-      openGithub: "Открыть{{kind}}#{{number}}",
-      removeGithub: "Удалить{{kind}}#{{number}}",
+      openGithub: "Открыть {{kind}} {{number}}",
+      removeGithub: "Удалить {{kind}} {{number}}",
       element: "Элемент",
       openBrowserElement: "Открыть вложение элемента браузера",
       removeBrowserElement: "Удалить вложение элемента браузера",
@@ -132,7 +136,9 @@ export const ru: TranslationResources = {
       searching: "Идет поиск...",
       noResults: "Результаты не найдены.",
       searchPlaceholder: "Поиск проблем и пиар...",
+      searchPlaceholder_mr: "Поиск проблем и MR...",
       title: "Прикрепите проблему или PR",
+      title_mr: "Прикрепите проблему или MR",
     },
   },
   agentControls: {
@@ -185,6 +191,7 @@ export const ru: TranslationResources = {
       notFound: "Agent не найден",
       failedToLoad: "Не удалось загрузить агент",
       reconnecting: "Повторное подключение...",
+      timelineSyncFailed: "Не удалось обновить историю агента. Повторная попытка…",
       archivingTitle: "Архивный агент...",
       archivingSubtitle: "Пожалуйста, подождите, пока мы архивируем этого агента.",
     },
@@ -335,16 +342,25 @@ export const ru: TranslationResources = {
   workspace: {
     route: {
       loading: "Загрузка рабочей области",
-      restoring: "Восстановление рабочей области",
-      restoreFailed:
-        "Не удалось восстановить эту рабочую область — каталог мог быть перемещён или удалён",
       connecting: "Подключение",
       hostOffline: "{{hostName}}не в сети",
       cannotReachHost: "Невозможно связаться с{{hostName}}",
       hostStatus: "Статус Host:{{status}}",
-      missing: "Workspace не найден",
       needsHostUpgrade: "Обновите хост, чтобы восстановить эту рабочую область",
       manageHost: "Управление хостом",
+      recovery: {
+        archivedTitle: "Рабочая область в архиве",
+        restoreDescription:
+          "{{workspaceName}} была архивирована, а её worktree удалён. Восстановите ветку {{branch}}, чтобы открыть её снова.",
+        unarchiveDescription:
+          "{{workspaceName}} находится в архиве. Разархивируйте её, чтобы открыть снова.",
+        restoreAction: "Восстановить",
+        unarchiveAction: "Разархивировать",
+        restoringTitle: "Восстановление рабочей области",
+        restoringAction: "Восстановление...",
+        unavailableTitle: "Рабочая область недоступна",
+        checkFailedTitle: "Не удалось проверить рабочую область",
+      },
     },
     hoverCard: {
       scriptsAccessibility: "Скрипты Workspace",
@@ -453,6 +469,7 @@ export const ru: TranslationResources = {
     },
     tabs: {
       loading: "Загрузка...",
+      modified: "Несохранённые изменения",
       loadingAgentTitle: "Название агента загрузки",
       emptyPane: "На этой панели нет вкладок.",
       fallback: {
@@ -492,6 +509,7 @@ export const ru: TranslationResources = {
         preparingTerminal: "Подготовка вкладки терминала",
         preparingTerminalTooltip: "Подготовка терминала...",
         newBrowser: "Новый браузер",
+        exitFocusMode: "Выйти из режима фокусировки",
         splitRight: "Разделить панель справа",
         splitDown: "Разделить панель вниз",
         terminalProfilesMenu: "Terminal profiles",
@@ -522,6 +540,13 @@ export const ru: TranslationResources = {
         failedToReloadAgent: "Не удалось перезагрузить агент",
       },
       confirmations: {
+        unsavedTitle: "Несохранённые изменения",
+        unsavedMessage:
+          "В этой вкладке есть несохранённые изменения. При закрытии черновик будет удалён.",
+        closeWithoutSaving: "Закрыть без сохранения",
+        closePaneTitle: "Закрыть панель?",
+        bulkUnsaved:
+          "В {{count}} вкладках есть несохранённые изменения. При закрытии черновики будут удалены.",
         close: "Закрывать",
         cancel: "Отмена",
         archive: "Архив",
@@ -615,6 +640,9 @@ export const ru: TranslationResources = {
           label: "Создать PR",
           pending: "Создание PR...",
           success: "PR создано",
+          label_mr: "Создать MR",
+          pending_mr: "Создание MR...",
+          success_mr: "MR создано",
         },
         mergeBranch: {
           label: "Объединить локально",
@@ -637,7 +665,13 @@ export const ru: TranslationResources = {
           rebase: "Объединить PR (rebase)",
           pending: "Объединение PR...",
           success: "PR объединен",
+          squash_mr: "Объединить MR (squash)",
+          merge_mr: "Объединить MR (merge)",
+          rebase_mr: "Объединить MR (rebase)",
+          pending_mr: "Объединение MR...",
+          success_mr: "MR объединен",
         },
+        viewPr_mr: "Посмотреть MR",
         autoMerge: {
           enableSquash: "Автообъединение (squash)",
           enableMerge: "Автообъединение (merge)",
@@ -648,7 +682,7 @@ export const ru: TranslationResources = {
           disabled: "Автоматическое объединение отключено",
         },
         unavailable: {
-          viewPrNoGithub: "Просмотр PR сейчас недоступен, поскольку GitHub не подключен.",
+          viewPrNoForge: "Просмотр {{noun}} сейчас недоступен, поскольку {{brand}} не подключен.",
           pullNoRemote:
             "Функция Pull здесь недоступна, поскольку эта ветка еще не подключена к удаленному серверу.",
           pullDirty:
@@ -662,10 +696,14 @@ export const ru: TranslationResources = {
             "Функция Pull and Push здесь недоступна, поскольку эта ветка еще не подключена к удаленному устройству.",
           pullAndPushDirty:
             "Функция извлечения и отправки недоступна, пока у вас есть локальные изменения, поэтому сначала зафиксируйте или сохраните их.",
+          pullAndPushNoIncoming:
+            "Функция Pull and Push недоступна, поскольку сначала нечего получать.",
           pullAndPushInSync:
             "Функция Pull and Push недоступна, поскольку эта ветвь уже синхронизирована.",
-          createPrNoGithub:
-            "Функция «Создать PR» сейчас недоступна, поскольку GitHub не подключен.",
+          pullAndPushNothingToPush:
+            "Функция Pull and Push недоступна, поскольку после pull нечего отправлять.",
+          createPrNoForge:
+            "Функция «Создать {{noun}}» сейчас недоступна, поскольку {{brand}} не подключен.",
           createPrNoCommits:
             "Функция «Создать PR» недоступна, поскольку в этой ветке еще нет новых коммитов.",
           mergeNoBase: "Объединение недоступно, поскольку нам не удалось определить базовую ветку.",
@@ -679,6 +717,10 @@ export const ru: TranslationResources = {
           updateCurrent:
             "Обновление недоступно, поскольку эта ветка уже обновлена ​​до версии{{baseRef}}.",
           mergePrNoGithub: "Объединение PR сейчас недоступно, поскольку GitHub не подключен.",
+          archiveNotWorktree:
+            "Архив здесь недоступен, поскольку это рабочее пространство не было создано как рабочее дерево Paseo.",
+          mergePrNoForge:
+            "Объединение {{noun}} сейчас недоступно, поскольку {{brand}} не подключен.",
           mergePrMissing: "Объединение PR недоступно, поскольку еще нет запроса на включение",
           mergePrDraft:
             "Объединение PR недоступно, поскольку запрос на включение все еще находится на стадии черновика.",
@@ -689,7 +731,7 @@ export const ru: TranslationResources = {
           mergePrQueue:
             "Слияние PR здесь недоступно, поскольку этот репозиторий использует очередь слияния.",
           mergePrNotReady:
-            "Функция слияния PR недоступна до тех пор, пока GitHub не сообщит, что запрос на включение готов к слиянию.",
+            "Функция слияния {{noun}} недоступна до тех пор, пока {{brand}} не сообщит, что {{noun}} готов к слиянию.",
           autoMergeCannotDisable:
             "Автоматическое объединение включено, но этот аккаунт не может его отключить.",
         },
@@ -740,7 +782,7 @@ export const ru: TranslationResources = {
         expandAllFolders: "Развернуть все папки",
         refreshing: "Освежающий",
         refresh: "Обновить",
-        refreshState: "Обновить состояние git и GitHub.",
+        refreshState: "Обновить состояние git и {{brand}}",
         failedRefresh: "Не удалось обновить состояние git.",
         emptyHiddenWhitespace: "Никаких видимых изменений после скрытия пробелов",
         emptyUncommitted: "Нет незафиксированных изменений",
@@ -754,6 +796,17 @@ export const ru: TranslationResources = {
         base: "база",
         newFile: "Новый",
         deletedFile: "Удалено",
+        commits: {
+          title: "Коммиты",
+          legendLocal: "локально",
+          legendRemote: "на удалённом",
+          countLabel: "{{count}} коммитов впереди базы",
+          fileDiffEmpty: "Нет изменений для отображения",
+          fileDiffError: "Не удалось загрузить различия файла",
+          loading: "Загрузка коммитов…",
+          loadError: "Не удалось загрузить коммиты",
+          empty: "Нет коммитов впереди базы",
+        },
       },
       openInEditor: {
         open: "Открыть",
@@ -765,13 +818,23 @@ export const ru: TranslationResources = {
       pr: {
         actions: {
           viewPullRequest: "Открыть",
+          openOn: "Открыть на {{brand}}",
         },
         sections: {
           checks: "Чеки",
+          pipeline: "Пайплайн",
           reviews: "Отзывы",
         },
+        empty: {
+          noJobs: "Нет задач",
+          loadingPipeline: "Загрузка пайплайна...",
+          pipelineJobsLoadFailed: "Не удалось загрузить задачи пайплайна",
+          allowedToFail: "допускается сбой",
+        },
+        approvals: "{{given}} из {{required}} одобрений",
         accessibility: {
           pullRequest: "Запрос на извлечение №{{number}}",
+          pullRequest_mr: "Запрос на слияние !{{number}}",
         },
         states: {
           draft: "Черновик",
@@ -788,10 +851,18 @@ export const ru: TranslationResources = {
         time: {
           justNow: "прямо сейчас",
         },
+        thread: {
+          discussion: "Обсуждение",
+        },
         errors: {
           statusLoadFailed: "Невозможно загрузить статус запроса на включение",
           activityLoadFailed: "Невозможно загрузить активность запроса на включение",
         },
+      },
+      forgeSetup: {
+        installCli: "Установите CLI {{cli}}, чтобы использовать возможности {{brand}}.",
+        signIn: "Выполните {{command}}, чтобы использовать возможности {{brand}}.",
+        generic: "Настройте {{brand}} на этом хосте, чтобы использовать его функции.",
       },
     },
   },
@@ -814,16 +885,13 @@ export const ru: TranslationResources = {
     },
     help: {
       trigger: "Помощь и поддержка",
-      troubleshoot: "Устранение неполадок",
+      sectionHelp: "Помощь",
       diagnostics: "Запустить диагностику",
-      diagnosticsDescription: "Собрать данные приложения и подключённых хостов",
       shortcuts: "Сочетания клавиш",
-      shortcutsDescription: "Показать доступные сочетания клавиш",
       reportIssue: "Сообщить о проблеме",
       discord: "Discord",
-      discordDescription: "Для быстрой помощи и обсуждения",
       github: "Создать issue в GitHub",
-      githubDescription: "Сообщить о воспроизводимой ошибке",
+      whatsNew: "Что нового",
       version: "Paseo {{version}}",
     },
     sections: {
@@ -935,10 +1003,11 @@ export const ru: TranslationResources = {
     refPicker: {
       startingRef: "Начальная ссылка",
       chooseStart: "Выберите, с чего начать",
-      checkoutHint: "Проверьте PR#{{number}}?",
-      checkoutPr: "Проверьте PR#{{number}}",
-      dismissCheckoutHint: "Отклонить подсказку по оформлению заказа PR#{{number}}",
-      intoBase: "в{{baseRef}}",
+      checkoutHint: "Проверьте {{noun}} {{numberPrefix}}{{number}}?",
+      checkoutPr: "Проверьте {{noun}} {{numberPrefix}}{{number}}",
+      dismissCheckoutHint:
+        "Отклонить подсказку по оформлению заказа {{noun}} {{numberPrefix}}{{number}}",
+      intoBase: "в {{baseRef}}",
       searching: "Идет поиск...",
       noMatchingRefs: "Нет подходящих ссылок.",
       searchPlaceholder: "Поиск филиалов и PR",
@@ -1430,6 +1499,8 @@ export const ru: TranslationResources = {
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",
     archiveTooltip: "Архивный субагент",
+    archiveFinishedAction: "Архивировать завершенные субагенты",
+    archiveFinishedTooltip: "Архивировать завершенные",
   },
   panels: {
     draft: {
@@ -1443,6 +1514,34 @@ export const ru: TranslationResources = {
       binaryPreviewUnavailable: "Предварительный просмотр двоичного файла недоступен.",
       failedToLoad: "Не удалось загрузить файл",
       failedToLoadPreview: "Не удалось загрузить предварительный просмотр файла.",
+      editor: {
+        fileSize: "Размер файла {{size}}",
+        lines: "Строк: {{count}}",
+        editorStatus: "Состояние редактора: {{status}}",
+        unsavedChanges: "Несохранённые изменения",
+        saving: "Сохранение...",
+        saveFailed: "Не удалось сохранить",
+        changedOnDisk: "Изменён на диске",
+        vimMode: "Режим Vim {{mode}}",
+        cursor: "Строка {{line}}, столбец {{column}}",
+        preview: "Просмотр",
+        source: "Исходник",
+        unavailableTitle: "Файл недоступен на диске",
+        conflictDescription: "Локальный буфер сохранён. Выберите версию, которую нужно оставить.",
+        overwrite: "Перезаписать",
+        reload: "Перезагрузить",
+        reloadTitle: "Перезагрузить с диска?",
+        reloadMessage: "Локальные изменения будут потеряны.",
+      },
+    },
+    diff: {
+      changesLabel: "Изменения",
+      changesSubtitle: "Различия рабочего дерева",
+      commitSubtitle: "Различия коммита",
+      directoryMissing: "Каталог Workspace не найден.",
+      empty: "Нет изменений",
+      loadError: "Не удалось загрузить различия",
+      capabilityMissing: "Обновите хост, чтобы просматривать различия коммитов.",
     },
   },
   toolCallDetails: {
@@ -1451,6 +1550,33 @@ export const ru: TranslationResources = {
     subAgentActivity: "Субагентская деятельность",
     input: "Вход",
     output: "Выход",
+  },
+  toolCallGroup: {
+    editedFiles: {
+      one: "изменён {{count}} файл",
+      other: "изменено {{count}} файлов",
+    },
+    commands: {
+      one: "выполнена {{count}} команда",
+      other: "выполнено {{count}} команд",
+    },
+    readFiles: {
+      one: "прочитан {{count}} файл",
+      other: "прочитано {{count}} файлов",
+    },
+    searches: {
+      one: "выполнен {{count}} поиск",
+      other: "выполнено {{count}} поисков",
+    },
+    otherTools: {
+      one: "использован {{count}} другой инструмент",
+      other: "использовано {{count}} других инструментов",
+    },
+    paseoCalls: {
+      one: "Paseo вызван {{count}} раз",
+      other: "Paseo вызван {{count}} раз",
+    },
+    and: "и",
   },
   renameModal: {
     rename: "Переименовать",
@@ -1502,11 +1628,17 @@ export const ru: TranslationResources = {
     sections: {
       general: "Общий",
       appearance: "Появление",
+      editor: "Редактор",
       shortcuts: "Ярлыки",
       integrations: "Интеграции",
       permissions: "Разрешения",
       diagnostics: "Диагностика",
       about: "О",
+    },
+    editor: {
+      title: "Редактор",
+      vimKeybindings: "Клавиши Vim",
+      vimHint: "Применяется к исходным файлам в веб- и настольной версии.",
     },
     hostSections: {
       connections: "Соединения",
@@ -1521,6 +1653,18 @@ export const ru: TranslationResources = {
     },
     general: {
       title: "Общий",
+      browserData: {
+        title: "Данные браузера",
+        siteData: "Файлы cookie и данные сайтов",
+        description: "Вкладки браузера используют общие данные входа и данные сайтов в Paseo.",
+        clear: "Очистить данные браузера",
+        clearing: "Очистка...",
+        confirmTitle: "Очистить данные браузера?",
+        confirmMessage:
+          "На сайтах будет выполнен выход, а открытые вкладки браузера перезагрузятся.",
+        success: "Данные браузера очищены.",
+        error: "Не удалось очистить данные браузера.",
+      },
       defaultSend: {
         label: "Отправка по умолчанию",
         descriptions: {
@@ -1550,6 +1694,15 @@ export const ru: TranslationResources = {
         label: "Всегда разворачивать размышления",
         description:
           "По умолчанию показывать блоки размышлений и логики агента полностью развернутыми",
+      },
+      toolCallDetail: {
+        label: "Отображение вызовов инструментов",
+        description: "Как вызовы инструментов отображаются на временной шкале",
+        accessibilityLabel: "Выбрать отображение вызовов инструментов ({{value}})",
+        options: {
+          overview: "Сводка",
+          detailed: "Полная детализация",
+        },
       },
       language: {
         label: "Язык",
@@ -1663,6 +1816,7 @@ export const ru: TranslationResources = {
     },
     shortcuts: {
       dialogTitle: "Ярлыки",
+      searchPlaceholder: "Поиск сочетаний клавиш",
       unavailableOnMobile: "Сочетания клавиш доступны только на рабочем столе.",
       capturePrompt: "Нажмите ярлык...",
       actions: {
@@ -1875,6 +2029,8 @@ export const ru: TranslationResources = {
           dialogFailedMessage: "Невозможно открыть диалоговое окно подтверждения перезапуска.",
         },
         update: {
+          desktopManagedHint:
+            "Этот демон управляется Paseo Desktop. Обновите Paseo Desktop на хосте.",
           title: "Update daemon",
           hint: "Update the daemon to the latest version and restart it",
           confirm: "Update",
@@ -1923,6 +2079,17 @@ export const ru: TranslationResources = {
       loading: "Загрузка...",
       addErrorTitle: "Unable to add provider",
       updateErrorTitle: "Невозможно обновить провайдера",
+      actions: {
+        menu: "{{name}} actions",
+        remove: "Remove provider",
+        removing: "Removing...",
+      },
+      remove: {
+        confirmTitle: "Remove {{name}}?",
+        confirmMessage: "This deletes the provider entry from config.json. It cannot be undone.",
+        confirm: "Remove",
+        errorTitle: "Unable to remove provider",
+      },
       statuses: {
         disabled: "Неполноценный",
         loading: "Загрузка",

@@ -353,7 +353,7 @@ export function useDashboardPullRequests(
     const byUrl = new Map<string, DashboardPullRequest>();
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index];
-      const items = queries[index]?.data?.items ?? [];
+      const items = (queries[index]?.data?.items ?? []) as GitHubSearchItem[];
       for (const item of items) {
         if (item.kind !== "pr") {
           continue;

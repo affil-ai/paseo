@@ -1772,6 +1772,31 @@ export interface DiffFilesPaneProps {
   showFileTree?: boolean;
 }
 
+interface SharedDiffViewProps {
+  files: ParsedDiffFile[];
+  displayPreferences: {
+    layout: "unified" | "split";
+    wrapLines: boolean;
+    codeFontSize: number;
+    monoFontFamily: string;
+  };
+  mode: { kind: string };
+}
+
+export function SharedDiffView({ files, mode }: SharedDiffViewProps) {
+  return (
+    <DiffFilesPane
+      files={files}
+      stateKey={`shared-diff:${mode.kind}`}
+      isDiffLoading={false}
+      diffErrorMessage={null}
+      emptyMessage=""
+      showToolbar={false}
+      showFileTree
+    />
+  );
+}
+
 /**
  * The diff presentation shared by the workspace Changes tab and the dashboard
  * PR review pane: collapsible per-file sections in a virtualized list plus the

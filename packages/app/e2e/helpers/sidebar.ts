@@ -39,6 +39,13 @@ export async function clickArchiveWorkspaceMenuItem(
   await archiveItem.click();
 }
 
+export async function pinWorkspaceFromSidebar(page: Page, workspaceId: string): Promise<void> {
+  const serverId = await openWorkspaceSidebarKebab(page, workspaceId);
+  const pinItem = page.getByTestId(`sidebar-workspace-menu-pin-${serverId}:${workspaceId}`);
+  await expect(pinItem).toBeVisible({ timeout: 10_000 });
+  await pinItem.click();
+}
+
 export async function archiveWorkspaceFromSidebar(page: Page, workspaceId: string): Promise<void> {
   // A clean workspace archives with no prompt. Managed worktree backing may raise
   // a browser confirm for unsynced work, so accept it when present.
@@ -61,13 +68,14 @@ export async function openMobileAgentSidebar(page: Page): Promise<void> {
 
 export async function closeMobileAgentSidebar(page: Page): Promise<void> {
   const closeButton = page.getByTestId("sidebar-close");
-  await expect(closeButton).toBeInViewport({ timeout: 5_000 });
-  await closeButton.click({ force: true });
+  await expect(closeButton).toBeInViewport({ ratio: 1, timeout: 5_000 });
+  await closeButton.click();
 }
 
-// The mobile sidebar panel animates via translateX; toBeInViewport reflects the rendered position.
+// The mobile sidebar panel animates via translateX. Waiting for its header to be fully visible
+// prevents a close click from targeting a button while the panel is still moving.
 export async function expectMobileAgentSidebarVisible(page: Page): Promise<void> {
-  await expect(page.getByTestId("sidebar-sessions")).toBeInViewport({ timeout: 5_000 });
+  await expect(page.getByTestId("sidebar-sessions")).toBeInViewport({ ratio: 1, timeout: 5_000 });
 }
 
 export async function expectMobileAgentSidebarHidden(page: Page): Promise<void> {

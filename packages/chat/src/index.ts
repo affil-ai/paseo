@@ -179,6 +179,9 @@ export async function main(): Promise<void> {
   const office = config.officeAdapter
     ? new OfficeAdapter({
         ...config.officeAdapter,
+        // This callback deliberately keeps receipt reservation, binding recovery, and relay
+        // registration in one transaction-like flow so retries remain idempotent.
+        // oxlint-disable-next-line complexity
         onTurnReceived: async (input) => {
           if (input.version === 1) {
             const existing = await state.getSession(input.threadId);
@@ -361,14 +364,18 @@ export async function main(): Promise<void> {
   client.on("agent_stream", async (message) => {
     const event = message.payload.event;
     if (officeTimelineRelay) {
-      const terminal =
-        event.type === "turn_completed"
-          ? { kind: "completed" as const }
-          : event.type === "turn_failed"
-            ? { kind: "failed" as const, errorCode: event.code ?? event.error }
-            : event.type === "turn_canceled"
-              ? { kind: "canceled" as const, errorCode: event.reason }
-              : undefined;
+      let terminal:
+        | { kind: "completed" }
+        | { kind: "failed"; errorCode: string }
+        | { kind: "canceled"; errorCode: string }
+        | undefined;
+      if (event.type === "turn_completed") {
+        terminal = { kind: "completed" };
+      } else if (event.type === "turn_failed") {
+        terminal = { kind: "failed", errorCode: event.code ?? event.error };
+      } else if (event.type === "turn_canceled") {
+        terminal = { kind: "canceled", errorCode: event.reason };
+      }
       if (event.type === "timeline" || event.type === "turn_started" || terminal) {
         await officeTimelineRelay.wake(message.payload.agentId, terminal).catch((error) => {
           console.warn("Office timeline relay failed", {

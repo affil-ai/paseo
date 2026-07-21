@@ -13,7 +13,7 @@ import type { TerminalInputModeState } from "@getpaseo/protocol/terminal-input-m
 import { useTranslation } from "react-i18next";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
-import { useAppVisible } from "@/hooks/use-app-visible";
+import { useAppActivelyVisible } from "@/hooks/use-app-visible";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import {
   hasPendingTerminalModifiers,
@@ -21,7 +21,12 @@ import {
   resolvePendingModifierDataInput,
 } from "@/utils/terminal-keys";
 import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-terminal-session";
-import { rememberTerminalViewportSize } from "@/terminal/runtime/terminal-size-cache";
+import {
+  EMPTY_FOCUS_CLAIM_STATE,
+  canRequestFocusClaim,
+  reconcileFocusClaim,
+  settleFocusClaim,
+} from "./terminal-pane-focus-claim";
 import {
   TerminalStreamController,
   type TerminalStreamControllerStatus,
@@ -172,7 +177,7 @@ export function TerminalPane({
   onOpenWorkspaceFile,
 }: TerminalPaneProps) {
   const { t } = useTranslation();
-  const isAppVisible = useAppVisible();
+  const isAppActivelyVisible = useAppActivelyVisible();
   const { theme } = useUnistyles();
   const { settings } = useAppSettings();
   const xtermTheme = useMemo(() => toXtermTheme(theme.colors.terminal), [theme]);
@@ -222,7 +227,7 @@ export function TerminalPane({
   const pendingTerminalInputRef = useRef<PendingTerminalInput[]>([]);
   const keyboardRefitTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastAutoFocusKeyRef = useRef<string | null>(null);
-  const lastPaneFocusResizeKeyRef = useRef<string | null>(null);
+  const paneFocusResizeClaimRef = useRef(EMPTY_FOCUS_CLAIM_STATE);
   const initialSnapshot = workspaceTerminalSession.snapshots.get({ terminalId });
 
   useEffect(() => {
@@ -265,38 +270,45 @@ export function TerminalPane({
       lastAutoFocusKeyRef.current = null;
       return;
     }
-
-    const nextFocusKey = `${scopeKey}:${terminalId}`;
-    if (lastAutoFocusKeyRef.current === nextFocusKey) {
-      return;
-    }
-
-    lastAutoFocusKeyRef.current = nextFocusKey;
     if (!isWorkspaceFocused) {
       return;
     }
-
-    requestTerminalFocus();
+    const focusKey = `${scopeKey}:${terminalId}`;
+    if (lastAutoFocusKeyRef.current !== focusKey) {
+      lastAutoFocusKeyRef.current = focusKey;
+      requestTerminalFocus();
+    }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
 
   useEffect(() => {
-    if (!isPaneFocused || !terminalId) {
-      lastPaneFocusResizeKeyRef.current = null;
-      return;
+    const canRequest = canRequestFocusClaim({
+      isWorkspaceFocused,
+      isAppActivelyVisible,
+      isClientReady: client !== null,
+      isConnected,
+      isRendererReady: rendererReadyStreamKey === terminalStreamKey,
+    });
+    const step = reconcileFocusClaim(paneFocusResizeClaimRef.current, {
+      key: !isPaneFocused || !terminalId ? null : `${scopeKey}:${terminalId}`,
+      canRequest,
+    });
+    paneFocusResizeClaimRef.current = step.state;
+    if (step.shouldRequest) {
+      lastSentTerminalSizeRef.current = null;
+      requestTerminalReflow();
     }
-
-    const focusResizeKey = `${scopeKey}:${terminalId}`;
-    if (lastPaneFocusResizeKeyRef.current === focusResizeKey) {
-      return;
-    }
-    lastPaneFocusResizeKeyRef.current = focusResizeKey;
-    if (!isWorkspaceFocused) {
-      return;
-    }
-
-    lastSentTerminalSizeRef.current = null;
-    requestTerminalReflow();
-  }, [isPaneFocused, isWorkspaceFocused, requestTerminalReflow, scopeKey, terminalId]);
+  }, [
+    client,
+    isAppActivelyVisible,
+    isConnected,
+    isPaneFocused,
+    isWorkspaceFocused,
+    rendererReadyStreamKey,
+    requestTerminalReflow,
+    scopeKey,
+    terminalId,
+    terminalStreamKey,
+  ]);
 
   const handleTerminalFocus = useCallback(() => {
     if (isWorkspaceFocused && isPaneFocused) {
@@ -636,26 +648,40 @@ export function TerminalPane({
       const normalizedCols = Math.floor(cols);
       const nextSize = { rows: normalizedRows, cols: normalizedCols };
       measuredTerminalSizeRef.current = nextSize;
-      // Seed future terminals in this workspace with the current pane size so they are born at
-      // the right size instead of the daemon's 80x24 default (see terminal-size-cache).
-      rememberTerminalViewportSize({ serverId, cwd, size: nextSize });
-      if (!input.shouldClaim || !client || !terminalId || !isWorkspaceFocused || !isAppVisible) {
+      if (!input.shouldClaim) {
         return;
       }
-      const previousSent = lastSentTerminalSizeRef.current;
-      if (
-        previousSent &&
-        previousSent.rows === normalizedRows &&
-        previousSent.cols === normalizedCols
-      ) {
-        return;
-      }
-      lastSentTerminalSizeRef.current = nextSize;
-      client.sendTerminalInput(terminalId, {
-        type: "resize",
-        rows: normalizedRows,
-        cols: normalizedCols,
+      let sent = false;
+      const canSend = canRequestFocusClaim({
+        isWorkspaceFocused,
+        isAppActivelyVisible,
+        isClientReady: client !== null,
+        isConnected,
+        isRendererReady: true,
       });
+      if (client && terminalId && canSend) {
+        const previousSent = lastSentTerminalSizeRef.current;
+        if (
+          !previousSent ||
+          previousSent.rows !== normalizedRows ||
+          previousSent.cols !== normalizedCols
+        ) {
+          lastSentTerminalSizeRef.current = nextSize;
+          client.sendTerminalInput(terminalId, {
+            type: "resize",
+            rows: normalizedRows,
+            cols: normalizedCols,
+          });
+        }
+        sent = true;
+      }
+      const requestedKey = paneFocusResizeClaimRef.current.requestedKey;
+      if (requestedKey) {
+        paneFocusResizeClaimRef.current = settleFocusClaim(paneFocusResizeClaimRef.current, {
+          key: requestedKey,
+          sent,
+        });
+      }
     },
   );
 

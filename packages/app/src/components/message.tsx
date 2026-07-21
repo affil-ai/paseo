@@ -2586,6 +2586,7 @@ interface ExpandableBadgeProps {
   isError?: boolean;
   isLastInSequence?: boolean;
   disableOuterSpacing?: boolean;
+  borderlessWhenExpanded?: boolean;
   testID?: string;
 }
 
@@ -2930,7 +2931,7 @@ function buildShimmerTextStyle(input: {
   };
 }
 
-const ExpandableBadge = memo(function ExpandableBadge({
+export const ExpandableBadge = memo(function ExpandableBadge({
   label,
   style,
   secondaryLabel,
@@ -2945,6 +2946,7 @@ const ExpandableBadge = memo(function ExpandableBadge({
   isError = false,
   isLastInSequence = false,
   disableOuterSpacing,
+  borderlessWhenExpanded: _borderlessWhenExpanded,
   testID,
 }: ExpandableBadgeProps) {
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
@@ -3284,6 +3286,7 @@ interface ToolCallProps {
   onOpenFilePath?: (filePath: string) => void;
   defaultExpanded?: boolean;
   forceInline?: boolean;
+  maxDetailHeight?: number;
 }
 
 export const ToolCall = memo(function ToolCall({
@@ -3304,6 +3307,7 @@ export const ToolCall = memo(function ToolCall({
   onOpenFilePath,
   defaultExpanded,
   forceInline = false,
+  maxDetailHeight: _maxDetailHeight,
 }: ToolCallProps) {
   const { openToolCall } = useToolCallSheet();
   const [isExpanded, setIsExpanded] = useState(defaultExpanded ?? false);

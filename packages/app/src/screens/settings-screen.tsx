@@ -1538,7 +1538,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         <View style={desktopStyles.contentPane}>
           <ScreenHeader
             borderless={!detailHeader}
-            windowControlsPaddingRole="detailHeader"
             left={
               detailHeader ? (
                 <>

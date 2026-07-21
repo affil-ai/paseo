@@ -13,10 +13,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
 import * as Clipboard from "expo-clipboard";
-import { SvgXml } from "react-native-svg";
 import {
   ChevronDown,
   Copy,
@@ -26,7 +24,7 @@ import {
   MoreVertical,
   RotateCw,
 } from "lucide-react-native";
-import { getFileIconSvg } from "@/components/material-file-icons";
+import { MaterialFileIcon } from "@/components/material-file-icon";
 import { TreeChevron, TreeIndentGuides, TREE_INDENT_PER_LEVEL } from "@/components/tree-primitives";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { AgentFileExplorerState, ExplorerEntry } from "@/stores/session-store";
@@ -46,8 +44,6 @@ import { usePanelStore, type SortOption } from "@/stores/panel-store";
 import { formatTimeAgo } from "@/utils/time";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
 import { filterVisibleExplorerEntries, isHiddenExplorerPath } from "@/file-explorer/visibility";
-import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
-import { isWeb } from "@/constants/platform";
 
 const SORT_OPTIONS: { value: SortOption }[] = [
   { value: "name" },
@@ -157,7 +153,7 @@ function TreeRowItem({
         <View style={styles.entryIcon}>
           {(() => {
             if (!isDirectory) {
-              return <SvgXml xml={getFileIconSvg(entry.name)} width={16} height={16} />;
+              return <MaterialFileIcon fileName={entry.name} size={16} />;
             }
             if (loading) return <ActivityIndicator size="small" />;
             return <TreeChevron expanded={isExpanded} />;
@@ -224,8 +220,6 @@ export function FileExplorerPane({
   onOpenFile,
 }: FileExplorerPaneProps) {
   const { t } = useTranslation();
-  const isMobile = useIsCompactFormFactor();
-  const showDesktopWebScrollbar = isWeb && !isMobile;
 
   const daemons = useHosts();
   const daemonProfile = useMemo(
@@ -283,9 +277,6 @@ export function FileExplorerPane({
   );
 
   const treeListRef = useRef<FlatList<TreeRow>>(null);
-  const scrollbar = useWebScrollViewScrollbar(treeListRef, {
-    enabled: showDesktopWebScrollbar,
-  });
 
   const hasInitializedRef = useRef(false);
 
@@ -482,9 +473,7 @@ export function FileExplorerPane({
         treeRows={treeRows}
         currentSortLabel={currentSortLabel}
         isRefreshFetching={isRefreshFetching}
-        showDesktopWebScrollbar={showDesktopWebScrollbar}
         treeListRef={treeListRef}
-        scrollbar={scrollbar}
         renderTreeRow={renderTreeRow}
         handleSortCycle={handleSortCycle}
         handleToggleHiddenFiles={handleToggleHiddenFiles}
@@ -505,9 +494,7 @@ interface FileExplorerPaneContentProps {
   treeRows: TreeRow[];
   currentSortLabel: string;
   isRefreshFetching: boolean;
-  showDesktopWebScrollbar: boolean;
   treeListRef: RefObject<FlatList<TreeRow> | null>;
-  scrollbar: ReturnType<typeof useWebScrollViewScrollbar>;
   renderTreeRow: (info: ListRenderItemInfo<TreeRow>) => ReactElement;
   handleSortCycle: () => void;
   handleToggleHiddenFiles: () => void;
@@ -528,9 +515,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
     treeRows,
     currentSortLabel,
     isRefreshFetching,
-    showDesktopWebScrollbar,
     treeListRef,
-    scrollbar,
     renderTreeRow,
     handleSortCycle,
     handleToggleHiddenFiles,
@@ -589,7 +574,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
   }
 
   return (
-    <View style={TREE_PANE_CONTAINER_STYLE}>
+    <View style={[styles.treePane, styles.treePaneFill]}>
       <View style={styles.paneHeader} testID="files-pane-header">
         <Pressable onPress={handleSortCycle} style={sortTriggerStyleProp}>
           <Text style={styles.sortTriggerText}>{currentSortLabel}</Text>
@@ -645,17 +630,12 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
           keyExtractor={treeRowKeyExtractor}
           testID="file-explorer-tree-scroll"
           contentContainerStyle={styles.entriesContent}
-          onLayout={scrollbar.onLayout}
-          onScroll={scrollbar.onScroll}
-          onContentSizeChange={scrollbar.onContentSizeChange}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={!showDesktopWebScrollbar}
+          showsVerticalScrollIndicator
           initialNumToRender={24}
           maxToRenderPerBatch={40}
           windowSize={12}
         />
       )}
-      {treeRows.length > 0 ? scrollbar.overlay : null}
     </View>
   );
 }
@@ -1272,5 +1252,3 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[4],
   },
 }));
-
-const TREE_PANE_CONTAINER_STYLE = [styles.treePane, styles.treePaneFill];

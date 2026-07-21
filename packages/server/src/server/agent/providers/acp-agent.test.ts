@@ -2208,6 +2208,71 @@ describe("ACPAgentSession", () => {
     expect(assistantMessages[2].messageId).not.toBe(assistantMessages[0].messageId);
   });
 
+  test("keeps ACP configuration notifications outside the turn lifecycle", async () => {
+    const session = createSession();
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => {
+      events.push(event);
+    });
+
+    await session.sessionUpdate({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "config_option_update",
+        configOptions: [
+          selectConfigOption("mode", ["plan", "yolo"], "yolo"),
+          selectConfigOption("model", ["kimi-code/kimi-for-coding"]),
+          selectConfigOption("thought_level", ["off", "on"], "on"),
+        ],
+      } as SessionUpdate,
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "thread_started",
+      "mode_changed",
+      "model_changed",
+      "thinking_option_changed",
+    ]);
+  });
+
+  test("forwards out-of-prompt ACP content without inventing a turn", async () => {
+    const session = createSession();
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => {
+      events.push(event);
+    });
+
+    await session.sessionUpdate({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "unscoped-message",
+        content: { type: "text", text: "Unscoped ACP update" },
+      } as SessionUpdate,
+    });
+
+    expect(events).toEqual([
+      {
+        type: "thread_started",
+        provider: "claude-acp",
+        sessionId: "session-1",
+      },
+      {
+        type: "timeline",
+        provider: "claude-acp",
+        item: {
+          type: "assistant_message",
+          text: "Unscoped ACP update",
+          messageId: "unscoped-message",
+        },
+      },
+    ]);
+  });
+
   test("startTurn returns before the ACP prompt settles and completes later via subscribers", async () => {
     const session = createSession();
     const events: Array<{ type: string; turnId?: string }> = [];
@@ -2264,7 +2329,9 @@ describe("ACPAgentSession", () => {
       events.push(event);
     });
 
-    const { turnId } = await session.startTurn("hello", { messageId: "msg-client-1" });
+    const { turnId } = await session.startTurn("hello", {
+      clientMessageId: "msg-client-1",
+    });
 
     expect(prompt).toHaveBeenCalledWith({
       sessionId: "session-1",
@@ -2278,7 +2345,12 @@ describe("ACPAgentSession", () => {
         type: "timeline",
         provider: "claude-acp",
         turnId,
-        item: { type: "user_message", text: "hello", messageId: "msg-client-1" },
+        item: {
+          type: "user_message",
+          text: "hello",
+          messageId: "msg-client-1",
+          clientMessageId: "msg-client-1",
+        },
       },
     ]);
 
@@ -2297,7 +2369,7 @@ describe("ACPAgentSession", () => {
       events.push(event);
     });
 
-    await session.startTurn("hello", { messageId: "msg-client-1" });
+    await session.startTurn("hello", { clientMessageId: "msg-client-1" });
     await session.sessionUpdate({
       sessionId: "session-1",
       update: {
@@ -2324,7 +2396,7 @@ describe("ACPAgentSession", () => {
       events.push(event);
     });
 
-    await session.startTurn("hello", { messageId: "msg-client-1" });
+    await session.startTurn("hello", { clientMessageId: "msg-client-1" });
     await session.sessionUpdate({
       sessionId: "session-1",
       update: {
@@ -2339,7 +2411,12 @@ describe("ACPAgentSession", () => {
       {
         type: "timeline",
         provider: "claude-acp",
-        item: { type: "user_message", text: "hello", messageId: "msg-client-1" },
+        item: {
+          type: "user_message",
+          text: "hello",
+          messageId: "msg-client-1",
+          clientMessageId: "msg-client-1",
+        },
         turnId: expect.any(String),
       },
     ]);
@@ -2363,7 +2440,7 @@ describe("ACPAgentSession", () => {
       events.push(event);
     });
 
-    await session.startTurn("first", { messageId: "msg-client-1" });
+    await session.startTurn("first", { clientMessageId: "msg-client-1" });
     await session.sessionUpdate({
       sessionId: "session-1",
       update: {
@@ -2375,7 +2452,7 @@ describe("ACPAgentSession", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    await session.startTurn("second", { messageId: "msg-client-2" });
+    await session.startTurn("second", { clientMessageId: "msg-client-2" });
     await session.sessionUpdate({
       sessionId: "session-1",
       update: {
@@ -2390,13 +2467,23 @@ describe("ACPAgentSession", () => {
       {
         type: "timeline",
         provider: "claude-acp",
-        item: { type: "user_message", text: "first", messageId: "msg-client-1" },
+        item: {
+          type: "user_message",
+          text: "first",
+          messageId: "msg-client-1",
+          clientMessageId: "msg-client-1",
+        },
         turnId: expect.any(String),
       },
       {
         type: "timeline",
         provider: "claude-acp",
-        item: { type: "user_message", text: "second", messageId: "msg-client-2" },
+        item: {
+          type: "user_message",
+          text: "second",
+          messageId: "msg-client-2",
+          clientMessageId: "msg-client-2",
+        },
         turnId: expect.any(String),
       },
     ]);
@@ -2414,7 +2501,7 @@ describe("ACPAgentSession", () => {
       events.push(event);
     });
 
-    await session.startTurn("hello", { messageId: "msg-client-1" });
+    await session.startTurn("hello", { clientMessageId: "msg-client-1" });
     await session.sessionUpdate({
       sessionId: "session-1",
       update: {
@@ -2430,7 +2517,12 @@ describe("ACPAgentSession", () => {
       {
         type: "timeline",
         provider: "claude-acp",
-        item: { type: "user_message", text: "hello", messageId: "msg-client-1" },
+        item: {
+          type: "user_message",
+          text: "hello",
+          messageId: "msg-client-1",
+          clientMessageId: "msg-client-1",
+        },
         turnId: expect.any(String),
       },
     ]);

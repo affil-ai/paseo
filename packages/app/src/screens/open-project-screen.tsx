@@ -7,7 +7,7 @@ import { GitBranch, FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-nat
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { CommunityLinks } from "@/components/community-links";
 import { MenuHeader } from "@/components/headers/menu-header";
-import { useOpenProjectPicker } from "@/hooks/use-open-project-picker";
+import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useHostChooser } from "@/hosts/host-chooser";
 import { usePanelStore } from "@/stores/panel-store";
 import {
@@ -30,7 +30,7 @@ export function OpenProjectScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
-  const openProjectPicker = useOpenProjectPicker();
+  const openProjectPicker = useOpenAddProject();
   const chooseHost = useHostChooser();
   const routeServerId = useHostRouteServerId();
   const localServerId = useLocalDaemonServerId();
