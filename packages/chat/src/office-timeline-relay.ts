@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { FetchAgentTimelinePayload } from "@getpaseo/client/internal/daemon-client";
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { ChatBridgeClient } from "./bridge.js";
 import type { OfficeV2RelayEvent } from "./office-adapter.js";
 import {
@@ -13,19 +12,30 @@ type TimelineEntry = FetchAgentTimelinePayload["entries"][number];
 type TerminalKind = "completed" | "failed" | "canceled";
 
 interface TurnSegment {
-  boundary: TimelineEntry & { item: Extract<AgentTimelineItem, { type: "user_message" }> };
+  boundary: {
+    kind: "human" | "autonomous";
+    seqStart: number;
+    seqEnd: number;
+    timestamp: string;
+    messageId?: string;
+  };
   entries: TimelineEntry[];
   providerTurnId: string;
 }
 
+interface OfficeRelayEventResult {
+  outcome?: string;
+}
+
 export interface OfficeTimelineRelayAdapter {
-  postRelayEvent(event: OfficeV2RelayEvent): Promise<void>;
+  postRelayEvent(event: OfficeV2RelayEvent): Promise<OfficeRelayEventResult | void>;
 }
 
 /**
  * Projects the durable parent-agent timeline into Office. The daemon stream is
- * only a wake-up signal: identity and replay always come from user-message
- * boundaries in fetchAgentTimeline.
+ * only a wake-up signal: replay comes from fetchAgentTimeline, with human turns
+ * bounded by user messages and autonomous continuations bounded by the durable
+ * relay cursor.
  */
 export class OfficeTimelineRelay {
   private readonly queues = new Map<string, Promise<void>>();
@@ -80,7 +90,11 @@ export class OfficeTimelineRelay {
       throw new Error("OFFICE_TIMELINE_EPOCH_CHANGED");
     }
 
-    const turns = partitionTurns(agentId, timeline.epoch, timeline.entries);
+    const turns = partitionTurns(agentId, timeline.epoch, timeline.entries, {
+      acknowledgedSeq: relay.acknowledgedSeq,
+      activeTurn: relay.activeTurn,
+      hasPendingOfficeTurn: Boolean(session.activeOfficeTurn),
+    });
     const activeId = relay.activeTurn?.providerTurnId;
     const candidates = turns.filter(
       (turn) =>
@@ -124,7 +138,7 @@ export class OfficeTimelineRelay {
   ): Promise<void> {
     const relay = session.officeRelay;
     if (!relay) return;
-    let boundaryReceiptId = turn.boundary.item.messageId;
+    let boundaryReceiptId = turn.boundary.messageId;
     let dispatchReceipt = boundaryReceiptId
       ? await this.store.getOfficeDispatchReceipt(boundaryReceiptId)
       : null;
@@ -189,28 +203,7 @@ export class OfficeTimelineRelay {
     });
     for (const projected of presentable) {
       if (projected.entry.seqEnd <= acknowledgedSeq) continue;
-      const occurredAt = Date.parse(projected.entry.timestamp);
-      await this.adapter.postRelayEvent({
-        version: 2,
-        eventId: `${turn.providerTurnId}:timeline:${projected.itemKey}:${projected.entry.seqEnd}`,
-        kind: "timeline",
-        bindingId: relay.bindingId,
-        agentId: relay.agentId,
-        providerTurnId: turn.providerTurnId,
-        itemKey: projected.itemKey,
-        seqStart: projected.entry.seqStart,
-        seqEnd: projected.entry.seqEnd,
-        occurredAt: Number.isFinite(occurredAt) ? occurredAt : Date.now(),
-        itemDigest: stableDigest(projected.item),
-        item: projected.item,
-      });
-      await this.store.updateSession(session.externalThreadId, (binding) => {
-        if (!binding.officeRelay) return;
-        binding.officeRelay.acknowledgedSeq = Math.max(
-          binding.officeRelay.acknowledgedSeq,
-          projected.entry.seqEnd,
-        );
-      });
+      await this.relayTimelineItem(session, turn, projected);
     }
 
     if (!terminal.terminal) return;
@@ -274,6 +267,38 @@ export class OfficeTimelineRelay {
     });
   }
 
+  private async relayTimelineItem(
+    session: ChatBinding,
+    turn: TurnSegment,
+    projected: { entry: TimelineEntry; itemKey: string; item: PresentationItem },
+  ): Promise<void> {
+    const relay = session.officeRelay;
+    if (!relay) return;
+    const occurredAt = Date.parse(projected.entry.timestamp);
+    const result = await this.adapter.postRelayEvent({
+      version: 2,
+      eventId: `${turn.providerTurnId}:timeline:${projected.itemKey}:${projected.entry.seqEnd}`,
+      kind: "timeline",
+      bindingId: relay.bindingId,
+      agentId: relay.agentId,
+      providerTurnId: turn.providerTurnId,
+      itemKey: projected.itemKey,
+      seqStart: projected.entry.seqStart,
+      seqEnd: projected.entry.seqEnd,
+      occurredAt: Number.isFinite(occurredAt) ? occurredAt : Date.now(),
+      itemDigest: stableDigest(projected.item),
+      item: projected.item,
+    });
+    if (result?.outcome === "stale") throw new Error("OFFICE_RELAY_TIMELINE_STALE");
+    await this.store.updateSession(session.externalThreadId, (binding) => {
+      if (!binding.officeRelay) return;
+      binding.officeRelay.acknowledgedSeq = Math.max(
+        binding.officeRelay.acknowledgedSeq,
+        projected.entry.seqEnd,
+      );
+    });
+  }
+
   private fetchTimeline(agentId: string) {
     return this.client.fetchAgentTimeline(agentId, {
       direction: "tail",
@@ -287,22 +312,101 @@ function partitionTurns(
   agentId: string,
   epoch: string,
   entries: readonly TimelineEntry[],
+  state: {
+    acknowledgedSeq: number;
+    activeTurn?: { providerTurnId: string; startSeq: number };
+    hasPendingOfficeTurn: boolean;
+  },
 ): TurnSegment[] {
+  const autonomous = resolveAutonomousBoundary(agentId, epoch, entries, state);
   const turns: TurnSegment[] = [];
+  let current: TurnSegment | undefined;
   for (const entry of entries) {
     if (entry.item.type === "user_message") {
-      turns.push({
-        boundary: entry as TurnSegment["boundary"],
+      current = {
+        boundary: {
+          kind: "human",
+          seqStart: entry.seqStart,
+          seqEnd: entry.seqEnd,
+          timestamp: entry.timestamp,
+          ...(entry.item.messageId ? { messageId: entry.item.messageId } : {}),
+        },
         entries: [],
-        providerTurnId: createHash("sha256")
-          .update(`${agentId}\0${epoch}\0${entry.seqStart}`)
-          .digest("base64url"),
-      });
+        providerTurnId: providerTurnId(agentId, epoch, entry.seqStart),
+      };
+      turns.push(current);
       continue;
     }
-    turns.at(-1)?.entries.push(entry);
+    if (
+      autonomous &&
+      entry.seqEnd >= autonomous.startSeq &&
+      current?.providerTurnId !== autonomous.providerTurnId
+    ) {
+      current = {
+        boundary: {
+          kind: "autonomous",
+          seqStart: autonomous.startSeq,
+          seqEnd: Math.max(0, autonomous.startSeq - 1),
+          timestamp: entry.timestamp,
+        },
+        entries: [],
+        providerTurnId: autonomous.providerTurnId,
+      };
+      turns.push(current);
+    }
+    current?.entries.push(entry);
   }
   return turns;
+}
+
+function resolveAutonomousBoundary(
+  agentId: string,
+  epoch: string,
+  entries: readonly TimelineEntry[],
+  state: {
+    acknowledgedSeq: number;
+    activeTurn?: { providerTurnId: string; startSeq: number };
+    hasPendingOfficeTurn: boolean;
+  },
+): { startSeq: number; providerTurnId: string } | undefined {
+  const activeHumanTurn = state.activeTurn
+    ? entries.find(
+        (entry) =>
+          entry.item.type === "user_message" &&
+          providerTurnId(agentId, epoch, entry.seqStart) === state.activeTurn?.providerTurnId,
+      )
+    : undefined;
+  const firstUnacknowledged = entries.find((entry) => entry.seqEnd > state.acknowledgedSeq);
+  let autonomousStart: number | undefined;
+  if (state.activeTurn && !activeHumanTurn) {
+    autonomousStart = state.activeTurn.startSeq;
+  } else if (!state.activeTurn && !state.hasPendingOfficeTurn) {
+    autonomousStart =
+      firstUnacknowledged?.item.type === "user_message" ? undefined : firstUnacknowledged?.seqStart;
+  }
+  const autonomousProviderTurnId =
+    autonomousStart === undefined
+      ? undefined
+      : (state.activeTurn?.providerTurnId ??
+        providerTurnId(agentId, epoch, autonomousStart, "autonomous"));
+  return autonomousStart === undefined || !autonomousProviderTurnId
+    ? undefined
+    : { startSeq: autonomousStart, providerTurnId: autonomousProviderTurnId };
+}
+
+function providerTurnId(
+  agentId: string,
+  epoch: string,
+  seqStart: number,
+  kind: "human" | "autonomous" = "human",
+): string {
+  return createHash("sha256")
+    .update(
+      kind === "human"
+        ? `${agentId}\0${epoch}\0${seqStart}`
+        : `${agentId}\0${epoch}\0autonomous\0${seqStart}`,
+    )
+    .digest("base64url");
 }
 
 function projectItem(

@@ -402,10 +402,10 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     return (message.raw as OfficeRawMessage).turn.title ?? null;
   }
 
-  async postRelayEvent(event: OfficeV2RelayEvent): Promise<void> {
+  async postRelayEvent(event: OfficeV2RelayEvent): Promise<{ outcome?: string } | void> {
     const relay = await this.config.resolveRelay?.(`office:${event.bindingId}`);
     if (!relay || relay.agentId !== event.agentId) throw new Error("OFFICE_RELAY_NOT_REGISTERED");
-    await this.sendCallback(relay.callbackUrl, event);
+    return this.sendCallback(relay.callbackUrl, event);
   }
 
   async postTurnEvent(event: OfficeTurnRelayEvent): Promise<RawMessage<OfficeRawMessage>> {
@@ -588,7 +588,10 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
     return turn;
   }
 
-  private async sendCallback(callbackUrl: string, event: unknown): Promise<void> {
+  private async sendCallback(
+    callbackUrl: string,
+    event: unknown,
+  ): Promise<{ outcome?: string } | void> {
     const body = JSON.stringify(event);
     const timestamp = String(Date.now());
     const signature = createHmac("sha256", this.config.callbackSecret)
@@ -605,7 +608,12 @@ export class OfficeAdapter implements Adapter<OfficeThreadId, OfficeRawMessage> 
         },
         body,
       });
-      if (response.ok) return;
+      if (response.ok) {
+        const result = (await response.json().catch(() => undefined)) as
+          | { outcome?: string }
+          | undefined;
+        return result;
+      }
       const retryable =
         response.status === 409 || response.status === 429 || response.status >= 500;
       if (!retryable || attempt === 7) throw new Error(`OFFICE_CALLBACK_HTTP_${response.status}`);

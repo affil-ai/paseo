@@ -159,4 +159,122 @@ describe("OfficeTimelineRelay", () => {
     expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 8, epoch: "epoch-1" });
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
+
+  it("creates a new continuation turn when a subagent notification resumes the parent", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "office-relay-subagent-test-"));
+    const store = new ThreadSessionStore(stateDir);
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-1",
+      muted: false,
+      activeRelayId: null,
+      title: "Subagent relay test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.registerOfficeRelay({
+      externalThreadId: "office:binding-1",
+      bindingId: "binding-1",
+      agentId: "agent-1",
+      callbackUrl: "https://convex.example/api/paseo/events",
+      acknowledgedSeq: 0,
+    });
+
+    let entries = [
+      entry(1, { type: "user_message", text: "Review the PR", messageId: "receipt-1" }),
+      entry(2, { type: "assistant_message", text: "I delegated the review.", messageId: "a-1" }),
+    ];
+    const events: OfficeV2RelayEvent[] = [];
+    const relay = new OfficeTimelineRelay(
+      {
+        fetchAgentTimeline: async () => ({
+          entries,
+          epoch: "epoch-1",
+          agent: { status: "idle" },
+        }),
+      } as never,
+      store,
+      { postRelayEvent: async (event) => void events.push(event) },
+    );
+
+    await relay.wake("agent-1", { kind: "completed" });
+    const originalProviderTurnId = events[0]!.providerTurnId;
+    expect(events.map((event) => event.kind)).toEqual(["turnStarted", "timeline", "completed"]);
+
+    entries = [
+      ...entries,
+      entry(3, { type: "reasoning", text: "private subagent notification reasoning" }),
+      entry(4, {
+        type: "assistant_message",
+        text: "The independent review is complete.",
+        messageId: "a-2",
+      }),
+    ];
+    await relay.wake("agent-1", { kind: "completed" });
+
+    expect(events.slice(3).map((event) => event.kind)).toEqual([
+      "turnStarted",
+      "timeline",
+      "timeline",
+      "completed",
+    ]);
+    expect(events[3]!.providerTurnId).not.toBe(originalProviderTurnId);
+    expect(
+      events.slice(3).every((event) => event.providerTurnId === events[3]!.providerTurnId),
+    ).toBe(true);
+    expect(events[5]).toMatchObject({
+      kind: "timeline",
+      seqStart: 4,
+      item: { type: "assistant_message", text: "The independent review is complete." },
+    });
+    const stored = await store.getSession("office:binding-1");
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 4, epoch: "epoch-1" });
+    expect(stored?.officeRelay?.activeTurn).toBeUndefined();
+  });
+
+  it("does not acknowledge timeline events that Office rejects as stale", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "office-relay-stale-test-"));
+    const store = new ThreadSessionStore(stateDir);
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-1",
+      muted: false,
+      activeRelayId: null,
+      title: "Stale relay test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.registerOfficeRelay({
+      externalThreadId: "office:binding-1",
+      bindingId: "binding-1",
+      agentId: "agent-1",
+      callbackUrl: "https://convex.example/api/paseo/events",
+      acknowledgedSeq: 0,
+    });
+    const relay = new OfficeTimelineRelay(
+      {
+        fetchAgentTimeline: async () => ({
+          entries: [
+            entry(1, { type: "user_message", text: "Hello" }),
+            entry(2, { type: "assistant_message", text: "Hi", messageId: "a-1" }),
+          ],
+          epoch: "epoch-1",
+          agent: { status: "idle" },
+        }),
+      } as never,
+      store,
+      {
+        postRelayEvent: async (event) =>
+          event.kind === "timeline" ? { outcome: "stale" as const } : { outcome: "applied" },
+      },
+    );
+
+    await expect(relay.wake("agent-1", { kind: "completed" })).rejects.toThrow(
+      "OFFICE_RELAY_TIMELINE_STALE",
+    );
+    const stored = await store.getSession("office:binding-1");
+    expect(stored?.officeRelay?.acknowledgedSeq).toBe(1);
+  });
 });
