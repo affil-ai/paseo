@@ -275,7 +275,7 @@ export class OfficeTimelineRelay {
     const relay = session.officeRelay;
     if (!relay) return;
     const occurredAt = Date.parse(projected.entry.timestamp);
-    const result = await this.adapter.postRelayEvent({
+    await this.adapter.postRelayEvent({
       version: 2,
       eventId: `${turn.providerTurnId}:timeline:${projected.itemKey}:${projected.entry.seqEnd}`,
       kind: "timeline",
@@ -289,7 +289,10 @@ export class OfficeTimelineRelay {
       itemDigest: stableDigest(projected.item),
       item: projected.item,
     });
-    if (result?.outcome === "stale") throw new Error("OFFICE_RELAY_TIMELINE_STALE");
+    // A stale result is terminal acknowledgement: Office has already closed
+    // this provider turn and will never accept the item on retry. Advance the
+    // durable cursor so an old canceled/failed turn cannot poison every later
+    // message on the same long-lived binding.
     await this.store.updateSession(session.externalThreadId, (binding) => {
       if (!binding.officeRelay) return;
       binding.officeRelay.acknowledgedSeq = Math.max(

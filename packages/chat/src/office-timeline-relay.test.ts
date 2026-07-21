@@ -233,7 +233,7 @@ describe("OfficeTimelineRelay", () => {
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 
-  it("does not acknowledge timeline events that Office rejects as stale", async () => {
+  it("drains stale terminal timeline events so a later Office turn can relay", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "office-relay-stale-test-"));
     const store = new ThreadSessionStore(stateDir);
     await store.upsertSession({
@@ -253,28 +253,53 @@ describe("OfficeTimelineRelay", () => {
       callbackUrl: "https://convex.example/api/paseo/events",
       acknowledgedSeq: 0,
     });
+    let entries = [
+      entry(1, { type: "user_message", text: "Hello" }),
+      entry(2, { type: "assistant_message", text: "Hi", messageId: "a-1" }),
+    ];
+    const events: OfficeV2RelayEvent[] = [];
+    let staleProviderTurnId: string | undefined;
     const relay = new OfficeTimelineRelay(
       {
         fetchAgentTimeline: async () => ({
-          entries: [
-            entry(1, { type: "user_message", text: "Hello" }),
-            entry(2, { type: "assistant_message", text: "Hi", messageId: "a-1" }),
-          ],
+          entries,
           epoch: "epoch-1",
           agent: { status: "idle" },
         }),
       } as never,
       store,
       {
-        postRelayEvent: async (event) =>
-          event.kind === "timeline" ? { outcome: "stale" as const } : { outcome: "applied" },
+        postRelayEvent: async (event) => {
+          events.push(event);
+          staleProviderTurnId ??= event.providerTurnId;
+          return {
+            outcome: event.providerTurnId === staleProviderTurnId ? "stale" : "applied",
+          };
+        },
       },
     );
 
-    await expect(relay.wake("agent-1", { kind: "completed" })).rejects.toThrow(
-      "OFFICE_RELAY_TIMELINE_STALE",
-    );
-    const stored = await store.getSession("office:binding-1");
-    expect(stored?.officeRelay?.acknowledgedSeq).toBe(1);
+    await relay.wake("agent-1", { kind: "completed" });
+    let stored = await store.getSession("office:binding-1");
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 2 });
+    expect(stored?.officeRelay?.activeTurn).toBeUndefined();
+
+    entries = [
+      ...entries,
+      entry(3, { type: "user_message", text: "Try again" }),
+      entry(4, { type: "assistant_message", text: "Recovered", messageId: "a-2" }),
+    ];
+    await relay.wake("agent-1", { kind: "completed" });
+
+    const recovered = events.filter((event) => event.providerTurnId !== staleProviderTurnId);
+    expect(recovered.map((event) => event.kind)).toEqual(["turnStarted", "timeline", "completed"]);
+    expect(recovered[1]).toMatchObject({
+      kind: "timeline",
+      seqStart: 4,
+      item: { type: "assistant_message", text: "Recovered" },
+    });
+    stored = await store.getSession("office:binding-1");
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 4 });
+    expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 });
