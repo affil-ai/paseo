@@ -66,14 +66,23 @@ export class OfficeTimelineRelay {
       (session) => session.officeRelay && !session.supersededByOfficeBindingId,
     );
     for (const session of sessions) {
-      const timeline = await this.fetchTimeline(getBindingOwnerAgentId(session));
-      const status = timeline.agent?.status;
-      await this.wake(
-        getBindingOwnerAgentId(session),
-        session.officeRelay?.activeTurn && status !== "initializing" && status !== "running"
-          ? { kind: "completed" }
-          : undefined,
-      );
+      const agentId = getBindingOwnerAgentId(session);
+      try {
+        const timeline = await this.fetchTimeline(agentId);
+        const status = timeline.agent?.status;
+        await this.wake(
+          agentId,
+          session.officeRelay?.activeTurn && status !== "initializing" && status !== "running"
+            ? { kind: "completed" }
+            : undefined,
+        );
+      } catch (error) {
+        console.warn("Office timeline session recovery failed", {
+          agentId,
+          externalThreadId: session.externalThreadId,
+          error,
+        });
+      }
     }
   }
 
