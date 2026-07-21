@@ -122,6 +122,7 @@ export class OfficeTimelineRelay {
       if (!refreshed?.officeRelay) return;
       relay.acknowledgedSeq = refreshed.officeRelay.acknowledgedSeq;
       relay.activeTurn = refreshed.officeRelay.activeTurn;
+      session.activeOfficeTurn = refreshed.activeOfficeTurn;
     }
   }
 
@@ -367,6 +368,13 @@ function findPendingBoundary(
         (entry) => entry.item.type === "user_message" && entry.item.messageId === receiptId,
       )
     : undefined;
+  const pendingMarkdown =
+    session.activeOfficeTurn?.version === 2 ? session.activeOfficeTurn.message.markdown.trim() : "";
+  const contentBoundary = pendingMarkdown
+    ? timeline.entries.findLast(
+        (entry) => entry.item.type === "user_message" && entry.item.text.includes(pendingMarkdown),
+      )
+    : undefined;
   // Provider session rehydration can preserve the durable conversation while
   // dropping the messageId metadata that Office attached to the prompt. An
   // active Office turn is always the newest human input on this binding, so
@@ -374,6 +382,7 @@ function findPendingBoundary(
   // already acknowledged and silently skipping the whole turn.
   return (
     exactBoundary ??
+    contentBoundary ??
     (session.activeOfficeTurn
       ? timeline.entries.findLast((entry) => entry.item.type === "user_message")
       : undefined)

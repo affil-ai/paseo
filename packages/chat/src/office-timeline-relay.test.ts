@@ -360,7 +360,7 @@ describe("OfficeTimelineRelay", () => {
       bindingId: "binding-1",
       agentId: "agent-1",
       callbackUrl: "https://convex.example/api/paseo/events",
-      acknowledgedSeq: 4,
+      acknowledgedSeq: 6,
     });
     await store.reserveOfficeDispatch({
       receiptId: "receipt-2",
@@ -407,6 +407,15 @@ describe("OfficeTimelineRelay", () => {
               text: "Replacement done",
               messageId: "a-2",
             }),
+            entry(5, {
+              type: "user_message",
+              text: "A later message entered directly in the coding agent",
+            }),
+            entry(6, {
+              type: "assistant_message",
+              text: "Later parent turn done",
+              messageId: "a-3",
+            }),
           ],
           epoch: "epoch-new",
           agent: { status: "idle" },
@@ -418,15 +427,28 @@ describe("OfficeTimelineRelay", () => {
 
     await relay.wake("agent-1", { kind: "completed" });
 
-    expect(events.map((event) => event.kind)).toEqual(["accepted", "timeline", "completed"]);
+    expect(events.map((event) => event.kind)).toEqual([
+      "accepted",
+      "timeline",
+      "completed",
+      "turnStarted",
+      "timeline",
+      "completed",
+    ]);
     expect(events[1]).toMatchObject({
       kind: "timeline",
       seqStart: 4,
       item: { type: "assistant_message", text: "Replacement done" },
     });
+    expect(events[4]).toMatchObject({
+      kind: "timeline",
+      seqStart: 6,
+      item: { type: "assistant_message", text: "Later parent turn done" },
+    });
+    expect(events[3]!.providerTurnId).not.toBe(events[0]!.providerTurnId);
     const stored = await store.getSession("office:binding-1");
     expect(stored?.officeRelay).toMatchObject({
-      acknowledgedSeq: 4,
+      acknowledgedSeq: 6,
       epoch: "epoch-new",
     });
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
