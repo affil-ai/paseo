@@ -342,7 +342,7 @@ describe("OfficeTimelineRelay", () => {
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 
-  it("continues from the pending Office message when the parent timeline epoch changes", async () => {
+  it("repairs a pending Office turn skipped during parent timeline rehydration", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "office-relay-epoch-test-"));
     const store = new ThreadSessionStore(stateDir);
     await store.upsertSession({
@@ -360,7 +360,7 @@ describe("OfficeTimelineRelay", () => {
       bindingId: "binding-1",
       agentId: "agent-1",
       callbackUrl: "https://convex.example/api/paseo/events",
-      acknowledgedSeq: 2,
+      acknowledgedSeq: 4,
     });
     await store.reserveOfficeDispatch({
       receiptId: "receipt-2",
@@ -380,7 +380,7 @@ describe("OfficeTimelineRelay", () => {
         message: { markdown: "Interrupt with this", files: [] },
         callbackUrl: "https://convex.example/api/paseo/events",
       };
-      if (session.officeRelay) session.officeRelay.epoch = "epoch-old";
+      if (session.officeRelay) session.officeRelay.epoch = "epoch-new";
     });
 
     const events: OfficeV2RelayEvent[] = [];

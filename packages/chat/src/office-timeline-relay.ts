@@ -89,6 +89,7 @@ export class OfficeTimelineRelay {
     if (relay.epoch && relay.epoch !== timeline.epoch) {
       await this.adoptTimelineEpoch(session, timeline);
     }
+    await this.repairPendingDispatchCursor(session, timeline);
 
     const turns = partitionTurns(agentId, timeline.epoch, timeline.entries, {
       acknowledgedSeq: relay.acknowledgedSeq,
@@ -130,25 +131,7 @@ export class OfficeTimelineRelay {
   ): Promise<void> {
     const relay = session.officeRelay;
     if (!relay) return;
-    const receiptId =
-      session.activeOfficeTurn?.version === 2
-        ? session.activeOfficeTurn.receiptId
-        : relay.activeTurn?.receiptId;
-    const exactPendingBoundary = receiptId
-      ? timeline.entries.find(
-          (entry) => entry.item.type === "user_message" && entry.item.messageId === receiptId,
-        )
-      : undefined;
-    // Provider session rehydration can preserve the durable conversation while
-    // dropping the messageId metadata that Office attached to the prompt. An
-    // active Office turn is always the newest human input on this binding, so
-    // resume at that boundary instead of treating the new epoch's tail as
-    // already acknowledged and silently skipping the whole turn.
-    const pendingBoundary =
-      exactPendingBoundary ??
-      (session.activeOfficeTurn
-        ? timeline.entries.findLast((entry) => entry.item.type === "user_message")
-        : undefined);
+    const pendingBoundary = findPendingBoundary(session, timeline);
     const acknowledgedSeq = pendingBoundary
       ? Math.max(0, pendingBoundary.seqStart - 1)
       : Math.min(relay.acknowledgedSeq, Math.max(0, timeline.window.nextSeq - 1));
@@ -159,6 +142,27 @@ export class OfficeTimelineRelay {
       binding.officeRelay.activeTurn = undefined;
     });
     relay.epoch = timeline.epoch;
+    relay.acknowledgedSeq = acknowledgedSeq;
+    relay.activeTurn = undefined;
+  }
+
+  private async repairPendingDispatchCursor(
+    session: ChatBinding,
+    timeline: FetchAgentTimelinePayload,
+  ): Promise<void> {
+    const relay = session.officeRelay;
+    const activeTurn = session.activeOfficeTurn;
+    if (!relay || activeTurn?.version !== 2) return;
+    const receipt = await this.store.getOfficeDispatchReceipt(activeTurn.receiptId);
+    if (receipt?.status !== "received") return;
+    const boundary = findPendingBoundary(session, timeline);
+    if (!boundary || relay.acknowledgedSeq < boundary.seqStart) return;
+    const acknowledgedSeq = Math.max(0, boundary.seqStart - 1);
+    await this.store.updateSession(session.externalThreadId, (binding) => {
+      if (!binding.officeRelay) return;
+      binding.officeRelay.acknowledgedSeq = acknowledgedSeq;
+      binding.officeRelay.activeTurn = undefined;
+    });
     relay.acknowledgedSeq = acknowledgedSeq;
     relay.activeTurn = undefined;
   }
@@ -348,6 +352,32 @@ export class OfficeTimelineRelay {
       limit: 0,
     });
   }
+}
+
+function findPendingBoundary(
+  session: ChatBinding,
+  timeline: FetchAgentTimelinePayload,
+): TimelineEntry | undefined {
+  const receiptId =
+    session.activeOfficeTurn?.version === 2
+      ? session.activeOfficeTurn.receiptId
+      : session.officeRelay?.activeTurn?.receiptId;
+  const exactBoundary = receiptId
+    ? timeline.entries.find(
+        (entry) => entry.item.type === "user_message" && entry.item.messageId === receiptId,
+      )
+    : undefined;
+  // Provider session rehydration can preserve the durable conversation while
+  // dropping the messageId metadata that Office attached to the prompt. An
+  // active Office turn is always the newest human input on this binding, so
+  // resume at that boundary instead of treating the new epoch's tail as
+  // already acknowledged and silently skipping the whole turn.
+  return (
+    exactBoundary ??
+    (session.activeOfficeTurn
+      ? timeline.entries.findLast((entry) => entry.item.type === "user_message")
+      : undefined)
+  );
 }
 
 function partitionTurns(
