@@ -302,4 +302,81 @@ describe("OfficeTimelineRelay", () => {
     expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 4 });
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
+
+  it("continues from the pending Office message when the parent timeline epoch changes", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "office-relay-epoch-test-"));
+    const store = new ThreadSessionStore(stateDir);
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-1",
+      muted: false,
+      activeRelayId: null,
+      title: "Epoch relay test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.registerOfficeRelay({
+      externalThreadId: "office:binding-1",
+      bindingId: "binding-1",
+      agentId: "agent-1",
+      callbackUrl: "https://convex.example/api/paseo/events",
+      acknowledgedSeq: 2,
+    });
+    await store.reserveOfficeDispatch({
+      receiptId: "receipt-2",
+      runId: "run-2",
+      payloadDigest: "b".repeat(64),
+    });
+    await store.updateSession("office:binding-1", (session) => {
+      session.activeOfficeTurn = {
+        version: 2,
+        kind: "message",
+        bindingId: "binding-1",
+        runId: "run-2",
+        receiptId: "receipt-2",
+        payloadDigest: "b".repeat(64),
+        agentId: "agent-1",
+        actor: { externalUserId: "member-1", displayName: "Vivek" },
+        message: { markdown: "Interrupt with this", files: [] },
+        callbackUrl: "https://convex.example/api/paseo/events",
+      };
+      if (session.officeRelay) session.officeRelay.epoch = "epoch-old";
+    });
+
+    const events: OfficeV2RelayEvent[] = [];
+    const relay = new OfficeTimelineRelay(
+      {
+        fetchAgentTimeline: async () => ({
+          entries: [
+            entry(1, { type: "user_message", text: "Old request", messageId: "receipt-1" }),
+            entry(2, { type: "assistant_message", text: "Old response", messageId: "a-1" }),
+            entry(3, {
+              type: "user_message",
+              text: "Interrupt with this",
+              messageId: "receipt-2",
+            }),
+            entry(4, { type: "assistant_message", text: "Replacement done", messageId: "a-2" }),
+          ],
+          epoch: "epoch-new",
+          agent: { status: "idle" },
+        }),
+      } as never,
+      store,
+      { postRelayEvent: async (event) => void events.push(event) },
+    );
+
+    await relay.wake("agent-1", { kind: "completed" });
+
+    expect(events.map((event) => event.kind)).toEqual(["accepted", "timeline", "completed"]);
+    expect(events[1]).toMatchObject({
+      kind: "timeline",
+      seqStart: 4,
+      item: { type: "assistant_message", text: "Replacement done" },
+    });
+    const stored = await store.getSession("office:binding-1");
+    expect(stored?.officeRelay).toMatchObject({ acknowledgedSeq: 4, epoch: "epoch-new" });
+    expect(stored?.officeRelay?.activeTurn).toBeUndefined();
+    expect(stored?.activeOfficeTurn).toBeUndefined();
+  });
 });

@@ -87,7 +87,7 @@ export class OfficeTimelineRelay {
     const relay = session.officeRelay;
 
     if (relay.epoch && relay.epoch !== timeline.epoch) {
-      throw new Error("OFFICE_TIMELINE_EPOCH_CHANGED");
+      await this.adoptTimelineEpoch(session, timeline);
     }
 
     const turns = partitionTurns(agentId, timeline.epoch, timeline.entries, {
@@ -122,6 +122,35 @@ export class OfficeTimelineRelay {
       relay.acknowledgedSeq = refreshed.officeRelay.acknowledgedSeq;
       relay.activeTurn = refreshed.officeRelay.activeTurn;
     }
+  }
+
+  private async adoptTimelineEpoch(
+    session: ChatBinding,
+    timeline: FetchAgentTimelinePayload,
+  ): Promise<void> {
+    const relay = session.officeRelay;
+    if (!relay) return;
+    const receiptId =
+      session.activeOfficeTurn?.version === 2
+        ? session.activeOfficeTurn.receiptId
+        : relay.activeTurn?.receiptId;
+    const pendingBoundary = receiptId
+      ? timeline.entries.find(
+          (entry) => entry.item.type === "user_message" && entry.item.messageId === receiptId,
+        )
+      : undefined;
+    const acknowledgedSeq = pendingBoundary
+      ? Math.max(0, pendingBoundary.seqStart - 1)
+      : Math.min(relay.acknowledgedSeq, Math.max(0, timeline.window.nextSeq - 1));
+    await this.store.updateSession(session.externalThreadId, (binding) => {
+      if (!binding.officeRelay) return;
+      binding.officeRelay.epoch = timeline.epoch;
+      binding.officeRelay.acknowledgedSeq = acknowledgedSeq;
+      binding.officeRelay.activeTurn = undefined;
+    });
+    relay.epoch = timeline.epoch;
+    relay.acknowledgedSeq = acknowledgedSeq;
+    relay.activeTurn = undefined;
   }
 
   private async relayTurn(

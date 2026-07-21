@@ -76,6 +76,12 @@ Slack input should match the app's default send behavior:
 
 - If a human replies while the bound office agent is still running, the follow-up interrupts the
   active turn and starts the new prompt, just like pressing Enter in the Paseo UI.
+- Agent reloads may replace the parent timeline epoch. The persistent Office relay resumes at the
+  pending Office receipt's user-message boundary in the new epoch; it must not reject an already
+  accepted prompt or replay older parent history.
+- Timeline catch-up runs after prompt acceptance and cannot change the inbound HTTP result. Relay
+  failures are retried from durable parent history without turning an accepted prompt into a
+  dispatch failure.
 - Pi allows only one active provider turn at a time, so the daemon/provider interrupt path must
   acknowledge cancellation before starting the replacement turn; otherwise `A Pi turn is already
 active` can leave the agent in an error state.

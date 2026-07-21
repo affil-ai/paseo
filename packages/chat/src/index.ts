@@ -174,7 +174,13 @@ export async function main(): Promise<void> {
       callbackUrl: input.callbackUrl,
       acknowledgedSeq: session?.officeRelay ? session.officeRelay.acknowledgedSeq : 0,
     });
-    await officeTimelineRelay?.wake(input.agentId);
+    void officeTimelineRelay?.wake(input.agentId).catch((error) => {
+      console.warn("Office timeline catch-up failed after accepting a turn", {
+        agentId: input.agentId,
+        receiptId: input.receiptId,
+        error,
+      });
+    });
   };
   const office = config.officeAdapter
     ? new OfficeAdapter({
