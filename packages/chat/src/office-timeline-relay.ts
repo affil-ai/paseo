@@ -134,11 +134,21 @@ export class OfficeTimelineRelay {
       session.activeOfficeTurn?.version === 2
         ? session.activeOfficeTurn.receiptId
         : relay.activeTurn?.receiptId;
-    const pendingBoundary = receiptId
+    const exactPendingBoundary = receiptId
       ? timeline.entries.find(
           (entry) => entry.item.type === "user_message" && entry.item.messageId === receiptId,
         )
       : undefined;
+    // Provider session rehydration can preserve the durable conversation while
+    // dropping the messageId metadata that Office attached to the prompt. An
+    // active Office turn is always the newest human input on this binding, so
+    // resume at that boundary instead of treating the new epoch's tail as
+    // already acknowledged and silently skipping the whole turn.
+    const pendingBoundary =
+      exactPendingBoundary ??
+      (session.activeOfficeTurn
+        ? timeline.entries.findLast((entry) => entry.item.type === "user_message")
+        : undefined);
     const acknowledgedSeq = pendingBoundary
       ? Math.max(0, pendingBoundary.seqStart - 1)
       : Math.min(relay.acknowledgedSeq, Math.max(0, timeline.window.nextSeq - 1));
@@ -476,7 +486,9 @@ function projectItem(
       input,
       ...(item.status === "completed" ? { output } : {}),
       ...(item.status === "failed"
-        ? { errorText: boundedString(String(item.error ?? "Tool failed"), 8_000) }
+        ? {
+            errorText: boundedString(String(item.error ?? "Tool failed"), 8_000),
+          }
         : {}),
     },
   };
