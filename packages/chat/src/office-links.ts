@@ -8,8 +8,8 @@ import type { ThreadSessionStore } from "./state/thread-session-store.js";
  * deployment. For every `office:<bindingId>` binding, the sweep walks the
  * daemon's agent tree from the binding's root office agent down through
  * `paseo.parent-agent-id` descendants, collects each agent workspace's current
- * branch and resolved GitHub PR, merges in the text-scraped `githubPrLinks`
- * store entries, and POSTs the batch to `/api/paseo/agent-links` (HMAC-signed
+ * branch and resolved GitHub PR from Paseo's workspace runtime, and POSTs the
+ * batch to `/api/paseo/agent-links` (HMAC-signed
  * exactly like turn callbacks). Reports are idempotent on the office side, so
  * the sweep favors self-healing repetition over precise event capture.
  */
@@ -121,14 +121,6 @@ export interface BuildAgentLinkReportsInput {
   }>;
   agents: AgentLinksAgent[];
   workspaces: AgentLinksWorkspace[];
-  /** The store's text-scraped links, flattened. */
-  githubPrLinks: Array<{
-    owner: string;
-    repo: string;
-    number: number;
-    url: string;
-    externalThreadId: string;
-  }>;
 }
 
 function paseoUrlForBinding(
@@ -243,17 +235,6 @@ export function buildAgentLinkReports(input: BuildAgentLinkReportsInput): AgentL
       workspacesById,
     });
 
-    for (const link of input.githubPrLinks) {
-      if (link.externalThreadId !== binding.externalThreadId) continue;
-      prLinks.set(`${link.owner}/${link.repo}#${link.number}`, {
-        owner: link.owner,
-        repo: link.repo,
-        number: link.number,
-        url: link.url,
-      });
-    }
-
-    if (branchLinks.length === 0 && prLinks.size === 0 && !paseoUrl) continue;
     reports.push({
       version: 1,
       bindingId,
@@ -350,7 +331,6 @@ export class OfficeAgentLinksReporter {
       })),
       agents,
       workspaces,
-      githubPrLinks: Object.values(data.githubPrLinks).flat(),
     });
 
     for (const report of reports) {

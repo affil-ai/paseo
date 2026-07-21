@@ -87,22 +87,6 @@ describe("buildAgentLinkReports", () => {
         agent("stranger", { workspaceId: "ws-sub" }),
       ],
       workspaces,
-      githubPrLinks: [
-        {
-          owner: "affil-ai",
-          repo: "paseo",
-          number: 9,
-          url: "https://github.com/affil-ai/paseo/pull/9",
-          externalThreadId: "office:binding-1",
-        },
-        {
-          owner: "affil-ai",
-          repo: "paseo",
-          number: 10,
-          url: "https://github.com/affil-ai/paseo/pull/10",
-          externalThreadId: "slack:C1:123",
-        },
-      ],
     });
     expect(reports).toHaveLength(1);
     const report = reports[0]!;
@@ -120,15 +104,10 @@ describe("buildAgentLinkReports", () => {
         agentId: "sub",
       },
     ]);
-    // PR 41 from the subagent workspace; PR 9 from the scraped store links.
-    // PR 10 belongs to a Slack thread and must not leak in.
-    expect(report.prLinks.map((link) => `${link.repo}#${link.number}`).sort()).toEqual([
-      "office#41",
-      "paseo#9",
-    ]);
+    expect(report.prLinks.map((link) => `${link.repo}#${link.number}`)).toEqual(["office#41"]);
   });
 
-  it("skips archived agents, non-office bindings, and empty reports", () => {
+  it("emits empty reports for reconciliation and skips non-office bindings", () => {
     const reports = buildAgentLinkReports({
       deepLinkBaseUrl: "https://affil.olumbe.com",
       serverId: "srv_m-yyB3h87NLA",
@@ -143,9 +122,16 @@ describe("buildAgentLinkReports", () => {
         }),
       ],
       workspaces,
-      githubPrLinks: [],
     });
-    expect(reports).toEqual([]);
+    expect(reports).toEqual([
+      {
+        version: 1,
+        bindingId: "binding-2",
+        agentId: "root",
+        branchLinks: [],
+        prLinks: [],
+      },
+    ]);
   });
 
   it("links legacy bindings by an unambiguous workspace title without an agent listing", () => {
@@ -167,7 +153,6 @@ describe("buildAgentLinkReports", () => {
           name: "Investigate Google Ads tracking and conversion attribution",
         },
       ],
-      githubPrLinks: [],
     });
 
     expect(reports).toEqual([
@@ -206,12 +191,16 @@ describe("buildAgentLinkReports", () => {
         { id: "duplicate-a", name: "Duplicate title one" },
         { id: "duplicate-b", name: "Duplicate title two" },
       ],
-      githubPrLinks: [],
     });
 
-    expect(reports).toHaveLength(1);
+    expect(reports).toHaveLength(2);
     expect(reports[0]?.bindingId).toBe("explicit-binding");
     expect(reports[0]?.paseoUrl).toContain("/workspace/ws-sub?");
+    expect(reports[1]).toMatchObject({
+      bindingId: "ambiguous-binding",
+      branchLinks: [],
+      prLinks: [],
+    });
   });
 
   it("survives parent-label cycles without infinite looping", () => {
@@ -229,7 +218,6 @@ describe("buildAgentLinkReports", () => {
         },
       ],
       workspaces,
-      githubPrLinks: [],
     });
     // b's walk (b → a → back to b) terminates at "a", which owns the binding.
     expect(reports).toHaveLength(1);
