@@ -10,6 +10,9 @@ import {
 
 type TimelineEntry = FetchAgentTimelinePayload["entries"][number];
 type TerminalKind = "completed" | "failed" | "canceled";
+type OfficeDispatchReceipt = NonNullable<
+  Awaited<ReturnType<ThreadSessionStore["getOfficeDispatchReceipt"]>>
+>;
 
 interface TurnSegment {
   boundary: {
@@ -99,6 +102,7 @@ export class OfficeTimelineRelay {
       await this.adoptTimelineEpoch(session, timeline);
     }
     await this.repairPendingDispatchCursor(session, timeline);
+    const pendingBoundarySeqStart = findPendingBoundary(session, timeline)?.seqStart;
 
     const turns = partitionTurns(agentId, timeline.epoch, timeline.entries, {
       acknowledgedSeq: relay.acknowledgedSeq,
@@ -121,12 +125,19 @@ export class OfficeTimelineRelay {
       const inferredTerminal = originalIndex >= 0 && originalIndex < turns.length - 1;
       const isLatest = originalIndex === turns.length - 1;
       const terminalForTurn = inferredTerminal || (isLatest && Boolean(terminal));
-      await this.relayTurn(session, timeline.epoch, turn, relay.acknowledgedSeq, {
-        terminal: terminalForTurn,
-        terminalKind: isLatest ? terminal?.kind : "completed",
-        errorCode: isLatest ? terminal?.errorCode : undefined,
-        occurredAt: isLatest ? terminal?.occurredAt : undefined,
-      });
+      await this.relayTurn(
+        session,
+        timeline.epoch,
+        turn,
+        relay.acknowledgedSeq,
+        pendingBoundarySeqStart,
+        {
+          terminal: terminalForTurn,
+          terminalKind: isLatest ? terminal?.kind : "completed",
+          errorCode: isLatest ? terminal?.errorCode : undefined,
+          occurredAt: isLatest ? terminal?.occurredAt : undefined,
+        },
+      );
       const refreshed = await this.store.getSession(session.externalThreadId);
       if (!refreshed?.officeRelay) return;
       relay.acknowledgedSeq = refreshed.officeRelay.acknowledgedSeq;
@@ -182,6 +193,7 @@ export class OfficeTimelineRelay {
     epoch: string,
     turn: TurnSegment,
     acknowledgedSeq: number,
+    pendingBoundarySeqStart: number | undefined,
     terminal: {
       terminal: boolean;
       terminalKind?: TerminalKind;
@@ -191,34 +203,11 @@ export class OfficeTimelineRelay {
   ): Promise<void> {
     const relay = session.officeRelay;
     if (!relay) return;
-    let boundaryReceiptId = turn.boundary.messageId;
-    let dispatchReceipt = boundaryReceiptId
-      ? await this.store.getOfficeDispatchReceipt(boundaryReceiptId)
-      : null;
-    if (!dispatchReceipt && session.activeOfficeTurn?.version === 2) {
-      boundaryReceiptId = session.activeOfficeTurn.receiptId;
-      dispatchReceipt = await this.store.getOfficeDispatchReceipt(boundaryReceiptId);
-    }
+    const receiptBinding = await this.attachDispatchReceipt(session, turn, pendingBoundarySeqStart);
+    const { boundaryReceiptId, dispatchReceipt } = receiptBinding;
     const startedAt = Date.parse(turn.boundary.timestamp);
 
-    if (dispatchReceipt) {
-      await this.adapter.postRelayEvent({
-        version: 2,
-        eventId: `${turn.providerTurnId}:accepted`,
-        kind: "accepted",
-        bindingId: relay.bindingId,
-        runId: dispatchReceipt.runId,
-        receiptId: boundaryReceiptId!,
-        agentId: relay.agentId,
-        providerTurnId: turn.providerTurnId,
-        timelineStartSeq: turn.boundary.seqStart,
-        startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
-      });
-      await this.store.updateOfficeDispatchReceipt(boundaryReceiptId!, {
-        status: "attached",
-        providerTurnId: turn.providerTurnId,
-      });
-    } else {
+    if (!receiptBinding.proposed) {
       await this.adapter.postRelayEvent({
         version: 2,
         eventId: `${turn.providerTurnId}:started`,
@@ -318,6 +307,65 @@ export class OfficeTimelineRelay {
         binding.activeOfficeTurn = undefined;
       }
     });
+  }
+
+  private async attachDispatchReceipt(
+    session: ChatBinding,
+    turn: TurnSegment,
+    pendingBoundarySeqStart: number | undefined,
+  ): Promise<{
+    proposed: boolean;
+    boundaryReceiptId?: string;
+    dispatchReceipt: OfficeDispatchReceipt | null;
+  }> {
+    const relay = session.officeRelay;
+    if (!relay) return { proposed: false, dispatchReceipt: null };
+    let boundaryReceiptId = turn.boundary.messageId;
+    let dispatchReceipt = boundaryReceiptId
+      ? await this.store.getOfficeDispatchReceipt(boundaryReceiptId)
+      : null;
+    if (
+      !dispatchReceipt &&
+      session.activeOfficeTurn?.version === 2 &&
+      turn.boundary.seqStart === pendingBoundarySeqStart
+    ) {
+      // Rehydrated provider messages lose Office's clientMessageId. Corroborate
+      // the fallback by timeline position so a lagging cursor cannot lend the
+      // newest receipt to an older completed/interrupted turn.
+      const pendingReceiptId = session.activeOfficeTurn.receiptId;
+      const pendingReceipt = await this.store.getOfficeDispatchReceipt(pendingReceiptId);
+      if (pendingReceipt?.status !== "terminal") {
+        boundaryReceiptId = pendingReceiptId;
+        dispatchReceipt = pendingReceipt;
+      }
+    }
+    if (!dispatchReceipt || !boundaryReceiptId) {
+      return { proposed: false, dispatchReceipt: null };
+    }
+
+    const startedAt = Date.parse(turn.boundary.timestamp);
+    const result = await this.adapter.postRelayEvent({
+      version: 2,
+      eventId: `${turn.providerTurnId}:accepted`,
+      kind: "accepted",
+      bindingId: relay.bindingId,
+      runId: dispatchReceipt.runId,
+      receiptId: boundaryReceiptId,
+      agentId: relay.agentId,
+      providerTurnId: turn.providerTurnId,
+      timelineStartSeq: turn.boundary.seqStart,
+      startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+    });
+    if (result?.outcome === "stale") {
+      // Office rejected this ownership proposal. Leave the receipt pending so
+      // a later, correctly matched boundary can claim it.
+      return { proposed: true, dispatchReceipt: null };
+    }
+    await this.store.updateOfficeDispatchReceipt(boundaryReceiptId, {
+      status: "attached",
+      providerTurnId: turn.providerTurnId,
+    });
+    return { proposed: true, boundaryReceiptId, dispatchReceipt };
   }
 
   private async relayTimelineItem(

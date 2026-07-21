@@ -342,6 +342,172 @@ describe("OfficeTimelineRelay", () => {
     expect(stored?.officeRelay?.activeTurn).toBeUndefined();
   });
 
+  it("does not attach a pending Office receipt to an earlier completed turn when the cursor lags", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "office-relay-boundary-test-"));
+    const store = new ThreadSessionStore(stateDir);
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-1",
+      muted: false,
+      activeRelayId: null,
+      title: "Boundary relay test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.registerOfficeRelay({
+      externalThreadId: "office:binding-1",
+      bindingId: "binding-1",
+      agentId: "agent-1",
+      callbackUrl: "https://convex.example/api/paseo/events",
+      acknowledgedSeq: 0,
+    });
+    await store.reserveOfficeDispatch({
+      receiptId: "receipt-new",
+      runId: "run-new",
+      payloadDigest: "c".repeat(64),
+    });
+    await store.updateSession("office:binding-1", (session) => {
+      session.activeOfficeTurn = {
+        version: 2,
+        kind: "message",
+        bindingId: "binding-1",
+        runId: "run-new",
+        receiptId: "receipt-new",
+        payloadDigest: "c".repeat(64),
+        agentId: "agent-1",
+        actor: { externalUserId: "member-1", displayName: "Vivek" },
+        message: { markdown: "New request", files: [] },
+        callbackUrl: "https://convex.example/api/paseo/events",
+      };
+      if (session.officeRelay) session.officeRelay.epoch = "epoch-1";
+    });
+
+    const events: OfficeV2RelayEvent[] = [];
+    const relay = new OfficeTimelineRelay(
+      {
+        fetchAgentTimeline: async () => ({
+          entries: [
+            entry(1, { type: "user_message", text: "Completed request" }),
+            entry(2, {
+              type: "assistant_message",
+              text: "Completed response",
+              messageId: "assistant-old",
+            }),
+            entry(3, { type: "user_message", text: "New request" }),
+            entry(4, {
+              type: "assistant_message",
+              text: "New response",
+              messageId: "assistant-new",
+            }),
+          ],
+          epoch: "epoch-1",
+          agent: { status: "idle" },
+        }),
+      } as never,
+      store,
+      { postRelayEvent: async (event) => void events.push(event) },
+    );
+
+    await relay.wake("agent-1", { kind: "completed" });
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "turnStarted",
+      "timeline",
+      "completed",
+      "accepted",
+      "timeline",
+      "completed",
+    ]);
+    expect(events[3]).toMatchObject({
+      kind: "accepted",
+      receiptId: "receipt-new",
+      runId: "run-new",
+      timelineStartSeq: 3,
+    });
+    expect(events[0]!.providerTurnId).not.toBe(events[3]!.providerTurnId);
+    expect(await store.getOfficeDispatchReceipt("receipt-new")).toMatchObject({
+      status: "terminal",
+      providerTurnId: events[3]!.providerTurnId,
+    });
+  });
+
+  it("does not consume a pending receipt when Office rejects the proposed turn as stale", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "office-relay-stale-receipt-test-"));
+    const store = new ThreadSessionStore(stateDir);
+    await store.upsertSession({
+      kind: "inbound-session",
+      externalThreadId: "office:binding-1",
+      rootAgentId: "agent-1",
+      muted: false,
+      activeRelayId: null,
+      title: "Stale receipt test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.registerOfficeRelay({
+      externalThreadId: "office:binding-1",
+      bindingId: "binding-1",
+      agentId: "agent-1",
+      callbackUrl: "https://convex.example/api/paseo/events",
+      acknowledgedSeq: 0,
+    });
+    await store.reserveOfficeDispatch({
+      receiptId: "receipt-1",
+      runId: "run-1",
+      payloadDigest: "d".repeat(64),
+    });
+    await store.updateSession("office:binding-1", (session) => {
+      session.activeOfficeTurn = {
+        version: 2,
+        kind: "message",
+        bindingId: "binding-1",
+        runId: "run-1",
+        receiptId: "receipt-1",
+        payloadDigest: "d".repeat(64),
+        agentId: "agent-1",
+        actor: { externalUserId: "member-1", displayName: "Vivek" },
+        message: { markdown: "Retry me", files: [] },
+        callbackUrl: "https://convex.example/api/paseo/events",
+      };
+    });
+
+    const events: OfficeV2RelayEvent[] = [];
+    const relay = new OfficeTimelineRelay(
+      {
+        fetchAgentTimeline: async () => ({
+          entries: [
+            entry(1, { type: "user_message", text: "Retry me" }),
+            entry(2, {
+              type: "assistant_message",
+              text: "Finished",
+              messageId: "assistant-1",
+            }),
+          ],
+          epoch: "epoch-1",
+          agent: { status: "idle" },
+        }),
+      } as never,
+      store,
+      {
+        postRelayEvent: async (event) => {
+          events.push(event);
+          return { outcome: event.kind === "accepted" ? "stale" : "applied" };
+        },
+      },
+    );
+
+    await relay.wake("agent-1", { kind: "completed" });
+
+    expect(events.map((event) => event.kind)).toEqual(["accepted", "timeline", "completed"]);
+    expect(await store.getOfficeDispatchReceipt("receipt-1")).toMatchObject({
+      status: "received",
+    });
+    expect(await store.getSession("office:binding-1")).toMatchObject({
+      activeOfficeTurn: { receiptId: "receipt-1" },
+    });
+  });
+
   it("repairs a pending Office turn skipped during parent timeline rehydration", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "office-relay-epoch-test-"));
     const store = new ThreadSessionStore(stateDir);
