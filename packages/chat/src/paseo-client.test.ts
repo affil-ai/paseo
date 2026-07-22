@@ -1,5 +1,38 @@
-import { describe, expect, it } from "vitest";
-import { resolveChatRepositoryPath } from "./paseo-client.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import chatPackageJson from "../package.json" with { type: "json" };
+
+interface CapturedDaemonClientConfig {
+  appVersion?: string;
+}
+
+const daemonClientState = vi.hoisted(() => ({
+  configs: [] as CapturedDaemonClientConfig[],
+}));
+
+vi.mock("@getpaseo/client/internal/daemon-client", () => ({
+  DaemonClient: class {
+    constructor(config: CapturedDaemonClientConfig) {
+      daemonClientState.configs.push(config);
+    }
+
+    async connect() {}
+  },
+}));
+
+import { connectToPaseoDaemon, resolveChatRepositoryPath } from "./paseo-client.js";
+
+beforeEach(() => {
+  daemonClientState.configs.length = 0;
+});
+
+describe("connectToPaseoDaemon", () => {
+  it("advertises the chat package version to the daemon", async () => {
+    await connectToPaseoDaemon({ daemonHost: "localhost:6767" });
+
+    expect(daemonClientState.configs).toHaveLength(1);
+    expect(daemonClientState.configs[0]?.appVersion).toBe(chatPackageJson.version);
+  });
+});
 
 describe("resolveChatRepositoryPath", () => {
   it("uses the configured project repo root before scanning legacy workspaces", async () => {
