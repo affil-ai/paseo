@@ -1,6 +1,12 @@
 import { DaemonClient, type WebSocketLike } from "@getpaseo/client/internal/daemon-client";
 import { WebSocket } from "ws";
-import type { ChatBridgeConfig, ChatRepositoryConfig } from "./config.js";
+import chatPackageJson from "../package.json" with { type: "json" };
+import type { ChatRepositoryConfig } from "./config.js";
+
+interface PaseoDaemonConnectionConfig {
+  daemonHost: string;
+  daemonPassword?: string;
+}
 
 function createWebSocketFactory() {
   return (
@@ -17,12 +23,15 @@ function daemonUrl(host: string): string {
   return `ws://${host.replace(/^http:\/\//, "").replace(/^https:\/\//, "")}/ws`;
 }
 
-export async function connectToPaseoDaemon(config: ChatBridgeConfig): Promise<DaemonClient> {
+export async function connectToPaseoDaemon(
+  config: PaseoDaemonConnectionConfig,
+): Promise<DaemonClient> {
   const client = new DaemonClient({
     url: daemonUrl(config.daemonHost),
     clientId: `chat-bridge-${process.pid}`,
     clientType: "cli",
-    appVersion: "chat-bridge-v1",
+    // The daemon uses this semver for provider compatibility; arbitrary labels hide Pi agents.
+    appVersion: chatPackageJson.version,
     password: config.daemonPassword,
     connectTimeoutMs: 15_000,
     webSocketFactory: createWebSocketFactory(),
